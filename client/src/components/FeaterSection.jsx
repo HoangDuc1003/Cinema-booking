@@ -16,8 +16,8 @@ const FeaterSection = () => {
         <div className='relative flex items-center justify-between pt-20 pb-10'>
             <BlurCircle top='0' right='-60px'/>
             <BlurCircle top='0' left='-65px'/>
-            <p className='relative text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-2'>Now Showing</p>
-            <button onClick={()=>navigate('/movies')} class="group flex items-center gap-2 px-6 py-3 text-sm text-gray-300 
+            <p className='relative text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-2 '>Now Showing</p>
+            <button onClick={()=>navigate('/movies')} className="group flex items-center gap-2 px-6 py-3 text-sm text-gray-300 
             hover:text-white bg-white/5 hover:bg-white/10 border border-white/20 hover:border-primary/40 
             rounded-full backdrop-blur-sm transition-all duration-300 hover:scale-105 relative overflow-hidden">
                 View All

@@ -1,55 +1,104 @@
-import React, { use, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import React, { useEffect, useState } from 'react' 
+import { Link, useNavigate, useLocation } from 'react-router-dom' // Import thêm useLocation
 import { assets } from '../assets/assets'
-import  { SearchIcon,MenuIcon, XIcon, TicketPlus } from 'lucide-react'
+import { SearchIcon, MenuIcon, XIcon, TicketPlus } from 'lucide-react'
 import { useClerk, UserButton, useUser } from '@clerk/react'
 
 const Navbar = () => {
 
   const [isOpen, setIsOpen] = useState(false);
-  const {user} = useUser();
-  const {openSignIn} = useClerk();
+  const [isScrolled, setIsScrolled] = useState(false); 
 
+  const { user } = useUser();
+  const { openSignIn } = useClerk();
   const navigate = useNavigate();
+  const location = useLocation(); // Lấy thông tin URL hiện tại
+
+  // Mảng chứa thông tin các menu để render cho gọn code
+  const navLinks = [
+    { name: 'Home', path: '/' },
+    { name: 'Movies', path: '/movies' },
+    { name: 'Threater', path: '/threater' },
+    { name: 'Releases', path: '/releases' },
+    { name: 'Favorites', path: '/favorite' },
+  ];
+
+  useEffect(() => {
+    const handleScroll = () => {
+      if (window.scrollY > 100) {
+        setIsScrolled(true);
+      } else {
+        setIsScrolled(false);
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll);
   
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
   return (
-    <div className='fixed top-0 left-0 z-50 w-full flex items-center justify-between px-6 md:px-16 lg:px-36 py-5'>
-        <Link to='/' className='max-md:flex-1' >
+    <div className={`fixed top-0 left-0 z-50 w-full flex items-center justify-between px-6 md:px-16 lg:px-36 transition-all duration-300 border-b ${
+      isScrolled 
+        ? 'py-3 bg-black/60 backdrop-blur-md border-white/10 shadow-lg' 
+        : 'py-5 bg-black/0 backdrop-blur-none border-transparent'
+    }`}>
+        
+        <Link to='/' className='max-md:flex-1 group transition-transform duration-300 hover:scale-105' >
           <img src={assets.logo} alt="logo" className='w-36 h-auto' />
         </Link>
+        
         <div className={`max-md:absolute max-md:top-0 max-md:left-0 max-md:font-medium 
         max-md:text-lg z-50 flex flex-col md:flex-row items-center max-md:justify-center gap-8 md:px-8 py-3 
-        max-md:h-screen md:rounded-full backdrop-blur bg-black/70 md:bg-white/10 
-        md:border border-gray-300/20 overflow-hidden transition-[width] duration-300 ${isOpen?'max-md:w-full':'max-md:w-0'}`}>
-          <XIcon className='md:hidden absolute top-6 right-6 w-6 h-6 cursor-pointer' onClick={()=>setIsOpen(!isOpen)}/>
+        max-md:h-screen md:rounded-full backdrop-blur-xl bg-black/80 md:bg-white/10 
+        md:border border-gray-300/20 md:shadow-xl overflow-hidden transition-all duration-500 ease-out ${isOpen?'max-md:w-full max-md:translate-x-0 max-md:opacity-100':'max-md:w-0 max-md:-translate-x-full max-md:opacity-0'}`}>
+          
+          <button className="md:hidden absolute top-6 right-6 p-2 rounded-full bg-white/10 hover:bg-white/20 transition-all duration-300 group" onClick={()=>setIsOpen(false)}>
+             <XIcon className='w-6 h-6 cursor-pointer text-white group-hover:rotate-90 transition-transform duration-300' />
+          </button>
 
-          <Link onClick={()=>{scrollTo(0,0),setIsOpen(!isOpen)}} to='/' className=''>Home</Link>
-          <Link onClick={()=>{scrollTo(0,0),setIsOpen(!isOpen)}} to='/movies' className=''>Movies</Link>
-          <Link onClick={()=>{scrollTo(0,0),setIsOpen(!isOpen)}} to='/threater' className=''>Threater</Link>
-          <Link onClick={()=>{scrollTo(0,0),setIsOpen(!isOpen)}} to='/releases' className=''>Releases</Link>
-          <Link onClick={()=>{scrollTo(0,0),setIsOpen(!isOpen)}} to='/favorite' className=''>Favorites</Link>
+          {navLinks.map((link) => {
+            const isActive = location.pathname === link.path; 
+            return (
+              <Link 
+                key={link.name}
+                onClick={() => { window.scrollTo(0, 0); setIsOpen(false); }} 
+                to={link.path} 
+                className={`relative font-medium transition-all duration-500 group px-2 py-1 ${
+                  isActive ? 'text-primary scale-110 font-semibold' : 'text-white/80 hover:text-primary hover:scale-110'
+                }`}
+              >
+                <span className="relative z-10">{link.name}</span>
+                
+                <span className={`absolute -bottom-1 left-0 h-0.5 bg-primary transition-all duration-500 ${
+                  isActive ? 'w-full' : 'w-0 group-hover:w-full'
+                }`}></span>
+
+                <span className="absolute inset-0 rounded-lg bg-primary/10 scale-0 group-hover:scale-100 transition-transform duration-500 -z-10"></span>
+              </Link>
+            );
+          })}
         </div>
 
         <div className='flex items-center gap-8'>
-          <SearchIcon className='max-md:hidden w-6 h-6 cursor-pointer'/>
+          <SearchIcon className='max-md:hidden w-6 h-6 cursor-pointer hover:text-primary transition-colors'/>
           {
             !user ? (
                   <button onClick={openSignIn} className='px-4 py-1 sm:px-7 sm:py-2
-                   bg-primary hover:bg-primary-dull transition rounded-full 
+                   bg-primary hover:bg-primary-dull transition-all duration-300 hover:scale-105 rounded-full 
                   font-medium cursor-pointer'>Login</button>
             ):(
               <UserButton>
                 <UserButton.MenuItems>
                   <UserButton.Action label='My Bookings' labelIcon=
-                  {<TicketPlus width={15}/>}onClick={()=>navigate('/my-bookings')}/>
+                  {<TicketPlus width={15}/>} onClick={()=>navigate('/my-bookings')}/>
                 </UserButton.MenuItems>
               </UserButton>
             )
           }
-          
         </div>
 
-        <MenuIcon className = 'max-md:ml-4 md:hidden w-8 h-8 cursor-pointer'
+        <MenuIcon className = 'max-md:ml-4 md:hidden w-8 h-8 cursor-pointer hover:text-primary transition-colors'
         onClick={()=>setIsOpen(!isOpen)}/>
     </div>
   )
