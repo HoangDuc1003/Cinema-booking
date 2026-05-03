@@ -193,7 +193,27 @@ export const dummyShowsData = [
         "vote_average": 7.443,
         "vote_count": 23569,
         "runtime": 127,
-    }
+    },
+    {
+        "_id": "575265",
+        "id": 575265,
+        "title": "Mission: Impossible - The Final Reckoning",
+        "overview": "Ethan Hunt and team continue their search for the terrifying AI known as the Entity — which has infiltrated intelligence networks all over the globe — with the world's governments and a mysterious ghost from Hunt's past on their trail. Joined by new allies and armed with the means to shut the Entity down for good, Hunt is in a race against time to prevent the world as we know it from changing forever.",
+        "poster_path": "https://image.tmdb.org/t/p/original/z53D72EAOxGRqdr7KXXWp9dJiDe.jpg",
+        "backdrop_path": "https://image.tmdb.org/t/p/original/1p5aI299YBnqrEEvVGJERk2MXXb.jpg",
+        "genres": [
+            { "id": 28, "name": "Action" },
+            { "id": 12, "name": "Adventure" },
+            { "id": 53, "name": "Thriller" }
+        ],
+        "casts": dummyCastsData,
+        "release_date": "2025-05-17",
+        "original_language": "en",
+        "tagline": "Our lives are the sum of our choices.",
+        "vote_average": 7.042,
+        "vote_count": 19885,
+        "runtime": 170,
+    },
 ]
 
 export const dummyDateTimeData = {

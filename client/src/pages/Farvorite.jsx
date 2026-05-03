@@ -2,7 +2,7 @@ import React from 'react'
 
 const Farvorite = () => {
   return (
-    <div>Farvorite</div>
+    <div></div>
   )
 }
 
