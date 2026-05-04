@@ -47,6 +47,107 @@ const STYLES = `
 
   .thumb-bar::-webkit-scrollbar { display: none; }
   .thumb-bar { scrollbar-width: none; }
+  /* hero shine: diagonal, soft capsule, slower and fully fades */
+  @keyframes shineDiag {
+    0% {
+      transform: translate(-150%, -30%) rotate(18deg);
+      opacity: 0;
+    }
+    12% { opacity: 0.06; }
+    40% {
+      transform: translate(-40%, -8%) rotate(18deg);
+      opacity: 0.18;
+    }
+    50% {
+      transform: translate(0%, 0%) rotate(18deg);
+      opacity: 0.32;
+    }
+    60% {
+      transform: translate(40%, 8%) rotate(18deg);
+      opacity: 0.18;
+    }
+    88% { opacity: 0.06; }
+    100% {
+      transform: translate(150%, 30%) rotate(18deg);
+      opacity: 0;
+    }
+  }
+
+  .hero-shine {
+    position: absolute;
+    left: -20%;
+    top: 30%;
+    width: 160%;
+    height: 30%;
+    pointer-events: none;
+    z-index: 7;
+    mix-blend-mode: screen;
+    border-radius: 40%;
+    /* soft diagonal band with transparent edges */
+    background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.06) 30%, rgba(255,255,255,0.16) 50%, rgba(255,255,255,0.06) 70%, rgba(255,255,255,0) 100%);
+    filter: blur(36px) saturate(1.03) contrast(1.02);
+    transform: translate(-150%, -30%) rotate(18deg);
+    animation: shineDiag 12s ease-in-out infinite;
+    opacity: 0;
+  }
+
+  /* depth band: diagonal alternating light/dark stripes to add perceived depth */
+  @keyframes depthMove {
+    from { background-position: 0 0; }
+    to { background-position: 240px 0; }
+  }
+  @keyframes depthPulse {
+    0% { opacity: 0.42; }
+    50% { opacity: 0.62; }
+    100% { opacity: 0.42; }
+  }
+  .depth-band {
+    position: absolute;
+    left: -20%;
+    top: 30%;
+    width: 160%;
+    height: 40%;
+    pointer-events: none;
+    z-index: 6;
+    transform: rotate(18deg);
+    /* alternating dark/light diagonal stripes */
+    background-image: repeating-linear-gradient(135deg,
+      rgba(0,0,0,0.06) 0px, rgba(0,0,0,0.06) 60px,
+      rgba(255,255,255,0.07) 60px, rgba(255,255,255,0.07) 120px);
+    opacity: 0.48;
+    filter: blur(14px) saturate(1.02) contrast(0.98);
+    animation: depthMove 10s linear infinite, depthPulse 8s ease-in-out infinite;
+    border-radius: 30%;
+    mix-blend-mode: multiply;
+  }
+
+  /* per-character title fly-in (alternate left/right) */
+  @keyframes charFromLeft {
+    0% { transform: translateX(-140px) translateY(6px) rotate(-6deg); opacity: 0; }
+    60% { transform: translateX(10px) translateY(-2px) rotate(2deg); opacity: 1; }
+    100% { transform: translateX(0) translateY(0) rotate(0); opacity: 1; }
+  }
+  @keyframes charFromRight {
+    0% { transform: translateX(140px) translateY(6px) rotate(6deg); opacity: 0; }
+    60% { transform: translateX(-10px) translateY(-2px) rotate(-2deg); opacity: 1; }
+    100% { transform: translateX(0) translateY(0) rotate(0); opacity: 1; }
+  }
+  .char { display: inline-block; will-change: transform, opacity; opacity: 0; }
+  .word { display: inline-block; will-change: transform, opacity; white-space: nowrap; opacity: 0; }
+
+  /* Mobile rules: reduce hero text, hide details for compact layout */
+  @media (max-width: 640px) {
+    .hero-title { font-size: clamp(18px, 6.5vw, 28px) !important; }
+    .hero-meta, .hero-overview, .hero-actions { display: none !important; }
+    .thumb-bar { display: none !important; gap: 0.5rem !important; padding: 0.5rem !important; }
+    .thumb-bar img { height: 44px !important; }
+    .hero-shine, .depth-band { display: none !important; }
+  }
+
+  .hero-backdrop {
+    will-change: transform, filter, opacity;
+    filter: contrast(1.08) saturate(1.08) brightness(1.05);
+  }
 `;
 
 // chore: Utility function to format duration
@@ -55,6 +156,17 @@ const formatRuntime = (minutes) => {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   return `${h}h ${m}m`;
+};
+
+// Keep the last `tailWords` words together by replacing spaces between them with non-breaking spaces
+const keepLastWordsTogether = (text = '', tailWords = 2) => {
+  const t = String(text).trim();
+  if (!t) return t;
+  const words = t.split(/\s+/);
+  if (words.length <= tailWords) return t;
+  const head = words.slice(0, words.length - tailWords).join(' ');
+  const tail = words.slice(words.length - tailWords).join('\u00A0');
+  return head + ' ' + tail;
 };
 
 const HeroSection = () => {
@@ -92,12 +204,11 @@ const HeroSection = () => {
   }, []);
 
   useEffect(() => {
-    // feat: Fetch top 5 popular movies on component mount
+    // feat: Fetch top 5 popular movies on component mount (include runtime for these)
     const load = async () => {
       try {
         setIsLoading(true);
-        // Request runtime details for the top 5 only (avoids fetching details for the whole list)
-        const data = await fetchPopularMovies({ includeDetails: true, detailLimit: 5 });
+        const data = await fetchPopularMovies({ includeDetails: true, detailLimit: 5, dailyRotate: true, dailySeedSize: 20 });
         setMovies(data.slice(0, 5));
       } catch (e) {
         console.error('Hero load error:', e);
@@ -131,7 +242,11 @@ const HeroSection = () => {
   }
 
   const movie      = movies[currentIndex];
-  const bgUrl      = movie.backdrop_path; 
+  const titleTextRaw = movie.title || movie.name || '';
+  const titleText  = keepLastWordsTogether(titleTextRaw, 2);
+  const titleWords = titleText.split(' ');
+  // choose highest-quality backdrop available for hero
+  const bgUrl      = movie.backdrop_original || movie.backdrop_w1280 || movie.backdrop_path || movie.backdrop_w780 || movie.poster_path;
   const year       = movie.release_date?.substring(0, 4) || 'N/A';
   const rating     = movie.vote_average?.toFixed(1) || 'N/A';
 
@@ -145,32 +260,30 @@ const HeroSection = () => {
         className="absolute inset-0 z-0"
         style={{ transition: 'opacity 420ms ease', opacity: isFading ? 0 : 1 }}
       >
-        {/* feat: Background image */}
+        {/* feat: Background image (high-res for hero) */}
         <img
           src={bgUrl}
           alt={movie.title}
-          className="w-full h-full object-cover object-center"
+          loading="eager"
+          decoding="sync"
+          className="w-full h-full object-cover object-center hero-backdrop"
           style={{ opacity: 0.48 }}
         />
+        {/* feat: Moving shine overlay to brighten and add depth */}
+        <div className="hero-shine" aria-hidden="true" />
+        {/* feat: Diagonal depth band (stripes) */}
+        <div className="depth-band" aria-hidden="true" />
         {/* feat: Gradient overlays for better text readability */}
         <div className="absolute inset-0"
-          style={{ background: 'linear-gradient(to right, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.55) 32%, transparent 65%)' }} />
+          style={{ background: 'linear-gradient(to right, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.55) 32%, transparent 65%)', zIndex: 8 }} />
         <div className="absolute inset-0"
-          style={{ background: 'linear-gradient(to top, #0a0a0a 0%, transparent 40%)' }} />
+          style={{ background: 'linear-gradient(to top, #0a0a0a 0%, transparent 40%)', zIndex: 8 }} />
       </div>
 
       {/* chore: Animated decorative blobs */}
       <div className="orb1 absolute z-0 pointer-events-none"
         style={{ top: '8%', left: '4%', width: 420, height: 420,
           background: 'radial-gradient(circle, rgba(229,9,20,0.22) 0%, transparent 70%)', filter: 'blur(60px)' }} />
-
-      <div className="orb2 absolute z-0 pointer-events-none"
-        style={{ top: '30%', right: '8%', width: 520, height: 520,
-          background: 'radial-gradient(circle, rgba(200,0,40,0.18) 0%, transparent 70%)', filter: 'blur(80px)' }} />
-
-      <div className="orb3 absolute z-0 pointer-events-none"
-        style={{ bottom: '5%', right: '20%', width: 380, height: 380,
-          background: 'radial-gradient(circle, rgba(255,50,50,0.14) 0%, transparent 70%)', filter: 'blur(70px)' }} />
 
       {/* ── TEXT CONTENT ── */}
       <div
@@ -182,6 +295,8 @@ const HeroSection = () => {
           opacity: isFading ? 0 : 1,
           transition: 'opacity 420ms ease',
           marginTop: '-20px',
+          background: 'transparent',
+          isolation: 'isolate',
         }}
       >
         {/* Genre tags */}
@@ -197,14 +312,25 @@ const HeroSection = () => {
           </div>
         )}
 
-        {/* Title */}
-        <h1 className={`${flyKey % 2 === 0 ? 'hero-fly-left' : 'hero-fly-right'} d1 font-black leading-tight mb-4 drop-shadow-2xl`}
-          style={{ fontSize: 'clamp(28px, 3.2vw, 54px)' }}>
-          {movie.title || movie.name}
+        {/* Title (words animate as groups) */}
+        <h1 key={`title-${flyKey}`} className={`d1 hero-title font-black leading-tight mb-4`} style={{ fontSize: 'clamp(30px, 3.2vw, 56px)', display: 'inline-block', lineHeight: '1', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none' }} aria-label={titleTextRaw}>
+          {titleWords.map((word, wIndex) => {
+            const fromLeft = (wIndex % 2) === 0;
+            const delay = wIndex * 140;
+            const animName = fromLeft ? 'charFromLeft' : 'charFromRight';
+            return (
+              <span
+                key={`w-${wIndex}`}
+                className="word d1"
+                style={{ animation: `${animName} 900ms cubic-bezier(0.22,1,0.36,1) ${delay}ms both`, display: 'inline-block', whiteSpace: 'nowrap', marginRight: '0.35em' }}>
+                {word}
+              </span>
+            );
+          })}
         </h1>
 
         {/* Meta */}
-        <div className="hero-fade-up d2 flex items-center flex-wrap gap-4 text-sm font-medium text-gray-300 mb-5">
+        <div className="hero-fade-up d2 flex items-center flex-wrap gap-4 text-base font-medium text-gray-300 mb-5">
           <span className="flex items-center gap-1.5">
             <CalendarIcon className="w-3.5 h-3.5 text-red-500" />{year}
           </span>
@@ -217,7 +343,7 @@ const HeroSection = () => {
         </div>
 
         {/* Overview */}
-        <p className="hero-fade-up d3 text-gray-400 text-sm leading-relaxed mb-8 line-clamp-3">
+        <p className="hero-fade-up d3 text-gray-400 text-base leading-relaxed mb-8 line-clamp-3">
           {movie.overview}
         </p>
 

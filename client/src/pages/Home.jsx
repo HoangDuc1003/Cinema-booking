@@ -7,13 +7,9 @@ import TrailersSection from '../components/TrailersSection'
 // feat: Main home page component with multiple sections
 const Home = () => {
   return (
-    // chore: Home page layout
     <>
-      {/* feat: Hero banner section */}
       <HeroSection/>
-      {/* feat: Featured movies section */}
       <FeatureSection/>
-      {/* feat: Movie trailers section */}
       <TrailersSection/>
     </>
   )

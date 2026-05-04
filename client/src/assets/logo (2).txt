@@ -17,7 +17,7 @@
     <!-- Shadow -->
     <text
       font-family="Georgia, Times New Roman, serif"
-      font-size="160"
+      font-size="140"
       font-weight="700"
       letter-spacing="8"
       fill="url(#shadowRed)"
@@ -29,7 +29,7 @@
     <!-- Main -->
     <text
       font-family="Georgia, Times New Roman, serif"
-      font-size="160"
+      font-size="140"
       font-weight="700"
       letter-spacing="8"
       fill="url(#mainRed)"
@@ -40,7 +40,7 @@
     <!-- Highlight -->
     <text
       font-family="Georgia, Times New Roman, serif"
-      font-size="160"
+      font-size="140"
       font-weight="700"
       letter-spacing="8"
       fill="#ff4d4d"

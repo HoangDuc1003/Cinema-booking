@@ -4,10 +4,12 @@ import { useNavigate } from 'react-router-dom'
 import BlurCircle from './BlurCircle'
 import { fetchPopularMovies } from '../services/tmdb'
 import MovieCard from './MovieCard'
+import { useRef } from 'react'
 
 // feat: Component displaying featured movies section
 const FeatureSection = () => {
     const navigate = useNavigate();
+    const styleRef = useRef(false);
 
     // Store movies data
     const [movies, setMovies] = useState([]);
@@ -29,6 +31,19 @@ const FeatureSection = () => {
         loadMovies();
     }, []);
 
+    useEffect(() => {
+        if (styleRef.current) return;
+        styleRef.current = true;
+        const s = document.createElement('style');
+        s.textContent = `
+          .show-more-btn { background: linear-gradient(135deg,#e50914,#b80710); color: #fff; border: none; position: relative; overflow: hidden; }
+          .show-more-btn::after { content: ''; position: absolute; left: -60%; top: -40%; width: 220%; height: 180%; background: linear-gradient(90deg, rgba(255,255,255,0.14), rgba(255,255,255,0.06), rgba(255,255,255,0.14)); transform: rotate(25deg) translateX(-100%); transition: transform 520ms ease; pointer-events: none; opacity: 0.95; mix-blend-mode: screen; }
+          .show-more-btn:hover::after { transform: rotate(25deg) translateX(0%); }
+          .show-more-btn:hover { box-shadow: 0 10px 30px rgba(229,9,20,0.55), 0 0 0 2px rgba(229,9,20,0.12); transform: translateY(-3px); }
+        `;
+        document.head.appendChild(s);
+    }, []);
+
     return (
         <div className='px-6 md:px-16 lg:px-24 xl:px-40 overflow-hidden'>
             <div className='relative flex items-center justify-between pt-20 pb-10'>
@@ -47,7 +62,7 @@ const FeatureSection = () => {
             {isLoading ? (
                 <p className="text-white text-center text-xl">Loading movies...</p>
             ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 sm:gap-6 w-full">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 sm:gap-6 w-full">
                     {/* feat: Responsive movie grid layout */}
                     {movies.map((show) => (
                         <MovieCard key={show._id} movie={show}/>
@@ -57,8 +72,8 @@ const FeatureSection = () => {
 
             <div className='flex justify-center mt-20'>
                 <button onClick={()=>{navigate('/movies');scrollTo(0,0)}} 
-                className='px-10 py-3 text-sm bg-primary hover:bg-primary-dull
-                transition rounded-md font-medium cursor-pointer'>Show more</button>
+                className='px-10 py-3 text-sm transition rounded-md font-medium 
+                cursor-pointer show-more-btn'>Show more</button>
             </div>
         </div>
     )
