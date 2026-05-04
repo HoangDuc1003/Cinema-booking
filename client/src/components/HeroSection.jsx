@@ -7,6 +7,7 @@ const HeroSection = () => {
     const navigate = useNavigate();
 
     return (
+        
         <div className='relative flex flex-col items-start justify-center px-6 md:px-16 lg:px-36 h-screen w-full overflow-hidden bg-black text-white'>
             
             <div className='absolute inset-0 z-0 w-full h-full'>
