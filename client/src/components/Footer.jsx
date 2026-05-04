@@ -7,8 +7,8 @@ const Footer = () => {
             <div className="flex flex-col md:flex-row justify-between w-full gap-10 border-b border-white/20 pb-6">
                 <div className="md:max-w-96">
                     <img className="w-36 h-auto cursor-pointer "src={assets.logo} alt="logo" onClick={()=>scrollTo({top:0,behavior:'smooth'}) }/>
-                    <p className="mt-6 text-sm text-gray-400">
-                        QuickShow is your ultimate destination for seamless movie ticket bookings. 
+                    <p className="mt-6 text-sm text-gray-400 ">
+                        NitroCine is your ultimate destination for seamless movie ticket bookings. 
                         Discover the latest blockbusters, secure your favorite seats, 
                         and enjoy a premium cinematic experience with just a few clicks.
                     </p>

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react' 
-import { Link, useNavigate, useLocation } from 'react-router-dom' // Import thêm useLocation
+import { Link, useNavigate, useLocation } from 'react-router-dom' 
 import { assets } from '../assets/assets'
 import { SearchIcon, MenuIcon, XIcon, TicketPlus } from 'lucide-react'
 import { useClerk, UserButton, useUser } from '@clerk/react'
@@ -12,9 +12,9 @@ const Navbar = () => {
   const { user } = useUser();
   const { openSignIn } = useClerk();
   const navigate = useNavigate();
-  const location = useLocation(); // Lấy thông tin URL hiện tại
+  const location = useLocation(); 
 
-  // Mảng chứa thông tin các menu để render cho gọn code
+  
   const navLinks = [
     { name: 'Home', path: '/' },
     { name: 'Movies', path: '/movies' },
@@ -38,7 +38,8 @@ const Navbar = () => {
   }, []);
 
   return (
-    <div className={`fixed top-0 left-0 z-50 w-full flex items-center justify-between px-6 md:px-16 lg:px-36 transition-all duration-300 border-b ${
+    <div className={`fixed top-0 left-0 z-50 w-full flex items-center justify-between px-6 md:px-16 lg:px-36 transition-all 
+      duration-300 border-b ${
       isScrolled 
         ? 'py-3 bg-black/60 backdrop-blur-md border-white/10 shadow-lg' 
         : 'py-5 bg-black/0 backdrop-blur-none border-transparent'
@@ -51,9 +52,11 @@ const Navbar = () => {
         <div className={`max-md:absolute max-md:top-0 max-md:left-0 max-md:font-medium 
         max-md:text-lg z-50 flex flex-col md:flex-row items-center max-md:justify-center gap-8 md:px-8 py-3 
         max-md:h-screen md:rounded-full backdrop-blur-xl bg-black/80 md:bg-white/10 
-        md:border border-gray-300/20 md:shadow-xl overflow-hidden transition-all duration-500 ease-out ${isOpen?'max-md:w-full max-md:translate-x-0 max-md:opacity-100':'max-md:w-0 max-md:-translate-x-full max-md:opacity-0'}`}>
+        md:border border-gray-300/20 md:shadow-xl overflow-hidden transition-all duration-500 ease-out ${isOpen?
+        'max-md:w-full max-md:translate-x-0 max-md:opacity-100':'max-md:w-0 max-md:-translate-x-full max-md:opacity-0'}`}>
           
-          <button className="md:hidden absolute top-6 right-6 p-2 rounded-full bg-white/10 hover:bg-white/20 transition-all duration-300 group" onClick={()=>setIsOpen(false)}>
+          <button className="md:hidden absolute top-6 right-6 p-2 rounded-full bg-white/10 hover:bg-white/20 transition-all 
+          duration-300 group" onClick={()=>setIsOpen(false)}>
              <XIcon className='w-6 h-6 cursor-pointer text-white group-hover:rotate-90 transition-transform duration-300' />
           </button>
 
@@ -74,7 +77,8 @@ const Navbar = () => {
                   isActive ? 'w-full' : 'w-0 group-hover:w-full'
                 }`}></span>
 
-                <span className="absolute inset-0 rounded-lg bg-primary/10 scale-0 group-hover:scale-100 transition-transform duration-500 -z-10"></span>
+                <span className="absolute inset-0 rounded-lg bg-primary/10 scale-0 group-hover:scale-100 transition-transform
+                 duration-500 -z-10"></span>
               </Link>
             );
           })}
