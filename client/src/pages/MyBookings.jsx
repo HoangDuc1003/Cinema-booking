@@ -1,8 +1,12 @@
 import React from 'react'
 
+// feat: Component for displaying user booking history
 const MyBookings = () => {
   return (
-    <div>MyBookings</div>
+    <div>
+      {/* TODO: Implement bookings list UI */}
+      MyBookings
+    </div>
   )
 }
 

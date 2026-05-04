@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { CalendarIcon, ClockIcon, Star, Play, Ticket } from 'lucide-react';
 import { fetchPopularMovies } from '../services/tmdb';
 
+// chore: CSS animations for hero section
 const STYLES = `
   @keyframes flyFromLeft {
     0%   { transform: translateX(-80px) skewX(-8deg); opacity: 0; }
@@ -48,6 +49,7 @@ const STYLES = `
   .thumb-bar { scrollbar-width: none; }
 `;
 
+// chore: Utility function to format duration
 const formatRuntime = (minutes) => {
   if (!minutes) return 'N/A';
   const h = Math.floor(minutes / 60);
@@ -56,15 +58,19 @@ const formatRuntime = (minutes) => {
 };
 
 const HeroSection = () => {
+  // chore: Navigation setup
   const navigate  = useNavigate();
+  // chore: Reference to prevent duplicate style injection
   const styleRef  = useRef(false);
 
+  // chore: State management for hero section
   const [movies, setMovies]           = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading]     = useState(true);
   const [isFading, setIsFading]       = useState(false);
   const [flyKey, setFlyKey]           = useState(0);
 
+  // feat: Handle switching between movies with fade animation
   const switchTo = (getNextIndex) => {
     setIsFading(true);
     setTimeout(() => {
@@ -77,6 +83,7 @@ const HeroSection = () => {
   };
 
   useEffect(() => {
+    // chore: Inject animation styles once
     if (styleRef.current) return;
     styleRef.current = true;
     const el = document.createElement('style');
@@ -85,10 +92,12 @@ const HeroSection = () => {
   }, []);
 
   useEffect(() => {
+    // feat: Fetch top 5 popular movies on component mount
     const load = async () => {
       try {
         setIsLoading(true);
-        const data = await fetchPopularMovies();
+        // Request runtime details for the top 5 only (avoids fetching details for the whole list)
+        const data = await fetchPopularMovies({ includeDetails: true, detailLimit: 5 });
         setMovies(data.slice(0, 5));
       } catch (e) {
         console.error('Hero load error:', e);
@@ -100,54 +109,57 @@ const HeroSection = () => {
   }, []);
 
   useEffect(() => {
+    // feat: Auto-rotate movies every 5 seconds
     if (!movies.length) return;
     const id = setInterval(() => switchTo((prev) => (prev + 1) % movies.length), 5000);
     return () => clearInterval(id);
   }, [movies]);
 
+  // chore: Handle thumbnail click navigation
   const handleThumbClick = (index) => {
     if (index === currentIndex || isFading) return;
     switchTo(() => index);
   };
 
+  // feat: Loading state UI
   if (isLoading || !movies.length) {
     return (
       <div className="h-screen w-full bg-[#0a0a0a] flex items-center justify-center text-white text-sm">
-        Đang tải phim...
+        Loading movies...
       </div>
     );
   }
 
   const movie      = movies[currentIndex];
-
   const bgUrl      = movie.backdrop_path; 
   const year       = movie.release_date?.substring(0, 4) || 'N/A';
   const rating     = movie.vote_average?.toFixed(1) || 'N/A';
 
-  const runtimeStr = formatRuntime(movie.movieruntime);
+  // fix: Corrected 'movieruntime' to 'runtime'
+  const runtimeStr = formatRuntime(movie.runtime);
 
   return (
     <div className="relative flex flex-col justify-center h-screen w-full overflow-hidden bg-[#0a0a0a] text-white">
-
-      {/* ── BACKDROP ── */}
+      {/* chore: Hero backdrop with image and gradients */}
       <div
         className="absolute inset-0 z-0"
         style={{ transition: 'opacity 420ms ease', opacity: isFading ? 0 : 1 }}
       >
+        {/* feat: Background image */}
         <img
           src={bgUrl}
           alt={movie.title}
           className="w-full h-full object-cover object-center"
           style={{ opacity: 0.48 }}
         />
-        {/* Gradients */}
+        {/* feat: Gradient overlays for better text readability */}
         <div className="absolute inset-0"
           style={{ background: 'linear-gradient(to right, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.55) 32%, transparent 65%)' }} />
         <div className="absolute inset-0"
           style={{ background: 'linear-gradient(to top, #0a0a0a 0%, transparent 40%)' }} />
       </div>
 
-      {/* ── ANIMATED BLOBS ── */}
+      {/* chore: Animated decorative blobs */}
       <div className="orb1 absolute z-0 pointer-events-none"
         style={{ top: '8%', left: '4%', width: 420, height: 420,
           background: 'radial-gradient(circle, rgba(229,9,20,0.22) 0%, transparent 70%)', filter: 'blur(60px)' }} />
@@ -262,7 +274,7 @@ const HeroSection = () => {
                   filter: isActive ? 'brightness(1)' : 'brightness(0.55)',
                 }}
               >
-                <img src={thumbUrl} alt={m.title} className="w-full h-full object-cover" />
+                <img src={thumbUrl} alt={m.title} loading="lazy" decoding="async" className="w-full h-full object-cover" />
                 <div className="absolute inset-0 flex items-end"
                   style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.75) 0%, transparent 60%)' }}>
                   <p className="text-white px-1.5 pb-1 leading-tight truncate"

@@ -5,7 +5,8 @@ import BlurCircle from './BlurCircle'
 import { fetchPopularMovies } from '../services/tmdb'
 import MovieCard from './MovieCard'
 
-const FeaterSection = () => {
+// feat: Component displaying featured movies section
+const FeatureSection = () => {
     const navigate = useNavigate();
 
     // Store movies data
@@ -20,7 +21,7 @@ const FeaterSection = () => {
             setIsLoading(true);
             const data = await fetchPopularMovies();
             
-            // Get only top 8 movies
+            // Get only top 10 movies
             setMovies(data.slice(0, 10));
             setIsLoading(false);
         };
@@ -31,8 +32,8 @@ const FeaterSection = () => {
     return (
         <div className='px-6 md:px-16 lg:px-24 xl:px-40 overflow-hidden'>
             <div className='relative flex items-center justify-between pt-20 pb-10'>
-                <BlurCircle top='50px' right='-60px'/>
-                <BlurCircle top='50px' left='-65px'/>
+                <BlurCircle top='80px' right='-60px'/>
+                <BlurCircle top='80px' left='-65px'/>
                 <p className='relative text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-2 mt-20'>Now Showing</p>
                 <button onClick={()=>{navigate('/movies');scrollTo(0,0)}} className="group flex items-center gap-2 px-6 py-3 text-sm text-gray-300 
                 hover:text-white bg-white/5 hover:bg-white/10 border border-white/20 hover:border-primary/40 
@@ -42,11 +43,12 @@ const FeaterSection = () => {
                 </button>
             </div>
 
-            {/* Render loading or grid */}
+            {/* chore: Conditional rendering for loading or content */}
             {isLoading ? (
                 <p className="text-white text-center text-xl">Loading movies...</p>
             ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 sm:gap-6 w-full">
+                    {/* feat: Responsive movie grid layout */}
                     {movies.map((show) => (
                         <MovieCard key={show._id} movie={show}/>
                     ))}
@@ -54,11 +56,12 @@ const FeaterSection = () => {
             )}
 
             <div className='flex justify-center mt-20'>
-                <button onClick={()=>{navigate('/movies');scrollTo(0,0)}} className='px-10 py-3 text-sm bg-primary hover:bg-primary-dull
+                <button onClick={()=>{navigate('/movies');scrollTo(0,0)}} 
+                className='px-10 py-3 text-sm bg-primary hover:bg-primary-dull
                 transition rounded-md font-medium cursor-pointer'>Show more</button>
             </div>
         </div>
     )
 }
 
-export default FeaterSection
+export default FeatureSection

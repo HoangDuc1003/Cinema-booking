@@ -1,55 +1,67 @@
 import React from 'react'
 import { assets } from '../assets/assets'
 
+// feat: Footer component with company info and social links
 const Footer = () => {
   return (
+    // chore: Footer container with dark background
     <footer className="px-6 md:px-16 lg:px-24 xl:px-32 pt-8 w-full bg-black text-white">
+            {/* feat: Footer content layout */}
             <div className="flex flex-col md:flex-row justify-between w-full gap-10 border-b border-white/20 pb-6">
+                {/* chore: Brand and description section */}
                 <div className="md:max-w-96">
-                    <img className="w-36 h-auto cursor-pointer "src={assets.logo} alt="logo" onClick={()=>scrollTo({top:0,behavior:'smooth'}) }/>
+                    {/* feat: Logo with smooth scroll to top */}
+                    <img className="w-36 h-auto cursor-pointer" src={assets.logo} alt="logo" onClick={()=>scrollTo({top:0,behavior:'smooth'}) }/>
+                    {/* chore: Company description */}
                     <p className="mt-6 text-sm text-gray-400 ">
                         NitroCine is your ultimate destination for seamless movie ticket bookings. 
                         Discover the latest blockbusters, secure your favorite seats, 
                         and enjoy a premium cinematic experience with just a few clicks.
                     </p>
                 </div>
+                {/* feat: Links and contact information sections */}
                 <div className="flex-1 flex items-start md:justify-end gap-20">
+                    {/* chore: Company navigation section */}
                     <div>
                         <h2 className="font-semibold mb-5 text-white">Company</h2>
-                        <ul className="text-sm space-y-2 text-gray-400">
-                          <li>
-                              <a href="#" className="hover:text-white transition-colors" 
-                                onClick={(e) => { e.preventDefault(); window.scrollTo({top: 0, behavior: 'smooth'}); }}>
-                                Home
-                              </a>
-                          </li>
-                          <li>
-                              <a href="#" className="hover:text-white transition-colors" 
-                                onClick={(e) => { e.preventDefault(); window.scrollTo({top: 0, behavior: 'smooth'}); }}>
-                                About us
-                              </a>
-                          </li>
-                          <li>
-                              <a href="#" className="hover:text-white transition-colors" 
-                                onClick={(e) => { e.preventDefault(); window.scrollTo({top: 0, behavior: 'smooth'}); }}>
-                                Contact us
-                              </a>
-                          </li>
-                          <li>
-                              <a href="#" className="hover:text-white transition-colors" 
-                                onClick={(e) => { e.preventDefault(); window.scrollTo({top: 0, behavior: 'smooth'}); }}>
-                                Privacy policy
-                              </a>
-                          </li>
-                        </ul>
-                    </div>
-                    <div>
-                        <h2 className="font-semibold mb-5 text-white">Get in touch</h2>
-                        <div className="text-sm space-y-2 text-gray-400">
-                            <p>098 1025559</p>
-                            <p>hhprolay@gmail.com</p>
+            <ul className="text-sm space-y-2 text-gray-400">
+              {/* chore: Company links */}
+              <li>
+                <a href="#" className="hover:text-white transition-colors" 
+                  onClick={(e) => { e.preventDefault(); window.scrollTo({top: 0, behavior: 'smooth'}); }}>
+                  Home
+                </a>
+              </li>
+              <li>
+                <a href="#" className="hover:text-white transition-colors" 
+                  onClick={(e) => { e.preventDefault(); window.scrollTo({top: 0, behavior: 'smooth'}); }}>
+                  About us
+                </a>
+              </li>
+              <li>
+                <a href="#" className="hover:text-white transition-colors" 
+                  onClick={(e) => { e.preventDefault(); window.scrollTo({top: 0, behavior: 'smooth'}); }}>
+                  Contact us
+                </a>
+              </li>
+              <li>
+                <a href="#" className="hover:text-white transition-colors" 
+                  onClick={(e) => { e.preventDefault(); window.scrollTo({top: 0, behavior: 'smooth'}); }}>
+                  Privacy policy
+                </a>
+              </li>
+            </ul>
+          </div>
+          {/* chore: Contact information section */}
+          <div>
+            <h2 className="font-semibold mb-5 text-white">Get in touch</h2>
+            <div className="text-sm space-y-2 text-gray-400">
+              <p>098 1025559</p>
+              <p>hhprolay@gmail.com</p>
                         </div>
+                        {/* feat: Social media links section */}
                         <div className="flex items-center gap-4 mt-5" >
+                            {/* chore: Social network links */}
                             <a href="https://www.facebook.com/kieuheef" className="hover:-translate-y-0.5 transition-all duration-300"  >
                                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" >
                                     <path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z" stroke="#fff" strokeOpacity=".5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -76,8 +88,9 @@ const Footer = () => {
                     </div>
                 </div>
             </div>
+            {/* chore: Copyright section */}
             <p className="pt-4 text-center text-xs md:text-sm pb-5 text-gray-500">
-                Copyright 2026 © <a href="https://github.com/HoangDuc1003" className="hover:text-white transition-colors">Hoang Duc</a>. All Right Reserved.
+                Copyright 2026 © <a href="https://github.com/HoangDuc1003" className="hover:text-white transition-colors">Hoang Duc</a>. All Rights Reserved.
             </p>
         </footer>
   )

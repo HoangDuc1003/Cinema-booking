@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react' 
+import React, { useEffect, useState, useRef } from 'react' 
 import { Link, useNavigate, useLocation } from 'react-router-dom' 
 import { assets } from '../assets/assets'
 import { SearchIcon, MenuIcon, XIcon, TicketPlus } from 'lucide-react'
@@ -13,27 +13,31 @@ const Navbar = () => {
   const { openSignIn } = useClerk();
   const navigate = useNavigate();
   const location = useLocation(); 
+  const tickingRef = useRef(false);
 
   
+  // chore: Navigation links configuration
   const navLinks = [
     { name: 'Home', path: '/' },
     { name: 'Movies', path: '/movies' },
-    { name: 'Threater', path: '/threater' },
+    { name: 'Theater', path: '/theater' }, // fix: Corrected spelling from 'Threater' to 'Theater'
     { name: 'Releases', path: '/releases' },
     { name: 'Favorites', path: '/favorite' },
   ];
 
+  // feat: Handle scroll event for navbar styling (throttled with rAF)
   useEffect(() => {
     const handleScroll = () => {
-      if (window.scrollY > 100) {
-        setIsScrolled(true);
-      } else {
-        setIsScrolled(false);
-      }
+      if (tickingRef.current) return;
+      tickingRef.current = true;
+      requestAnimationFrame(() => {
+        setIsScrolled(window.scrollY > 100);
+        tickingRef.current = false;
+      });
     };
 
-    window.addEventListener('scroll', handleScroll);
-  
+    window.addEventListener('scroll', handleScroll, { passive: true });
+
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
@@ -44,9 +48,9 @@ const Navbar = () => {
         ? 'py-3 bg-black/60 backdrop-blur-md border-white/10 shadow-lg' 
         : 'py-5 bg-black/0 backdrop-blur-none border-transparent'
     }`}>
-        
-        <Link to='/' className='max-md:flex-1 group transition-transform duration-300 hover:scale-105' >
-          <img src={assets.logo} alt="logo" className='w-36 h-auto' />
+      {/* feat: Logo link to home */}
+      <Link to='/' className='max-md:flex-1 group transition-transform duration-300 hover:scale-105' >
+        <img src={assets.logo} alt="logo" className='w-36 h-auto' />
         </Link>
         
         <div className={`max-md:absolute max-md:top-0 max-md:left-0 max-md:font-medium 
