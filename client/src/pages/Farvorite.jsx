@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { fetchPopularMovies } from '../services/tmdb';
 import MovieCard from '../components/MovieCard'
 import BlurCircle from '../components/BlurCircle'
+import Loading from '../components/Loading'
 
 // feat: Component for displaying favorite/popular movies
 const Favorite = () => {
@@ -9,6 +10,7 @@ const Favorite = () => {
   const [movies, setMovies] = useState([]);
   // chore: Loading state tracker
   const [isLoading, setIsLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
   
   // feat: Fetch popular movies on component mount
   useEffect(() => {
@@ -17,9 +19,11 @@ const Favorite = () => {
         setIsLoading(true);
         const data = await fetchPopularMovies();
         setMovies(data); 
+        setHasError(false);
       } catch (error) {
         // fix: Corrected error message grammar
         console.error("No movies available", error);
+        setHasError(true);
       } finally {
         setIsLoading(false);
       }
@@ -31,12 +35,11 @@ const Favorite = () => {
 
   // chore: Show loading state while fetching data
   if (isLoading) {
-    return (
-      <div className='min-h-[80vh] flex items-center justify-center'>
-        {/* feat: Loading indicator */}
-        <h1 className='text-3xl font-bold text-white'>Loading movies...</h1>
-      </div>
-    );
+    return <Loading />;
+  }
+
+  if (hasError) {
+    return <Loading />;
   }
 
 

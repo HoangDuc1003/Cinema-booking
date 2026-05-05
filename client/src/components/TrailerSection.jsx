@@ -2,11 +2,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import BlurCircle from './BlurCircle';
 import { Star } from 'lucide-react';
 import { fetchLatestTrailers } from '../services/tmdb';
+import Loading from './Loading';
 
 const TrailerSection = () => {
   const [trailers, setTrailers]         = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading]       = useState(true);
+  const [hasError, setHasError]         = useState(false);
   const [isMuted, setIsMuted]           = useState(true);
   const [isPaused, setIsPaused]         = useState(false);
 
@@ -142,9 +144,9 @@ const TrailerSection = () => {
       .ctrl-btn.is-paused .ctrl-dot { background: #6b7280; }
       .ctrl-btn.is-paused:hover { background: rgba(45,45,60,0.98); }
 
-      .ctrl-btn.is-muted { background: rgba(180,10,25,0.9); color: #fff; }
+      .ctrl-btn.is-muted { background: rgba(246,69,101,0.9); color: #fff; }
       .ctrl-btn.is-muted .ctrl-dot { background: rgba(255,255,255,.65); }
-      .ctrl-btn.is-muted:hover { background: rgba(215,20,35,0.98); }
+      .ctrl-btn.is-muted:hover { background: rgba(246,69,101,0.98); }
 
       .ctrl-btn.is-sound { background: rgba(24,24,36,0.88); color: #e5e7eb; }
       .ctrl-btn.is-sound .ctrl-dot { background: #4ade80; }
@@ -186,7 +188,7 @@ const TrailerSection = () => {
 
       .indicator-btn.active {
         width: 28px;
-        background: rgb(229,9,20);
+        background: rgba(246,69,101,1);
       }
 
       .marquee {
@@ -224,7 +226,7 @@ const TrailerSection = () => {
         padding: 0;
       }
 
-      .marquee-item:hover { transform: translateY(-3px); border-color: rgba(244,63,94,.7); }
+      .marquee-item:hover { transform: translateY(-3px); border-color: rgba(246,69,101,.7); }
       .marquee-item.active { border-color: rgba(255,255,255,0.75); box-shadow: 0 0 0 2px rgba(255,255,255,0.15) inset; }
 
       .thumb-image-wrap { width: 100%; height: 155px; }
@@ -259,8 +261,10 @@ const TrailerSection = () => {
         const data = await fetchLatestTrailers({ limit: 10, ttlHours: 2, pagesToSearch: 4 });
         if (!mounted) return;
         setTrailers(data);
+        setHasError(false);
       } catch (e) {
         console.error('Failed to load trailers:', e);
+        setHasError(true);
       } finally {
         if (mounted) setIsLoading(false);
       }
@@ -385,9 +389,13 @@ const TrailerSection = () => {
           </div>
         </div>
 
-        {isLoading && (
+        {hasError ? (
+          <div className='py-8'>
+            <Loading />
+          </div>
+        ) : isLoading ? (
           <p className='text-white-400 px-6 pb-4 text-4xl items-center'>Loading trailer...</p>
-        )}
+        ) : null}
       </div>
     </div>
   );

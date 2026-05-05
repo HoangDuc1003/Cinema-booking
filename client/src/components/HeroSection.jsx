@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CalendarIcon, ClockIcon, Star, Play, Ticket } from 'lucide-react';
 import { fetchPopularMovies } from '../services/tmdb';
-
+import BlurCircle from './BlurCircle';
+import Loading from './Loading';
 /* =========================================
    UTILITY FUNCTIONS
    ========================================= */
@@ -93,6 +94,31 @@ const STYLES = `
     .thumb-bar { gap: 0.5rem !important; padding: 0.5rem !important; }
     .thumb-bar img { height: 44px !important; }
   }
+
+  /* Additional hero optimizations */
+  .hero-section-container {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  .hero-backdrop {
+    will-change: transform, opacity;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+    transform: translateZ(0);
+    transition: transform 600ms ease-out, opacity 600ms ease-out;
+    image-rendering: auto;
+  }
+
+  .hero-title-word { filter: drop-shadow(0 6px 12px rgba(0,0,0,0.6)); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hero-fade-up, .d1, .d2, .d3, .d4, .hero-title span, .thumb-bar img {
+      animation: none !important;
+      transition: none !important;
+    }
+  }
 `;
 
 const HeroSection = () => {
@@ -109,30 +135,23 @@ const HeroSection = () => {
   const [hideText, setHideText] = useState(false);
   const [flyKey, setFlyKey] = useState(0);
 
-  /* --- ANIMATION SEQUENCE LOGIC --- */
+  /*ANIMATION SEQUENCE LOGIC*/
   const switchTo = (getNextIndex) => {
     if (isFading) return;
     setIsFading(true);
-    
-    // 1. Hide current text instantly
-    setHideText(true);
 
-    // 2. Change Image while screen is dipped in dark/flare (400ms)
+    setHideText(true);
     setTimeout(() => {
       setCurrentIndex((prev) => typeof getNextIndex === 'function' ? getNextIndex(prev) : getNextIndex);
     }, 400);
-
-    // 3. Show new text AFTER image is loaded (650ms)
     setTimeout(() => {
       setHideText(false);
-      setFlyKey((k) => k + 1); // Re-trigger text animations
+      setFlyKey((k) => k + 1);
     }, 650);
-
-    // 4. End transition sequence
     setTimeout(() => setIsFading(false), 1200);
   };
 
-  /* --- DATA FETCHING & SETUP --- */
+  /*DATA FETCHING & SETUP*/
   useEffect(() => {
     if (styleRef.current) return;
     styleRef.current = true;
@@ -169,11 +188,13 @@ const HeroSection = () => {
     switchTo(index);
   };
 
-  /* --- LOADING STATE --- */
+  /*LOADING STATE*/
   if (isLoading || !movies.length) {
     return (
       <div className="h-screen w-full bg-[#0a0a0a] flex items-center justify-center text-white text-sm tracking-widest uppercase">
-        <div className="animate-pulse">Loading Movies...</div>
+        <div className="animate-pulse">
+          <Loading/>
+          </div>
       </div>
     );
   }
@@ -190,20 +211,17 @@ const HeroSection = () => {
   const runtimeStr = formatRuntime(movie.runtime);
 
   return (
-    <div className="relative flex flex-col justify-center h-screen w-full overflow-hidden bg-[#0a0a0a] text-white">
+    <div className="hero-section-container relative flex flex-col justify-center h-screen w-full overflow-hidden bg-[#0a0a0a] text-white">
       
-      {/* =========================================
-          BACKGROUND & LIGHT EFFECTS
-          ========================================= */}
+      {/*BACKGROUND & LIGHT EFFECTS*/}
       <div className="absolute inset-0 z-0">
         <img
           key={`bg-${currentIndex}`}
           src={bgUrl}
           alt={movie.title}
-          className="w-full h-full object-cover object-center"
+          className="hero-backdrop w-full h-full object-cover object-center"
           style={{ opacity: 1 }} 
         />
-        
         {/* Soft Breathing Dark Layer */}
         <div className="absolute inset-0 bg-black pointer-events-none will-change-opacity" 
              style={{ animation: 'cinematicBreathe 7s ease-in-out infinite', zIndex: 1 }} />
@@ -221,7 +239,7 @@ const HeroSection = () => {
              style={{ background: 'radial-gradient(circle at center, transparent 30%, rgba(0,0,0,0.3) 100%)', mixBlendMode: 'overlay', zIndex: 3 }} />
       </div>
 
-      {/* --- PURE WHITE VERTICAL FLARE (Tâm hắt từ bên phải) --- */}
+      {/*PURE WHITE VERTICAL FLARE*/}
       <div
         key={`flare-${isFading}`}
         className="absolute inset-y-[-20%] right-0 w-[5vw] pointer-events-none"
@@ -232,7 +250,6 @@ const HeroSection = () => {
           zIndex: 4,
           willChange: 'transform, opacity',
           transformOrigin: 'center center',
-          // Keyframes xử lý translate(50%) sẽ đẩy tâm 50% của gradient đúng vào vạch right-0
           animation: isFading ? 'verticalWhiteFlare 1.1s cubic-bezier(0.4, 0, 0.2, 1) forwards' : 'none',
           opacity: 0,
         }}
@@ -249,9 +266,7 @@ const HeroSection = () => {
         }}
       />
 
-      {/* =========================================
-          MAIN TEXT CONTENT
-          ========================================= */}
+      {/*MAIN TEXT CONTENT*/}
       <div
         className="relative z-10 px-8 md:px-14 lg:px-20 mb-12 transition-opacity duration-300 ease-out"
         style={{ 
@@ -279,7 +294,7 @@ const HeroSection = () => {
               {titleWords.map((word, wIndex) => {
                 const animName = wIndex % 2 === 0 ? 'charFromLeft' : 'charFromRight';
                 return (
-                  <span key={`w-${wIndex}`} className="inline-block whitespace-nowrap mr-[0.3em] will-change-transform"
+                  <span key={`w-${wIndex}`} className="hero-title-word inline-block whitespace-nowrap mr-[0.3em] will-change-transform"
                     style={{ animation: `${animName} 700ms cubic-bezier(0.22,1,0.36,1) ${wIndex * 80}ms both` }}>
                     {word}
                   </span>
@@ -293,28 +308,28 @@ const HeroSection = () => {
               <span className="flex items-center gap-1.5"><Star className="w-4 h-4 text-yellow-400 fill-yellow-400" />{rating}</span>
             </div>
 
-            <p className="hero-overview hero-fade-up d3 text-gray-200 text-base leading-relaxed mb-8 line-clamp-3 cinematic-shadow font-medium">
+            <p className="hero-overview hero-fade-up d3 text-gray-200 text-base leading-relaxed mb-8 line-clamp-3  font-medium">
               {movie.overview}
             </p>
 
             <div className="hero-actions hero-fade-up d4 flex items-center gap-4 flex-wrap">
-              <button onClick={() => navigate(`/movie/${movie.id}`)}
-                className="flex items-center gap-2 px-7 py-3 rounded-full font-bold text-sm transition-all duration-300 hover:scale-105"
-                style={{ background: 'linear-gradient(135deg, #e50914 0%, #b80710 100%)', boxShadow: '0 8px 25px rgba(229,9,20,0.5)' }}>
-                <Ticket className="w-4 h-4" /> Book Now
+              <button onClick={() => navigate(`/movies/${movie.id}`)}
+                className="group flex items-center gap-3 px-10 py-6 bg-linear-to-r from-primary to-primary-dull
+                 hover:from-primary-dull hover:to-primary text-white font-semibold rounded-full shadow-lg shadow-primary/30 
+                 hover:shadow-xl hover:shadow-primary/60 hover:scale-105 active:scale-95 transition-all duration-300 border
+                  border-primary/30 hover:border-primary/60 relative overflow-hidden">
+                <Ticket className="w-6 h-6 " /> Book Now
               </button>
-              <button className="flex items-center gap-2 px-7 py-3 rounded-full font-bold text-sm transition-all duration-300 hover:bg-white/20 backdrop-blur-md"
-                style={{ border: '1px solid rgba(255,255,255,0.4)', backgroundColor: 'rgba(255,255,255,0.1)' }}>
+              <button className="group flex items-center gap-3 px-8 py-4 bg-white/15 hover:bg-white/25 text-white 
+              font-semibold rounded-full border border-white/40 hover:border-primary/40 backdrop-blur-sm hover:scale-105 
+              transition-all duration-300 relative overflow-hidden cursor-pointer">
                 <Play className="w-4 h-4" /> Trailer
               </button>
             </div>
           </div>
         )}
       </div>
-
-      {/* =========================================
-          THUMBNAILS NAVIGATION
-          ========================================= */}
+      {/*THUMBNAILS NAVIGATION*/}
       <div className="absolute bottom-8 left-8 md:left-14 lg:left-20 z-20 flex flex-col gap-3">
         <div className="flex items-center gap-2 mb-1">
           {movies.map((_, i) => (
@@ -339,7 +354,7 @@ const HeroSection = () => {
                   width: isActive ? 140 : 100, 
                   height: isActive ? 80 : 56, 
                   transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-                  outline: isActive ? '2px solid rgb(229,9,20)' : '2px solid transparent', 
+                  outline: isActive ? '2px solid rgba(246, 69, 101) ' : '2px solid transparent', 
                   outlineOffset: 2,
                   boxShadow: isActive ? '0 8px 24px rgba(229,9,20,0.36)' : '0 4px 12px rgba(0,0,0,0.6)',
                 }}

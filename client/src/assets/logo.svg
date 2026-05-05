@@ -1,11 +1,6 @@
 <svg viewBox="0 0 1100 260" xmlns="http://www.w3.org/2000/svg">
 
   <defs>
-    <linearGradient id="mainRed" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#ff1f1f"/>
-      <stop offset="100%" stop-color="#990000"/>
-    </linearGradient>
-
     <linearGradient id="shadowRed" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="#660000" stop-opacity="0.6"/>
       <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
@@ -26,29 +21,17 @@
       NITROCINE
     </text>
 
-    <!-- Main -->
+    <!-- Main (N highlighted in primary, rest white) -->
     <text
       font-family="Georgia, Times New Roman, serif"
       font-size="160"
       font-weight="700"
       letter-spacing="8"
-      fill="url(#mainRed)"
     >
-      NITROCINE
+      <tspan fill="#f64565">N</tspan><tspan fill="#ffffff">ITROCINE</tspan>
     </text>
 
-    <!-- Highlight -->
-    <text
-      font-family="Georgia, Times New Roman, serif"
-      font-size="160"
-      font-weight="700"
-      letter-spacing="8"
-      fill="#ff4d4d"
-      opacity="0.15"
-      transform="translate(0,-2)"
-    >
-      NITROCINE
-    </text>
+    
 
   </g>
 

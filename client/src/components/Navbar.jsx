@@ -16,16 +16,16 @@ const Navbar = () => {
   const tickingRef = useRef(false);
 
   
-  // chore: Navigation links configuration
+  
   const navLinks = [
     { name: 'Home', path: '/' },
     { name: 'Movies', path: '/movies' },
-    { name: 'Theater', path: '/theater' }, // fix: Corrected spelling from 'Threater' to 'Theater'
+    { name: 'Theater', path: '/theater' },
     { name: 'Releases', path: '/releases' },
     { name: 'Favorites', path: '/favorite' },
   ];
 
-  // feat: Handle scroll event for navbar styling (throttled with rAF)
+  // Feature: change navbar style when page is scrolled
   useEffect(() => {
     const handleScroll = () => {
       if (tickingRef.current) return;
@@ -48,9 +48,9 @@ const Navbar = () => {
         ? 'py-3 bg-black/60 backdrop-blur-md border-white/10 shadow-lg' 
         : 'py-5 bg-black/0 backdrop-blur-none border-transparent'
     }`}>
-      {/* feat: Logo link to home */}
+      {/* Logo links to home */}
       <Link to='/' className='max-md:flex-1 group transition-transform duration-300 hover:scale-105' >
-        <img src={assets.logo} alt="logo" className='w-36 h-auto' />
+        <img src={assets.logo} alt="logo" className='w-50 h-auto' />
         </Link>
         
         <div className={`max-md:absolute max-md:top-0 max-md:left-0 max-md:font-medium 

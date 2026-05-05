@@ -1,4 +1,4 @@
-// chore: TMDB API constants
+// Service: TMDB API helpers
 const API_KEY = '127bc7f7c148cade2892233946154212';
 const BASE_URL = 'https://api.themoviedb.org/3';
 const IMAGE_BASE = 'https://image.tmdb.org/t/p';
@@ -13,14 +13,14 @@ export const fetchPopularMovies = async (options = { includeDetails: false, deta
         const seedSize = options && Number.isInteger(options.dailySeedSize) ? options.dailySeedSize : 20;
         const page = dailyRotate ? ((Math.floor(Date.now() / 86400000) % seedSize) + 1) : 1;
         const cacheKey = `${CACHE_KEY}_p${page}`;
-        
+
         try {
             const cached = sessionStorage.getItem(cacheKey);
             if (cached) {
                 const parsed = JSON.parse(cached);
                 if (Date.now() - parsed.t < CACHE_TTL) return parsed.data;
             }
-        } catch (e) { 
+        } catch (e) {
             //
         }
 
@@ -38,33 +38,14 @@ export const fetchPopularMovies = async (options = { includeDetails: false, deta
             release_date: movie.release_date,
             vote_average: movie.vote_average,
             vote_count: movie.vote_count,
-            runtime: null,
+            runtime: movie.runtime,
         }));
-
-        if (options && options.includeDetails) {
-            const limit = Number.isInteger(options.detailLimit) ? options.detailLimit : 10;
-            results = await Promise.all(
-                results.map(async (mv, idx) => {
-                    if (idx >= limit) return mv;
-                    try {
-                        const detailResp = await fetch(`${BASE_URL}/movie/${mv.id}?api_key=${API_KEY}&language=en-US`);
-                        if (detailResp.ok) {
-                            const detailData = await detailResp.json();
-                            mv.runtime = detailData.runtime ?? mv.runtime;
-                        }
-                    } catch (e) { 
-                        //
-                    }
-                    return mv;
-                })
-            );
-        }
 
         try {
             sessionStorage.setItem(cacheKey, JSON.stringify({ t: Date.now(), data: results }));
         } catch (e) {
             //
-         }
+        }
 
         return results;
     } catch (error) {
@@ -73,9 +54,22 @@ export const fetchPopularMovies = async (options = { includeDetails: false, deta
     }
 }
 
+export const fetchMovieDetails = async (id) => {
+    try {
+        const resp = await fetch(`${BASE_URL}/movie/${id}?api_key=${API_KEY}&language=en-US&append_to_response=credits`);
+        if (!resp.ok) throw new Error('Failed to fetch movie details');
+        const data = await resp.json();
+
+
+        return { ...data };
+    } catch (e) {
+        console.error('fetchMovieDetails error', e);
+        return null;
+    }
+}
 // services/tmdb.js
 export const fetchLatestTrailers = async (opts = { limit: 10, ttlHours: 2, pagesToSearch: 4 }) => {
-    // ... (giữ nguyên phần cache)
+
     try {
         const results = [];
         let page = 1;

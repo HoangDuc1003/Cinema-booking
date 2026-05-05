@@ -2,44 +2,46 @@ import React, { useState, useEffect } from 'react'
 import { fetchPopularMovies } from '../services/tmdb';
 import MovieCard from '../components/MovieCard'
 import BlurCircle from '../components/BlurCircle'
+import Loading from '../components/Loading'
 
-// feat: Component displaying all available movies
+// Feature: movies listing page
 const Movies = () => {
   // chore: State management for movies list and loading
   const [movies, setMovies] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
 
-  // feat: Fetch all movies on component mount
+  
   useEffect(() => {
     const loadMovies = async () => {
       try {
         setIsLoading(true);
         const data = await fetchPopularMovies();
-        setMovies(data); 
+        setMovies(data);
+        setHasError(false);
       } catch (error) {
         // fix: Corrected error message grammar
         console.error("No movies available", error);
+        setHasError(true);
       } finally {
         setIsLoading(false);
       }
     };
 
-    loadMovies(); 
+    loadMovies();
   }, []);
 
-  // feat: Loading state UI
   if (isLoading) {
-    return (
-      <div className='min-h-[80vh] flex items-center justify-center'>
-        <h1 className='text-3xl font-bold text-white'>Loading movies...</h1>
-      </div>
-    );
+    return <Loading />;
+  }
+  if (hasError) {
+    return <Loading />;
   }
 
   // feat: Movies list or empty state
   return movies.length > 0 ? (
     <>
-      {/* chore: Animation styles for gradient effect */}
+      {/* Animation styles for gradient effect */}
       <style>
         {`
           @keyframes slowPulseBand {
@@ -53,26 +55,27 @@ const Movies = () => {
       </style>
 
       {/* feat: Main movies grid container */}
-      <div className='relative pt-30 mb-60 px-6 md:px-16 lg:px-40 xl:px-44 overflow-hidden min-h-[80vh]'>
-        
+      <div className='relative pt-30 mb-5 px-6 md:px-16 lg:px-40 xl:px-44 overflow-hidden min-h-[80vh]'>
+
         {/* chore: Gradient background effect */}
-        <div 
-          className="absolute left-1/2 -translate-x-1/2 w-[150%] h-45 bg-red-600/80 rounded-[100%] blur-[120px] 
+        <div
+          className="absolute left-1/2 -translate-x-1/2 w-[150%] h-45 rounded-[100%] blur-[120px] 
           animate-slow-pulse pointer-events-none"
-          style={{ top: '-20px', zIndex: 0 }}
+          style={{ top: '-20px', zIndex: 0, background: 'rgba(0, 123, 255, 0.5)' }}
         ></div>
 
-        {/* chore: Decorative blur circles */}
-        <BlurCircle top='150px' left='0'/>
-        <BlurCircle bottom='50px' right='50px'/>
-        
+        <BlurCircle top='150px' left='0' />
+        <BlurCircle bottom='50px' right='50px' />
+        <BlurCircle top='50px' left='400px' />
+        <BlurCircle top='100px' right='0' />
+
         {/* feat: Movies grid layout */}
         <div className="relative z-10">
-          {/* feat: Section title */}
+          {/* Section title */}
           <h1 className='text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-20'>
             Now Showing
           </h1>
-          {/* feat: Movies list in responsive grid */}
+          {/* Movies grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6 w-full">
             {movies.map((movie) => (
               <MovieCard movie={movie} key={movie._id} />
@@ -83,9 +86,9 @@ const Movies = () => {
       </div>
     </>
   ) : (
-    // feat: Empty state message
+    // Empty state message
     <div className='min-h-[80vh] flex items-center justify-center'>
-        <h1 className='text-3xl font-bold text-center text-white'>No movies available</h1>
+      <h1 className='text-3xl font-bold text-center text-white'>No movies available</h1>
     </div>
   )
 }

@@ -1,7 +1,7 @@
 import React, { Suspense, lazy } from 'react'
 import Navbar from './components/Navbar'
 import { Route, Routes, useLocation } from 'react-router-dom'
-// feat: Lazy-load page routes to reduce initial bundle
+// Feature: lazy-loaded routes
 const Home = lazy(() => import('./pages/Home'));
 const Movies = lazy(() => import('./pages/Movies'));
 const MovieDetails = lazy(() => import('./pages/MovieDetails'));
@@ -12,18 +12,18 @@ const MyMovies = lazy(() => import('./pages/MyMovies'));
 import { Toaster } from 'react-hot-toast'
 import Footer from './components/Footer'
 
-// feat: Main application component with routing
+// Feature: main App with routing
 const App = () => {
-  // chore: Check if current route is admin route to hide navbar/footer
+  // Admin route check
   const isAdminRoute = useLocation().pathname.startsWith('/admin')
 
   return (
     <>
-      {/* chore: Main app layout with toast notifications */}
+      {/* App layout + toast */}
       <Toaster />
-      {/* feat: Navigation bar (hidden on admin routes) */}
+      {/* Feature: navigation bar (hidden on admin routes) */}
       {!isAdminRoute && <Navbar />}
-      {/* feat: Application routing configuration (lazy-loaded) */}
+      {/* Feature: routing */}
       <Suspense fallback={<div className="min-h-[60vh] flex items-center justify-center text-white">Loading...</div>}>
         <Routes>
           <Route path='/' element={<Home />} />
@@ -35,7 +35,7 @@ const App = () => {
           <Route path='/my-movies' element={<MyMovies />} />
         </Routes>
       </Suspense>
-      {/* feat: Footer component (hidden on admin routes) */}
+      {/* Feature: footer */}
       {!isAdminRoute && <Footer />}
     </>
   )
