@@ -61,7 +61,6 @@ const TrailerSection = () => {
     const s = document.createElement('style');
     s.textContent = `
 
-
       .trailer-player-wrapper {
         width: 75%;
         margin: 0 auto;
@@ -76,14 +75,18 @@ const TrailerSection = () => {
         box-shadow: 0 20px 50px rgba(0,0,0,.45);
         background: #02050b;
       }
+
+      /* Sử dụng tỷ lệ phần trăm toán học để giấu toàn bộ viền đen trên dưới */
       .video-crop {
         position: absolute;
-        top: -17%; /* Giấu chính xác phần viền 16:9 dư thừa */
+        top: -17.625%; /* Giấu chính xác phần viền 16:9 dư thừa */
         left: 0;
         right: 0;
         width: 100%;
-        height: 131.25%;
+        height: 131.25%; /* Kéo giãn vừa đủ để nội dung lấp đầy khung 21:9 */
       }
+
+      /* iframe nằm trọn vẹn trong thẻ crop */
       .video-crop iframe {
         position: absolute !important;
         top: 0;
@@ -91,9 +94,10 @@ const TrailerSection = () => {
         width: 100% !important;
         height: 100% !important;
         border: none;
-        pointer-events: none;
+        pointer-events: none; /* Khóa tương tác chuột để YouTube không can thiệp, dùng custom buttons */
       }
 
+      /* Phần còn lại của CSS giữ nguyên */
       .player-controls {
         position: absolute;
         top: 12px;
@@ -276,13 +280,9 @@ const TrailerSection = () => {
   const loopItems      = trailers.length > 0 ? [...trailers, ...trailers] : [];
 
   return (
-
     <div className='px-6 md:px-16 lg:px-24 py-20 overflow-hidden'>
-      
+      <p className=' text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-2 '>Trailers</p>
 
-      <p className='text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-2'>Trailers</p>
-
-      
       <div className='trailer-frame relative mt-6'>
         <BlurCircle top='220px' right='-100px' />
         <BlurCircle top='-40px'  left='-20px'  />
@@ -356,14 +356,14 @@ const TrailerSection = () => {
         )}
 
         <div className='marquee'>
-          <div className='marquee-track animate'>
+          <div className='marquee-track animate '>
             {loopItems.map((t, i) => (
               <button
                 key={`${t.id}-${i}`}
-                className={`marquee-item ${currentTrailer?.id === t.id ? 'active' : ''}`}
+                className={`marquee-item flex flex-col justify-start h-65 ${currentTrailer?.id === t.id ? 'active' : ''}`}
                 onClick={() => selectTrailer(t)}
               >
-                <div className='thumb-image-wrap flex flex-col justify-start'>
+                <div className='thumb-image-wrap '>
                   <img
                     src={t.backdrop_path || t.poster_path}
                     alt={t.title}
@@ -386,7 +386,7 @@ const TrailerSection = () => {
         </div>
 
         {isLoading && (
-          <p className='text-gray-400 px-6 pb-4 text-4xl'>Loading trailer...</p>
+          <p className='text-white-400 px-6 pb-4 text-4xl items-center'>Loading trailer...</p>
         )}
       </div>
     </div>

@@ -95,10 +95,7 @@ export const fetchLatestTrailers = async (opts = { limit: 10, ttlHours: 2, pages
                         overview: mv.overview,
                         release_date: mv.release_date,
                         backdrop_path: mv.backdrop_path ? `${IMAGE_BASE}/w1280${mv.backdrop_path}` : null,
-                        // Use watch URL for ReactPlayer compatibility and also provide embed URL
-                        videoUrl: `https://www.youtube.com/watch?v=${video.key}`,
-                        embedUrl: `https://www.youtube.com/embed/${video.key}?rel=0&modestbranding=1`,
-                        // FIX: Lấy ảnh preview trực tiếp từ YouTube (quan trọng)
+                        videoUrl: `https://www.youtube.com/embed/${video.key}`,
                         thumbnail: `https://img.youtube.com/vi/${video.key}/maxresdefault.jpg`,
                         videoName: video.name,
                         qualityLabel: '1080p'
