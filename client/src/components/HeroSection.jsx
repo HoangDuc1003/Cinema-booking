@@ -3,154 +3,15 @@ import { useNavigate } from 'react-router-dom';
 import { CalendarIcon, ClockIcon, Star, Play, Ticket } from 'lucide-react';
 import { fetchPopularMovies } from '../services/tmdb';
 
-// chore: CSS animations for hero section
-const STYLES = `
-  @keyframes flyFromLeft {
-    0%   { transform: translateX(-80px) skewX(-8deg); opacity: 0; }
-    60%  { transform: translateX(6px)  skewX(2deg);  opacity: 1; }
-    100% { transform: translateX(0)    skewX(0deg);  opacity: 1; }
-  }
-  @keyframes flyFromRight {
-    0%   { transform: translateX(80px) skewX(8deg);  opacity: 0; }
-    60%  { transform: translateX(-6px) skewX(-2deg); opacity: 1; }
-    100% { transform: translateX(0)    skewX(0deg);  opacity: 1; }
-  }
-  @keyframes fadeSlideUp {
-    0%   { transform: translateY(28px); opacity: 0; }
-    100% { transform: translateY(0);    opacity: 1; }
-  }
-  @keyframes orb1 {
-    0%,100% { transform: translate(0px, 0px)    scale(1);    }
-    33%      { transform: translate(60px,-40px)  scale(1.18); }
-    66%      { transform: translate(-40px,50px)  scale(0.90); }
-  }
-  @keyframes orb2 {
-    0%,100% { transform: translate(0px,0px)    scale(1);    }
-    40%      { transform: translate(-70px,40px) scale(1.22); }
-    70%      { transform: translate(50px,-50px) scale(0.85); }
-  }
-  @keyframes orb3 {
-    0%,100% { transform: translate(0px,0px)   scale(1);    }
-    30%      { transform: translate(80px,60px) scale(1.15); }
-    60%      { transform: translate(-60px,-30px) scale(0.92); }
-  }
-  .hero-fly-left  { animation: flyFromLeft  0.75s cubic-bezier(0.22,1,0.36,1) forwards; opacity:0; }
-  .hero-fly-right { animation: flyFromRight 0.75s cubic-bezier(0.22,1,0.36,1) forwards; opacity:0; }
-  .hero-fade-up   { animation: fadeSlideUp  0.65s cubic-bezier(0.22,1,0.36,1) forwards; opacity:0; }
-  .d1 { animation-delay: 0ms;   }
-  .d2 { animation-delay: 120ms; }
-  .d3 { animation-delay: 220ms; }
-  .d4 { animation-delay: 340ms; }
-  .orb1 { animation: orb1 9s ease-in-out infinite; }
-  .orb2 { animation: orb2 12s ease-in-out infinite; }
-  .orb3 { animation: orb3 15s ease-in-out infinite; }
+/* =========================================
+   UTILITY FUNCTIONS
+   ========================================= */
+const getImageUrl = (path, size = 'original') => {
+  if (!path) return '';
+  if (path.startsWith('http')) return path;
+  return `https://image.tmdb.org/t/p/${size}${path}`;
+};
 
-  .thumb-bar::-webkit-scrollbar { display: none; }
-  .thumb-bar { scrollbar-width: none; }
-  /* hero shine: diagonal, soft capsule, slower and fully fades */
-  @keyframes shineDiag {
-    0% {
-      transform: translate(-150%, -30%) rotate(18deg);
-      opacity: 0;
-    }
-    12% { opacity: 0.06; }
-    40% {
-      transform: translate(-40%, -8%) rotate(18deg);
-      opacity: 0.18;
-    }
-    50% {
-      transform: translate(0%, 0%) rotate(18deg);
-      opacity: 0.32;
-    }
-    60% {
-      transform: translate(40%, 8%) rotate(18deg);
-      opacity: 0.18;
-    }
-    88% { opacity: 0.06; }
-    100% {
-      transform: translate(150%, 30%) rotate(18deg);
-      opacity: 0;
-    }
-  }
-
-  .hero-shine {
-    position: absolute;
-    left: -20%;
-    top: 30%;
-    width: 160%;
-    height: 30%;
-    pointer-events: none;
-    z-index: 7;
-    mix-blend-mode: screen;
-    border-radius: 40%;
-    /* soft diagonal band with transparent edges */
-    background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.06) 30%, rgba(255,255,255,0.16) 50%, rgba(255,255,255,0.06) 70%, rgba(255,255,255,0) 100%);
-    filter: blur(36px) saturate(1.03) contrast(1.02);
-    transform: translate(-150%, -30%) rotate(18deg);
-    animation: shineDiag 12s ease-in-out infinite;
-    opacity: 0;
-  }
-
-  /* depth band: diagonal alternating light/dark stripes to add perceived depth */
-  @keyframes depthMove {
-    from { background-position: 0 0; }
-    to { background-position: 240px 0; }
-  }
-  @keyframes depthPulse {
-    0% { opacity: 0.42; }
-    50% { opacity: 0.62; }
-    100% { opacity: 0.42; }
-  }
-  .depth-band {
-    position: absolute;
-    left: -20%;
-    top: 30%;
-    width: 160%;
-    height: 40%;
-    pointer-events: none;
-    z-index: 6;
-    transform: rotate(18deg);
-    /* alternating dark/light diagonal stripes */
-    background-image: repeating-linear-gradient(135deg,
-      rgba(0,0,0,0.06) 0px, rgba(0,0,0,0.06) 60px,
-      rgba(255,255,255,0.07) 60px, rgba(255,255,255,0.07) 120px);
-    opacity: 0.48;
-    filter: blur(14px) saturate(1.02) contrast(0.98);
-    animation: depthMove 10s linear infinite, depthPulse 8s ease-in-out infinite;
-    border-radius: 30%;
-    mix-blend-mode: multiply;
-  }
-
-  /* per-character title fly-in (alternate left/right) */
-  @keyframes charFromLeft {
-    0% { transform: translateX(-140px) translateY(6px) rotate(-6deg); opacity: 0; }
-    60% { transform: translateX(10px) translateY(-2px) rotate(2deg); opacity: 1; }
-    100% { transform: translateX(0) translateY(0) rotate(0); opacity: 1; }
-  }
-  @keyframes charFromRight {
-    0% { transform: translateX(140px) translateY(6px) rotate(6deg); opacity: 0; }
-    60% { transform: translateX(-10px) translateY(-2px) rotate(-2deg); opacity: 1; }
-    100% { transform: translateX(0) translateY(0) rotate(0); opacity: 1; }
-  }
-  .char { display: inline-block; will-change: transform, opacity; opacity: 0; }
-  .word { display: inline-block; will-change: transform, opacity; white-space: nowrap; opacity: 0; }
-
-  /* Mobile rules: reduce hero text, hide details for compact layout */
-  @media (max-width: 640px) {
-    .hero-title { font-size: clamp(18px, 6.5vw, 28px) !important; }
-    .hero-meta, .hero-overview, .hero-actions { display: none !important; }
-    .thumb-bar { display: none !important; gap: 0.5rem !important; padding: 0.5rem !important; }
-    .thumb-bar img { height: 44px !important; }
-    .hero-shine, .depth-band { display: none !important; }
-  }
-
-  .hero-backdrop {
-    will-change: transform, filter, opacity;
-    filter: contrast(1.08) saturate(1.08) brightness(1.05);
-  }
-`;
-
-// chore: Utility function to format duration
 const formatRuntime = (minutes) => {
   if (!minutes) return 'N/A';
   const h = Math.floor(minutes / 60);
@@ -158,7 +19,6 @@ const formatRuntime = (minutes) => {
   return `${h}h ${m}m`;
 };
 
-// Keep the last `tailWords` words together by replacing spaces between them with non-breaking spaces
 const keepLastWordsTogether = (text = '', tailWords = 2) => {
   const t = String(text).trim();
   if (!t) return t;
@@ -169,33 +29,111 @@ const keepLastWordsTogether = (text = '', tailWords = 2) => {
   return head + ' ' + tail;
 };
 
+/* =========================================
+   PERFORMANCE-OPTIMIZED CSS ANIMATIONS
+   ========================================= */
+const STYLES = `
+  /* Hardware-accelerated text fade up */
+  @keyframes fadeSlideUp {
+    0%   { transform: translateY(20px); opacity: 0; }
+    100% { transform: translateY(0);    opacity: 1; }
+  }
+
+  /* Subtle background breathing */
+  @keyframes cinematicBreathe {
+    0%, 100% { opacity: 0.05; }
+    50%      { opacity: 0.2; } 
+  }
+  
+  /* Pure White Vertical Flare (Tâm sáng ở ngay mép phải màn hình) */
+  @keyframes verticalWhiteFlare {
+    0%   { opacity: 0; transform: translateX(50%) scaleX(0.1) scaleY(1); }
+    30%  { opacity: 1; transform: translateX(50%) scaleX(3.5) scaleY(1.1); } 
+    50%  { opacity: 0.1; transform: translateX(50%) scaleX(0.3) scaleY(1); } 
+    75%  { opacity: 0.9; transform: translateX(50%) scaleX(2.5) scaleY(1.05); } 
+    100% { opacity: 0; transform: translateX(50%) scaleX(0.1) scaleY(1); } 
+  }
+
+  /* Soft dark dip for background transition */
+  @keyframes darkDipTransition {
+    0%, 100% { opacity: 0; }
+    40%, 60% { opacity: 0.5; }
+  }
+
+  /* Per-character text fly-ins */
+  @keyframes charFromLeft {
+    0% { transform: translateX(-50px) translateY(5px) rotate(-4deg); opacity: 0; }
+    100% { transform: translateX(0) translateY(0) rotate(0); opacity: 1; }
+  }
+  @keyframes charFromRight {
+    0% { transform: translateX(50px) translateY(5px) rotate(4deg); opacity: 0; }
+    100% { transform: translateX(0) translateY(0) rotate(0); opacity: 1; }
+  }
+
+  /* Animation Classes */
+  .hero-fade-up { animation: fadeSlideUp 0.6s cubic-bezier(0.22,1,0.36,1) forwards; opacity: 0; }
+  .d1 { animation-delay: 50ms;   }
+  .d2 { animation-delay: 150ms; }
+  .d3 { animation-delay: 250ms; }
+  .d4 { animation-delay: 350ms; }
+  
+  /* Text shadow for readability */
+  .cinematic-shadow {
+    text-shadow: 0px 2px 10px rgba(0,0,0,0.8), 0px 4px 20px rgba(0,0,0,0.5);
+  }
+
+  /* Hide scrollbars */
+  .thumb-bar::-webkit-scrollbar { display: none; }
+  .thumb-bar { scrollbar-width: none; }
+
+  /* Mobile Adjustments */
+  @media (max-width: 640px) {
+    .hero-title { font-size: clamp(24px, 6.5vw, 32px) !important; }
+    .hero-meta, .hero-overview { display: none !important; }
+    .thumb-bar { gap: 0.5rem !important; padding: 0.5rem !important; }
+    .thumb-bar img { height: 44px !important; }
+  }
+`;
+
 const HeroSection = () => {
-  // chore: Navigation setup
-  const navigate  = useNavigate();
-  // chore: Reference to prevent duplicate style injection
-  const styleRef  = useRef(false);
+  const navigate = useNavigate();
+  const styleRef = useRef(false);
 
-  // chore: State management for hero section
-  const [movies, setMovies]           = useState([]);
+  /* --- STATE MANAGEMENT --- */
+  const [movies, setMovies] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [isLoading, setIsLoading]     = useState(true);
-  const [isFading, setIsFading]       = useState(false);
-  const [flyKey, setFlyKey]           = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  
+  // Animation states
+  const [isFading, setIsFading] = useState(false);
+  const [hideText, setHideText] = useState(false);
+  const [flyKey, setFlyKey] = useState(0);
 
-  // feat: Handle switching between movies with fade animation
+  /* --- ANIMATION SEQUENCE LOGIC --- */
   const switchTo = (getNextIndex) => {
+    if (isFading) return;
     setIsFading(true);
+    
+    // 1. Hide current text instantly
+    setHideText(true);
+
+    // 2. Change Image while screen is dipped in dark/flare (400ms)
     setTimeout(() => {
-      setCurrentIndex((prev) => {
-        return typeof getNextIndex === 'function' ? getNextIndex(prev) : getNextIndex;
-      });
-      setFlyKey((k) => k + 1);
-      setIsFading(false);
-    }, 420);
+      setCurrentIndex((prev) => typeof getNextIndex === 'function' ? getNextIndex(prev) : getNextIndex);
+    }, 400);
+
+    // 3. Show new text AFTER image is loaded (650ms)
+    setTimeout(() => {
+      setHideText(false);
+      setFlyKey((k) => k + 1); // Re-trigger text animations
+    }, 650);
+
+    // 4. End transition sequence
+    setTimeout(() => setIsFading(false), 1200);
   };
 
+  /* --- DATA FETCHING & SETUP --- */
   useEffect(() => {
-    // chore: Inject animation styles once
     if (styleRef.current) return;
     styleRef.current = true;
     const el = document.createElement('style');
@@ -204,7 +142,6 @@ const HeroSection = () => {
   }, []);
 
   useEffect(() => {
-    // feat: Fetch top 5 popular movies on component mount (include runtime for these)
     const load = async () => {
       try {
         setIsLoading(true);
@@ -219,192 +156,203 @@ const HeroSection = () => {
     load();
   }, []);
 
+  // Auto-slide
   useEffect(() => {
-    // feat: Auto-rotate movies every 5 seconds
     if (!movies.length) return;
-    const id = setInterval(() => switchTo((prev) => (prev + 1) % movies.length), 5000);
+    const id = setInterval(() => switchTo((prev) => (prev + 1) % movies.length), 6000);
     return () => clearInterval(id);
-  }, [movies]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [movies, isFading]);
 
-  // chore: Handle thumbnail click navigation
   const handleThumbClick = (index) => {
     if (index === currentIndex || isFading) return;
-    switchTo(() => index);
+    switchTo(index);
   };
 
-  // feat: Loading state UI
+  /* --- LOADING STATE --- */
   if (isLoading || !movies.length) {
     return (
-      <div className="h-screen w-full bg-[#0a0a0a] flex items-center justify-center text-white text-sm">
-        Loading movies...
+      <div className="h-screen w-full bg-[#0a0a0a] flex items-center justify-center text-white text-sm tracking-widest uppercase">
+        <div className="animate-pulse">Loading Movies...</div>
       </div>
     );
   }
 
-  const movie      = movies[currentIndex];
+  const movie = movies[currentIndex];
   const titleTextRaw = movie.title || movie.name || '';
-  const titleText  = keepLastWordsTogether(titleTextRaw, 2);
+  const titleText = keepLastWordsTogether(titleTextRaw, 2);
   const titleWords = titleText.split(' ');
-  // choose highest-quality backdrop available for hero
-  const bgUrl      = movie.backdrop_original || movie.backdrop_w1280 || movie.backdrop_path || movie.backdrop_w780 || movie.poster_path;
-  const year       = movie.release_date?.substring(0, 4) || 'N/A';
-  const rating     = movie.vote_average?.toFixed(1) || 'N/A';
-
-  // fix: Corrected 'movieruntime' to 'runtime'
+  
+  const bgPath = movie.backdrop_original || movie.backdrop_w1280 || movie.backdrop_path;
+  const bgUrl = getImageUrl(bgPath, 'original');
+  const year = movie.release_date?.substring(0, 4) || 'N/A';
+  const rating = movie.vote_average?.toFixed(1) || 'N/A';
   const runtimeStr = formatRuntime(movie.runtime);
 
   return (
     <div className="relative flex flex-col justify-center h-screen w-full overflow-hidden bg-[#0a0a0a] text-white">
-      {/* chore: Hero backdrop with image and gradients */}
-      <div
-        className="absolute inset-0 z-0"
-        style={{ transition: 'opacity 420ms ease', opacity: isFading ? 0 : 1 }}
-      >
-        {/* feat: Background image (high-res for hero) */}
+      
+      {/* =========================================
+          BACKGROUND & LIGHT EFFECTS
+          ========================================= */}
+      <div className="absolute inset-0 z-0">
         <img
+          key={`bg-${currentIndex}`}
           src={bgUrl}
           alt={movie.title}
-          loading="eager"
-          decoding="sync"
-          className="w-full h-full object-cover object-center hero-backdrop"
-          style={{ opacity: 0.48 }}
+          className="w-full h-full object-cover object-center"
+          style={{ opacity: 1 }} 
         />
-        {/* feat: Moving shine overlay to brighten and add depth */}
-        <div className="hero-shine" aria-hidden="true" />
-        {/* feat: Diagonal depth band (stripes) */}
-        <div className="depth-band" aria-hidden="true" />
-        {/* feat: Gradient overlays for better text readability */}
-        <div className="absolute inset-0"
-          style={{ background: 'linear-gradient(to right, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.55) 32%, transparent 65%)', zIndex: 8 }} />
-        <div className="absolute inset-0"
-          style={{ background: 'linear-gradient(to top, #0a0a0a 0%, transparent 40%)', zIndex: 8 }} />
+        
+        {/* Soft Breathing Dark Layer */}
+        <div className="absolute inset-0 bg-black pointer-events-none will-change-opacity" 
+             style={{ animation: 'cinematicBreathe 7s ease-in-out infinite', zIndex: 1 }} />
+             
+        {/* Lớp đen bên trái (Đã giảm độ tối 50%) */}
+        <div className="absolute inset-0 pointer-events-none"
+             style={{ background: 'linear-gradient(90deg, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0.3) 25%, transparent 60%)', zIndex: 2 }} />
+
+        {/* Bottom Gradient (Only for Thumbnail visibility) */}
+        <div className="absolute inset-0 pointer-events-none"
+             style={{ background: 'linear-gradient(0deg, rgba(10,10,10,0.9) 0%, rgba(10,10,10,0.4) 15%, transparent 30%)', zIndex: 2 }} />
+             
+        {/* Vignette effect */}
+        <div className="absolute inset-0 pointer-events-none"
+             style={{ background: 'radial-gradient(circle at center, transparent 30%, rgba(0,0,0,0.3) 100%)', mixBlendMode: 'overlay', zIndex: 3 }} />
       </div>
 
-      {/* chore: Animated decorative blobs */}
-      <div className="orb1 absolute z-0 pointer-events-none"
-        style={{ top: '8%', left: '4%', width: 420, height: 420,
-          background: 'radial-gradient(circle, rgba(229,9,20,0.22) 0%, transparent 70%)', filter: 'blur(60px)' }} />
-
-      {/* ── TEXT CONTENT ── */}
+      {/* --- PURE WHITE VERTICAL FLARE (Tâm hắt từ bên phải) --- */}
       <div
-        key={flyKey}
-        className="relative z-10 px-8 md:px-14 lg:px-20 mb-10"
+        key={`flare-${isFading}`}
+        className="absolute inset-y-[-20%] right-0 w-[5vw] pointer-events-none"
         style={{
-          maxWidth: '32%',
-          minWidth: 280,
-          opacity: isFading ? 0 : 1,
-          transition: 'opacity 420ms ease',
-          marginTop: '-20px',
-          background: 'transparent',
+          background: 'linear-gradient(90deg, transparent 0%, rgba(229, 9, 20, 0.4) 30%, rgba(229, 9, 20, 1) 50%, rgba(229, 9, 20, 0.4) 70%, transparent 100%)',
+          mixBlendMode: 'screen',
+          filter: 'blur(30px)',
+          zIndex: 4,
+          willChange: 'transform, opacity',
+          transformOrigin: 'center center',
+          // Keyframes xử lý translate(50%) sẽ đẩy tâm 50% của gradient đúng vào vạch right-0
+          animation: isFading ? 'verticalWhiteFlare 1.1s cubic-bezier(0.4, 0, 0.2, 1) forwards' : 'none',
+          opacity: 0,
+        }}
+      />
+      
+      {/* Background Dip Transition */}
+      <div
+        key={`dark-${isFading}`}
+        className="absolute inset-0 bg-black pointer-events-none will-change-opacity"
+        style={{
+          zIndex: 3,
+          animation: isFading ? 'darkDipTransition 1.1s cubic-bezier(0.4, 0, 0.2, 1) forwards' : 'none',
+          opacity: 0 
+        }}
+      />
+
+      {/* =========================================
+          MAIN TEXT CONTENT
+          ========================================= */}
+      <div
+        className="relative z-10 px-8 md:px-14 lg:px-20 mb-12 transition-opacity duration-300 ease-out"
+        style={{ 
+          maxWidth: '45%', 
+          minWidth: 320, 
           isolation: 'isolate',
+          opacity: hideText ? 0 : 1 
         }}
       >
-        {/* Genre tags */}
-        {movie.genres?.length > 0 && (
-          <div className="hero-fade-up d1 flex flex-wrap gap-2 mb-4">
-            {movie.genres.slice(0, 3).map((g) => (
-              <span key={g.id}
-                className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest"
-                style={{ background: 'rgba(229,9,20,0.18)', border: '1px solid rgba(229,9,20,0.35)', color: '#ff6b6b' }}>
-                {g.name}
-              </span>
-            ))}
+        {!hideText && (
+          <div key={`content-block-${flyKey}`}>
+            {movie.genres?.length > 0 && (
+              <div className="hero-fade-up d1 flex flex-wrap gap-2 mb-4">
+                {movie.genres.slice(0, 3).map((g) => (
+                  <span key={g.id} className="px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest backdrop-blur-md cinematic-shadow"
+                    style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff' }}>
+                    {g.name}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <h1 className="d1 hero-title font-black leading-[1.1] mb-5 cinematic-shadow text-white" 
+                style={{ fontSize: 'clamp(36px, 4.5vw, 68px)', wordBreak: 'normal', overflowWrap: 'normal' }}>
+              {titleWords.map((word, wIndex) => {
+                const animName = wIndex % 2 === 0 ? 'charFromLeft' : 'charFromRight';
+                return (
+                  <span key={`w-${wIndex}`} className="inline-block whitespace-nowrap mr-[0.3em] will-change-transform"
+                    style={{ animation: `${animName} 700ms cubic-bezier(0.22,1,0.36,1) ${wIndex * 80}ms both` }}>
+                    {word}
+                  </span>
+                );
+              })}
+            </h1>
+
+            <div className="hero-meta hero-fade-up d2 flex items-center flex-wrap gap-5 text-[15px] font-medium text-white mb-6 cinematic-shadow">
+              <span className="flex items-center gap-1.5"><CalendarIcon className="w-4 h-4" />{year}</span>
+              <span className="flex items-center gap-1.5"><ClockIcon className="w-4 h-4" />{runtimeStr}</span>
+              <span className="flex items-center gap-1.5"><Star className="w-4 h-4 text-yellow-400 fill-yellow-400" />{rating}</span>
+            </div>
+
+            <p className="hero-overview hero-fade-up d3 text-gray-200 text-base leading-relaxed mb-8 line-clamp-3 cinematic-shadow font-medium">
+              {movie.overview}
+            </p>
+
+            <div className="hero-actions hero-fade-up d4 flex items-center gap-4 flex-wrap">
+              <button onClick={() => navigate(`/movie/${movie.id}`)}
+                className="flex items-center gap-2 px-7 py-3 rounded-full font-bold text-sm transition-all duration-300 hover:scale-105"
+                style={{ background: 'linear-gradient(135deg, #e50914 0%, #b80710 100%)', boxShadow: '0 8px 25px rgba(229,9,20,0.5)' }}>
+                <Ticket className="w-4 h-4" /> Book Now
+              </button>
+              <button className="flex items-center gap-2 px-7 py-3 rounded-full font-bold text-sm transition-all duration-300 hover:bg-white/20 backdrop-blur-md"
+                style={{ border: '1px solid rgba(255,255,255,0.4)', backgroundColor: 'rgba(255,255,255,0.1)' }}>
+                <Play className="w-4 h-4" /> Trailer
+              </button>
+            </div>
           </div>
         )}
-
-        {/* Title (words animate as groups) */}
-        <h1 key={`title-${flyKey}`} className={`d1 hero-title font-black leading-tight mb-4`} style={{ fontSize: 'clamp(30px, 3.2vw, 56px)', display: 'inline-block', lineHeight: '1', wordBreak: 'normal', overflowWrap: 'normal', hyphens: 'none' }} aria-label={titleTextRaw}>
-          {titleWords.map((word, wIndex) => {
-            const fromLeft = (wIndex % 2) === 0;
-            const delay = wIndex * 140;
-            const animName = fromLeft ? 'charFromLeft' : 'charFromRight';
-            return (
-              <span
-                key={`w-${wIndex}`}
-                className="word d1"
-                style={{ animation: `${animName} 900ms cubic-bezier(0.22,1,0.36,1) ${delay}ms both`, display: 'inline-block', whiteSpace: 'nowrap', marginRight: '0.35em' }}>
-                {word}
-              </span>
-            );
-          })}
-        </h1>
-
-        {/* Meta */}
-        <div className="hero-fade-up d2 flex items-center flex-wrap gap-4 text-base font-medium text-gray-300 mb-5">
-          <span className="flex items-center gap-1.5">
-            <CalendarIcon className="w-3.5 h-3.5 text-red-500" />{year}
-          </span>
-          <span className="flex items-center gap-1.5">
-            <ClockIcon className="w-3.5 h-3.5 text-red-500" />{runtimeStr}
-          </span>
-          <span className="flex items-center gap-1.5">
-            <Star className="w-3.5 h-3.5 text-yellow-400 fill-yellow-400" />{rating}
-          </span>
-        </div>
-
-        {/* Overview */}
-        <p className="hero-fade-up d3 text-gray-400 text-base leading-relaxed mb-8 line-clamp-3">
-          {movie.overview}
-        </p>
-
-        {/* Buttons */}
-        <div className="hero-fade-up d4 flex items-center gap-3 flex-wrap">
-          <button
-            onClick={() => navigate(`/movie/${movie.id}`)}
-            className="flex items-center gap-2 px-6 py-2.5 rounded-full font-semibold text-sm transition-all duration-300 hover:scale-105"
-            style={{
-              background: 'linear-gradient(135deg, #e50914 0%, #b80710 100%)',
-              boxShadow: '0 6px 24px rgba(229,9,20,0.40)',
-            }}>
-            <Ticket className="w-4 h-4" />Book Now
-          </button>
-          <button className="flex items-center gap-2 px-6 py-2.5 rounded-full font-semibold text-sm transition-all duration-300 hover:bg-white/10"
-            style={{ border: '1px solid rgba(255,255,255,0.25)' }}>
-            <Play className="w-4 h-4" />Trailer
-          </button>
-        </div>
       </div>
 
-      {/* ── THUMBNAIL STRIP ── */}
+      {/* =========================================
+          THUMBNAILS NAVIGATION
+          ========================================= */}
       <div className="absolute bottom-8 left-8 md:left-14 lg:left-20 z-20 flex flex-col gap-3">
-        {/* Dots indicator */}
         <div className="flex items-center gap-2 mb-1">
           {movies.map((_, i) => (
-            <button
-              key={i}
-              onClick={() => handleThumbClick(i)}
-              style={{
-                transition: 'all 0.45s ease', borderRadius: 9999, height: 6,
-                width: i === currentIndex ? 28 : 6, background: i === currentIndex ? '#e50914' : 'rgba(255,255,255,0.3)',
-                border: 'none', cursor: 'pointer', padding: 0,
-              }}
+            <button key={i} onClick={() => handleThumbClick(i)}
+              className="rounded-full transition-all duration-500 ease-out"
+              style={{ height: 6, width: i === currentIndex ? 32 : 6, background: i === currentIndex ? '#fff' : 'rgba(0,0,0,0.3)' }}
             />
           ))}
         </div>
 
-        {/* Thumbnail row */}
-        <div className="thumb-bar flex items-end gap-2.5 overflow-x-auto py-4 px-3 -ml-3">
-  {movies.map((m, i) => {
-    const isActive = i === currentIndex;
-    const thumbUrl = m.backdrop_path;
+        <div className="thumb-bar flex items-end gap-3 overflow-x-auto py-2 pr-4 pl-2">
+          {movies.map((m, i) => {
+            const isActive = i === currentIndex;
+            const thumbUrl = getImageUrl(m.backdrop_path, 'w500');
 
-    return (
-      <button
-        key={m.id}
-        onClick={() => handleThumbClick(i)}
-                className="shrink-0 rounded-xl overflow-hidden cursor-pointer relative"
+            return (
+              <button
+                key={m.id}
+                onClick={() => handleThumbClick(i)}
+                className="shrink-0 rounded-xl overflow-hidden cursor-pointer relative group will-change-transform"
                 style={{
-                  width: isActive ? 120 : 88, height: isActive ? 68 : 50, transition: 'all 0.42s cubic-bezier(0.4,0,0.2,1)',
-                  outline: isActive ? '2px solid #e50914' : '2px solid transparent', outlineOffset: 2,
-                  boxShadow: isActive ? '0 6px 24px rgba(229,9,20,0.45), 0 0 0 1.5px rgba(229,9,20,0.3)' : '0 2px 8px rgba(0,0,0,0.5)',
-                  filter: isActive ? 'brightness(1)' : 'brightness(0.55)',
+                  width: isActive ? 140 : 100, 
+                  height: isActive ? 80 : 56, 
+                  transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+                  outline: isActive ? '2px solid rgb(229,9,20)' : '2px solid transparent', 
+                  outlineOffset: 2,
+                  boxShadow: isActive ? '0 8px 24px rgba(229,9,20,0.36)' : '0 4px 12px rgba(0,0,0,0.6)',
                 }}
               >
-                <img src={thumbUrl} alt={m.title} loading="lazy" decoding="async" className="w-full h-full object-cover" />
-                <div className="absolute inset-0 flex items-end"
-                  style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.75) 0%, transparent 60%)' }}>
-                  <p className="text-white px-1.5 pb-1 leading-tight truncate"
-                    style={{ fontSize: 9, fontWeight: 700 }}>
+                <img 
+                  src={thumbUrl} 
+                  alt={m.title} 
+                  loading="lazy" 
+                  className={`w-full h-full object-cover transition-all duration-500 ${isActive ? 'scale-110 brightness-100' : 'brightness-50 group-hover:brightness-120'}`} 
+                />
+                <div className="absolute inset-0 flex items-end opacity-100"
+                  style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.9) 0%, transparent 70%)' }}>
+                  <p className="text-white px-2 pb-1.5 leading-tight truncate w-full text-left" style={{ fontSize: 10, fontWeight: isActive ? 700 : 500 }}>
                     {m.title}
                   </p>
                 </div>

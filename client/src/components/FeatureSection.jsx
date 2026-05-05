@@ -1,10 +1,9 @@
 import { ArrowRightIcon, ShowerHead } from 'lucide-react'
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import BlurCircle from './BlurCircle'
 import { fetchPopularMovies } from '../services/tmdb'
 import MovieCard from './MovieCard'
-import { useRef } from 'react'
 
 // feat: Component displaying featured movies section
 const FeatureSection = () => {
