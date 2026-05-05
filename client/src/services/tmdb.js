@@ -121,17 +121,29 @@ export const fetchPopularMovies = async (options = { includeDetails: false, deta
                             const vResp = await fetch(`${BASE_URL}/movie/${mv.id}/videos?api_key=${API_KEY}&language=en-US`);
                             if (!vResp.ok) continue;
                             const vData = await vResp.json();
-                            const trailer = Array.isArray(vData.results) && vData.results.find(v => v.type === 'Trailer' && (v.site === 'YouTube' || v.site === 'youtube'));
+                            const videos = Array.isArray(vData.results) ? vData.results : [];
+                            const officialCandidates = videos
+                                .filter(v => (v.site === 'YouTube' || v.site === 'youtube') && v.type === 'Trailer' && v.official)
+                                .filter(v => {
+                                    const n = (v.name || '').toLowerCase();
+                                    return !n.includes('short') && !n.includes('teaser') && !n.includes('clip') && !n.includes('tv spot');
+                                })
+                                .sort((a, b) => (b.size || 0) - (a.size || 0));
+
+                            const trailer = officialCandidates[0];
                             if (trailer) {
                                 const videoUrl = `https://www.youtube.com/watch?v=${trailer.key}`;
+                                const qualityLabel = trailer.size ? `${trailer.size}p` : 'HD';
                                 results.push({
                                     id: mv.id,
                                     title: mv.title || mv.name,
                                     overview: mv.overview,
                                     release_date: mv.release_date,
                                     poster_path: mv.poster_path ? `${IMAGE_BASE}/w500${mv.poster_path}` : null,
-                                    backdrop_path: mv.backdrop_path ? `${IMAGE_BASE}/w780${mv.backdrop_path}` : null,
+                                    backdrop_path: mv.backdrop_path ? `${IMAGE_BASE}/w1280${mv.backdrop_path}` : null,
                                     videoUrl,
+                                    videoName: trailer.name,
+                                    qualityLabel,
                                 });
                             }
                         } catch (e) {
