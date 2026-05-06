@@ -1,8 +1,9 @@
 import { createContext, useContext, useEffect, useCallback, useState } from 'react';
 import axios from 'axios';
-import { useAuth, useUser } from '@clerk/clerk-react';
+import { useAuth, useUser } from '@clerk/react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
+import { dummyShowsData } from '../assets/assets';
 
 const apiBaseUrl = (import.meta.env.VITE_BASE_URL || '').trim().replace(/\/+$/, '');
 axios.defaults.baseURL = apiBaseUrl;
@@ -17,7 +18,7 @@ export const AppProvider = ({ children }) => {
   const [isAdmin, setIsAdmin] = useState(false);
   const [shows, setShows] = useState([]);
   const [favoriteMovies, setFavoriteMovies] = useState([]);
-  
+
   const { user } = useUser();
   const { getToken } = useAuth();
   const location = useLocation();
@@ -27,50 +28,48 @@ export const AppProvider = ({ children }) => {
   const fetchIsAdmin = useCallback(async () => {
     try {
       const token = await getToken();
+      if (!token) return;
       const { data } = await axios.get('/api/admin/is-admin', {
         headers: { Authorization: `Bearer ${token}` }
       });
       setIsAdmin(data.isAdmin);
-      
       if (!data.isAdmin && location.pathname.startsWith('/admin')) {
         navigate('/');
         toast.error('You are not authorized to access admin dashboard.');
       }
-    } catch (error) {
-      console.error(error);
+    } catch {
+      // BE chưa sẵn sàng, bỏ qua
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [getToken, navigate]); 
+  }, [getToken, navigate, location.pathname]);
 
   const fetchShows = useCallback(async () => {
     try {
-      const { data } = await axios.get('/api/show/all');
-      if (data.success) {
-        setShows(data.shows);
-      } else {
-        toast.error(data.message);
-      }
-    } catch (error) {
-      console.error(error);
+      // TODO: Bỏ comment khi backend sẵn sàng
+      // const { data } = await axios.get('/api/show/all');
+      // if (data.success) setShows(data.shows);
+      // else toast.error(data.message);
+
+      setShows(dummyShowsData);
+    } catch {
+      // BE chưa sẵn sàng, bỏ qua
     }
   }, []);
 
   const fetchFavoriteMovies = useCallback(async () => {
     try {
       const token = await getToken();
+      if (!token) return;
       const { data } = await axios.get('/api/user/favorites', {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (data.success) {
         setFavoriteMovies(data.movies);
-      } else {
-        toast.error(data.message);
       }
-    } catch (error) {
-      console.error(error);
+    } catch {
+      // BE chưa sẵn sàng, bỏ qua
     }
   }, [getToken]);
-  
+
   useEffect(() => {
     if (user) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -87,14 +86,14 @@ export const AppProvider = ({ children }) => {
   const value = {
     axios,
     fetchIsAdmin,
-    user, 
-    getToken, 
-    navigate, 
-    isAdmin, 
+    user,
+    getToken,
+    navigate,
+    isAdmin,
     shows,
-    favoriteMovies, 
-    fetchFavoriteMovies, 
-    image_base_url
+    favoriteMovies,
+    fetchFavoriteMovies,
+    image_base_url,
   };
 
   return (

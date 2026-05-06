@@ -89,7 +89,7 @@ const Navbar = () => {
         </div>
 
         <div className='flex items-center gap-8'>
-          <SearchIcon className='max-md:hidden w-6 h-6 cursor-pointer hover:text-primary transition-colors'/>
+          <SearchIcon onClick={()=>{navigate('/movies'),scrollTo(0,0)}} className='max-md:hidden w-6 h-6 cursor-pointer hover:text-primary transition-colors'/>
           {
             !user ? (
                   <button onClick={openSignIn} className='px-4 py-1 sm:px-7 sm:py-2

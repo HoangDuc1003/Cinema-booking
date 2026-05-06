@@ -394,7 +394,7 @@ const TrailerSection = () => {
             <Loading />
           </div>
         ) : isLoading ? (
-          <p className='text-white-400 px-6 pb-4 text-4xl items-center'>Loading trailer...</p>
+          <p className='text-xl md:text-xl lg:text-xl font-semibold text-white mt-5 mb-55 justify-center text-center'>Loading trailer...</p>
         ) : null}
       </div>
     </div>

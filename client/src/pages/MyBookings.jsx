@@ -1,11 +1,12 @@
-import React from 'react'
+import React, { useState } from 'react'
 
-// feat: Component for displaying user booking history
 const MyBookings = () => {
+  const currency= import.meta.env.VITE_CURRENCY
+  const [bookings,setBooking] = useState([])
+  const [isLoading,setIsLoading] = useState(true)
   return (
     <div>
-      {/* TODO: Implement bookings list UI */}
-      MyBookings
+      
     </div>
   )
 }

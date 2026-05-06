@@ -5,7 +5,7 @@ import toast from 'react-hot-toast'
 import { useNavigate } from 'react-router-dom'
 
 const DateSelect = ({ id }) => {
-
+    
     const navigate = useNavigate();
     const [mockDates, setMockDates] = useState([]);
     const [selected, setSelected] = useState(null);
@@ -15,7 +15,7 @@ const DateSelect = ({ id }) => {
             return toast.error('Please select a date');
         }
         else {
-            navigate(`/movies/${id}/${selected}`);
+            navigate(`/movies/${id}/${selected.toISOString().split('T')[0]}`);
             window.scrollTo(0,0);
         }
     }
@@ -57,9 +57,10 @@ const DateSelect = ({ id }) => {
                             {mockDates.map((date, index) => (
                                 <button
                                     onClick={() => setSelected(date)}
-                                    key={index}
+                                    key={id}
                                     className={`flex flex-col items-center justify-center h-18 w-14 aspect-square rounded cursor-pointer border 
                                         transition-all ${
+                                        
                                         selected === date 
                                         ? "bg-primary text-white border-primary  hover:from-primary-dull hover:to-primary hover:shadow-xl hover:shadow-primary/60 hover:scale-105 active:scale-95 transition-all duration-300 border" 
                                         : "bg-white/5 border-transparent hover:bg-primary/20 hover:border-primary text-white hover:from-primary-dull hover:to-primary hover:shadow-xl hover:shadow-primary/60 hover:scale-105 active:scale-95 transition-all duration-300 border"

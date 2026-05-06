@@ -33,6 +33,7 @@ const App = () => {
           <Route path='/my-bookings' element={<MyBookings />} />
           <Route path='/favorite' element={<Favorite />} />
           <Route path='/my-movies' element={<MyMovies />} />
+          <Route path="/movies/:id/:date" element={<SeatLayout />} />
         </Routes>
       </Suspense>
       {/* Feature: footer */}

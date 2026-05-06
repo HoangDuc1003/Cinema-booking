@@ -14,7 +14,7 @@ const getImageUrl = (path, size = 'original') => {
 };
 
 const formatRuntime = (minutes) => {
-  if (!minutes) return 'N/A';
+  if (typeof minutes !== 'number' || Number.isNaN(minutes) || minutes <= 0) return 'N/A';
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   return `${h}h ${m}m`;
@@ -304,11 +304,11 @@ const HeroSection = () => {
 
             <div className="hero-meta hero-fade-up d2 flex items-center flex-wrap gap-5 text-[15px] font-medium text-white mb-6 cinematic-shadow">
               <span className="flex items-center gap-1.5"><CalendarIcon className="w-4 h-4" />{year}</span>
-              <span className="flex items-center gap-1.5"><ClockIcon className="w-4 h-4" />{runtimeStr}</span>
+              <span className="flex items-center gap-1.5"><ClockIcon className="w-4 h-4" />{runtimeStr || '—'}</span>
               <span className="flex items-center gap-1.5"><Star className="w-4 h-4 text-yellow-400 fill-yellow-400" />{rating}</span>
             </div>
 
-            <p className="hero-overview hero-fade-up d3 text-gray-200 text-base leading-relaxed mb-8 line-clamp-3  font-medium">
+            <p className="hero-overview hero-fade-up  text-gray-200 d3 text-base leading-relaxed mb-8 line-clamp-4  font-medium w-120">
               {movie.overview}
             </p>
 

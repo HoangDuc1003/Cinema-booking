@@ -41,6 +41,33 @@ export const fetchPopularMovies = async (options = { includeDetails: false, deta
             runtime: movie.runtime,
         }));
 
+        // Optionally fetch detailed info (runtime, genres, higher-res backdrops)
+        if (options && options.includeDetails) {
+            const limit = Math.min(Number(options.detailLimit) || 0, results.length);
+            if (limit > 0) {
+                const detailPromises = results.slice(0, limit).map(r =>
+                    fetch(`${BASE_URL}/movie/${r.id}?api_key=${API_KEY}&language=en-US&append_to_response=credits`)
+                        .then(res => res.ok ? res.json() : null)
+                        .catch(() => null)
+                );
+
+                const details = await Promise.all(detailPromises);
+                for (let i = 0; i < limit; i++) {
+                    const d = details[i];
+                    if (!d) continue;
+                    results[i] = {
+                        ...results[i],
+                        runtime: d.runtime ?? results[i].runtime,
+                        backdrop_original: d.backdrop_path ? `${IMAGE_BASE}/w1280${d.backdrop_path}` : results[i].backdrop_path,
+                        backdrop_w1280: d.backdrop_path ? `${IMAGE_BASE}/w1280${d.backdrop_path}` : results[i].backdrop_path,
+                        poster_path: d.poster_path ? `${IMAGE_BASE}/w500${d.poster_path}` : results[i].poster_path,
+                        vote_average: d.vote_average ?? results[i].vote_average,
+                        genres: d.genres ?? []
+                    };
+                }
+            }
+        }
+
         try {
             sessionStorage.setItem(cacheKey, JSON.stringify({ t: Date.now(), data: results }));
         } catch (e) {
