@@ -4,9 +4,7 @@ import { CalendarIcon, ClockIcon, Star, Play, Ticket } from 'lucide-react';
 import { fetchPopularMovies } from '../services/tmdb';
 import BlurCircle from './BlurCircle';
 import Loading from './Loading';
-/* =========================================
-   UTILITY FUNCTIONS
-   ========================================= */
+
 const getImageUrl = (path, size = 'original') => {
   if (!path) return '';
   if (path.startsWith('http')) return path;
@@ -30,9 +28,7 @@ const keepLastWordsTogether = (text = '', tailWords = 2) => {
   return head + ' ' + tail;
 };
 
-/* =========================================
-   PERFORMANCE-OPTIMIZED CSS ANIMATIONS
-   ========================================= */
+// CSS animations
 const STYLES = `
   /* Hardware-accelerated text fade up */
   @keyframes fadeSlideUp {
@@ -138,7 +134,7 @@ const HeroSection = () => {
   const navigate = useNavigate();
   const styleRef = useRef(false);
 
-  /* --- STATE MANAGEMENT --- */
+
   const [movies, setMovies] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -148,7 +144,7 @@ const HeroSection = () => {
   const [hideText, setHideText] = useState(false);
   const [flyKey, setFlyKey] = useState(0);
 
-  /*ANIMATION SEQUENCE LOGIC*/
+
   const switchTo = (getNextIndex) => {
     if (isFading) return;
     setIsFading(true);
@@ -164,7 +160,7 @@ const HeroSection = () => {
     setTimeout(() => setIsFading(false), 1200);
   };
 
-  /*DATA FETCHING & SETUP*/
+
   useEffect(() => {
     if (styleRef.current) return;
     styleRef.current = true;
@@ -201,7 +197,7 @@ const HeroSection = () => {
     switchTo(index);
   };
 
-  /*LOADING STATE*/
+
   if (isLoading || !movies.length) {
     return (
       <div className="h-screen w-full bg-[#0a0a0a] flex items-center justify-center text-white text-sm tracking-widest uppercase">
@@ -226,7 +222,7 @@ const HeroSection = () => {
   return (
     <div className="hero-section-container relative flex flex-col justify-center h-screen w-full overflow-hidden bg-[#0a0a0a] text-white">
       
-      {/*BACKGROUND & LIGHT EFFECTS*/}
+
       <div className="absolute inset-0 z-0">
         <img
           key={`bg-${currentIndex}`}
@@ -239,7 +235,7 @@ const HeroSection = () => {
         <div className="absolute inset-0 bg-black pointer-events-none will-change-opacity" 
              style={{ animation: 'cinematicBreathe 7s ease-in-out infinite', zIndex: 1 }} />
              
-        {/* Lớp đen bên trái (Đã giảm độ tối 50%) */}
+        {/* Left dark gradient */}
         <div className="absolute inset-0 pointer-events-none"
              style={{ background: 'linear-gradient(90deg, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0.3) 25%, transparent 60%)', zIndex: 2 }} />
 
@@ -252,7 +248,7 @@ const HeroSection = () => {
              style={{ background: 'radial-gradient(circle at center, transparent 30%, rgba(0,0,0,0.3) 100%)', mixBlendMode: 'overlay', zIndex: 3 }} />
       </div>
 
-      {/*PURE WHITE VERTICAL FLARE*/}
+
       <div
         key={`flare-${isFading}`}
         className="absolute inset-y-[-20%] right-0 w-[5vw] pointer-events-none"
@@ -279,7 +275,7 @@ const HeroSection = () => {
         }}
       />
 
-      {/*MAIN TEXT CONTENT*/}
+
       <div
         className="relative z-10 px-8 md:px-14 lg:px-20 mb-12 transition-opacity duration-300 ease-out"
         style={{ 
@@ -342,7 +338,7 @@ const HeroSection = () => {
           </div>
         )}
       </div>
-      {/*THUMBNAILS NAVIGATION*/}
+
       <div className="absolute bottom-8 left-8 md:left-14 lg:left-20 z-20 flex flex-col gap-3">
         <div className="flex items-center gap-2 mb-1">
           {movies.map((_, i) => (

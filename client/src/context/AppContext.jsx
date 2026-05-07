@@ -41,14 +41,14 @@ export const AppProvider = ({ children }) => {
 
   const fetchShows = useCallback(async () => {
     try {
-      // TODO: Bỏ comment khi backend sẵn sàng
+      // TODO: Uncomment when backend is ready
       // const { data } = await axios.get('/api/show/all');
       // if (data.success) setShows(data.shows);
       // else toast.error(data.message);
 
       setShows(dummyShowsData);
     } catch {
-      // BE chưa sẵn sàng, bỏ qua
+      // Backend not ready, skip
     }
   }, []);
 
@@ -63,7 +63,7 @@ export const AppProvider = ({ children }) => {
         setFavoriteMovies(data.movies);
       }
     } catch {
-      // BE chưa sẵn sàng, bỏ qua
+      // Backend not ready, skip
     }
   }, [getToken]);
 

@@ -1,4 +1,4 @@
-import { ArrowRightIcon, ShowerHead } from 'lucide-react'
+import { ArrowRightIcon } from 'lucide-react'
 import React, { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import BlurCircle from './BlurCircle'
@@ -6,19 +6,19 @@ import { fetchPopularMovies } from '../services/tmdb'
 import MovieCard from './MovieCard'
 import Loading from './Loading'
 
-// Feature: shows featured movies
+
 const FeatureSection = () => {
     const navigate = useNavigate();
     const styleRef = useRef(false);
 
-    // Store movies data
+
     const [movies, setMovies] = useState([]);
 
-    // Track loading status
+
     const [isLoading, setIsLoading] = useState(true);
     const [hasError, setHasError] = useState(false);
 
-    // Fetch data on mount
+
     useEffect(() => {
         const loadMovies = async () => {
             setIsLoading(true);
@@ -71,7 +71,7 @@ const FeatureSection = () => {
                 <Loading />
             ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 sm:gap-6 w-full">
-                    {/* Movies grid */}
+
                     {movies.map((show) => (
                         <MovieCard key={show._id} movie={show} />
                     ))}

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { dummyShowsData } from '../../assets/assets';
 import Loading from '../../components/Loading';
 import Title from '../../components/admin/Title';
-// 1. Sửa lại import cho đúng chuẩn
+
 import { StarIcon, XIcon, PlusIcon } from 'lucide-react'; 
 import { kConverter } from '../../lib/kConverter';
 
@@ -11,7 +11,7 @@ const AddShows = () => {
   const [nowPlayingMovies, setNowPlayingMovies] = useState([]);
   const [selectedMovie, setSelectedMovie] = useState(null);
   
-  // Lưu trữ ngày giờ dưới dạng Object: { "2025-05-10": ["10:00", "14:00"], ... }
+  // Date-time map: { "2025-05-10": ["10:00", "14:00"], ... }
   const [dateTimeSelection, setDateTimeSelection] = useState({}); 
   const [dateTimeInput, setDateTimeInput] = useState("");
   const [showPrice, setShowPrice] = useState("");
@@ -25,38 +25,38 @@ const AddShows = () => {
     fetchNowPlayingMovies();
   }, []);
 
-  // Hàm xử lý khi người dùng bấm thêm một ngày/giờ chiếu mới
+  // Add a new showtime
   const handleAddDateTime = () => {
     if (!dateTimeInput) return;
 
     const dateObj = new Date(dateTimeInput);
-    const dateStr = dateObj.toISOString().split('T')[0]; // Lấy ngày (YYYY-MM-DD)
-    const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); // Lấy giờ (HH:MM)
+    const dateStr = dateObj.toISOString().split('T')[0];
+    const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     setDateTimeSelection((prev) => {
       const updatedSelection = { ...prev };
-      // Nếu ngày này đã có trong danh sách, thêm giờ vào mảng
+      // Add time to existing date or create new date entry
       if (updatedSelection[dateStr]) {
         if (!updatedSelection[dateStr].includes(timeStr)) {
           updatedSelection[dateStr].push(timeStr);
         }
       } else {
-        // Nếu ngày mới, tạo mảng mới
+        
         updatedSelection[dateStr] = [timeStr];
       }
       return updatedSelection;
     });
 
-    setDateTimeInput(""); // Reset ô input
+    setDateTimeInput("");
   };
 
-  // Hàm xử lý xóa một giờ chiếu
+  // Remove a showtime
   const handleRemoveTime = (date, timeToRemove) => {
     setDateTimeSelection((prev) => {
       const updatedSelection = { ...prev };
       updatedSelection[date] = updatedSelection[date].filter(time => time !== timeToRemove);
       
-      // Nếu ngày đó không còn giờ nào, xóa luôn ngày đó đi
+      // Remove date if no times left
       if (updatedSelection[date].length === 0) {
         delete updatedSelection[date];
       }
@@ -64,19 +64,19 @@ const AddShows = () => {
     });
   };
 
-  // Hàm Submit giả lập
+  // Submit handler (mock)
   const handleSubmit = () => {
     if (!selectedMovie || !showPrice || Object.keys(dateTimeSelection).length === 0) {
-        alert("Vui lòng nhập đầy đủ phim, giá vé và ít nhất 1 suất chiếu!");
+        alert("Please fill in movie, price and at least 1 showtime!");
         return;
     }
-    console.log("Dữ liệu chuẩn bị gửi lên Server:", {
+    console.log("Data to submit:", {
         movieId: selectedMovie._id,
         price: showPrice,
         shows: dateTimeSelection
     });
-    alert("Thêm suất chiếu thành công (Xem console)!");
-    // Sau khi thêm xong, có thể reset form tại đây
+    alert("Shows added successfully (check console)!");
+    // Reset form here if needed
   };
 
   return nowPlayingMovies.length > 0 ? (
@@ -84,13 +84,13 @@ const AddShows = () => {
       <Title text1="Add " text2="Show" />
       <p className='mt-10 text-lg font-medium'>Now Playing Movies</p>
       
-      {/* 2. HIỂN THỊ DANH SÁCH PHIM */}
+      {/* Movie list */}
       <div className='overflow-x-auto pb-4'>
         <div className='group flex flex-wrap gap-4 mt-4 w-max'>
           {nowPlayingMovies.map((movie) => (
             <div 
                 key={movie.id} 
-                onClick={() => setSelectedMovie(movie)} // Xử lý chọn phim
+                onClick={() => setSelectedMovie(movie)}
                 className={`relative max-w-40 cursor-pointer transition duration-300 rounded-lg overflow-hidden border-2
                     ${selectedMovie?.id === movie.id ? 'border-primary' : 'border-transparent group-hover:not-hover:opacity-40 hover:-translate-y-1'}`}
             >
@@ -109,7 +109,7 @@ const AddShows = () => {
         </div>
       </div>
 
-      {/* 3. KHU VỰC FORM (Chỉ hiện khi đã chọn 1 bộ phim) */}
+      {/* Show form (visible when a movie is selected) */}
       {selectedMovie && (
         <div className='mt-10 max-w-4xl bg-primary/5 border border-primary/20 p-6 rounded-lg'>
             <h2 className='text-xl font-bold mb-6 text-white'>
@@ -117,7 +117,7 @@ const AddShows = () => {
             </h2>
 
             <div className='flex flex-col md:flex-row gap-6'>
-                {/* Cột nhập Giá */}
+                {/* Price input */}
                 <div className='flex-1'>
                     <label className='block text-sm font-medium text-gray-300 mb-2'>Show Price ({currency})</label>
                     <input 
@@ -129,7 +129,7 @@ const AddShows = () => {
                     />
                 </div>
 
-                {/* Cột nhập Ngày/Giờ */}
+                {/* Date/time input */}
                 <div className='flex-1'>
                     <label className='block text-sm font-medium text-gray-300 mb-2'>Select Date & Time</label>
                     <div className='flex items-center gap-3'>
@@ -149,7 +149,7 @@ const AddShows = () => {
                 </div>
             </div>
 
-            {/* Hiển thị các suất chiếu đã chọn */}
+            {/* Selected showtimes */}
             {Object.keys(dateTimeSelection).length > 0 && (
                 <div className='mt-8'>
                     <p className='text-gray-300 mb-3'>Selected Timings:</p>
@@ -174,7 +174,7 @@ const AddShows = () => {
                 </div>
             )}
 
-            {/* Nút Submit */}
+            {/* Submit button */}
             <div className='mt-8 text-right'>
                 <button 
                     onClick={handleSubmit}

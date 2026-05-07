@@ -17,7 +17,7 @@ const TrailerSection = () => {
 
   const currentTrailer = trailers[currentIndex] || null;
 
-  // ─── Gửi lệnh tới YouTube iframe thông qua postMessage ──
+  // Send commands to YouTube iframe via postMessage
   const ytCmd = (func) => {
     iframeRef.current?.contentWindow?.postMessage(
       JSON.stringify({ event: 'command', func, args: '' }),
@@ -37,7 +37,7 @@ const TrailerSection = () => {
     ytCmd(next ? 'pauseVideo' : 'playVideo');
   };
 
-  // ─── Xây dựng URL YouTube với các tham số loại bỏ UI thừa ──
+  // Build YouTube embed URL with clean parameters
   const buildEmbedUrl = (trailer) => {
     if (!trailer?.embedUrl && !trailer?.videoUrl) return '';
     try {
@@ -47,15 +47,15 @@ const TrailerSection = () => {
       url.searchParams.set('enablejsapi', '1');
       url.searchParams.set('rel', '0');
       url.searchParams.set('modestbranding', '1');
-      url.searchParams.set('controls', '0'); // Ẩn hoàn toàn thanh công cụ của YouTube
-      url.searchParams.set('iv_load_policy', '3'); // Ẩn các chú thích trên video
+      url.searchParams.set('controls', '0'); // Hide YouTube controls
+      url.searchParams.set('iv_load_policy', '3'); // Hide video annotations
       return url.toString();
     } catch {
       return trailer.embedUrl || trailer.videoUrl;
     }
   };
 
-  // ─── Inject styles với tỷ lệ Cinematic 21:9 được tính toán hoàn hảo ──
+  // Inject cinematic 21:9 aspect ratio styles
   useEffect(() => {
     if (styleRef.current) return;
     styleRef.current = true;
@@ -78,17 +78,17 @@ const TrailerSection = () => {
         background: #02050b;
       }
 
-      /* Sử dụng tỷ lệ phần trăm toán học để giấu toàn bộ viền đen trên dưới */
+      /* Crop 16:9 iframe to 21:9 aspect ratio */
       .video-crop {
         position: absolute;
-        top: -17.625%; /* Giấu chính xác phần viền 16:9 dư thừa */
+        top: -17.625%; /* Offset to hide 16:9 black bars */
         left: 0;
         right: 0;
         width: 100%;
-        height: 131.25%; /* Kéo giãn vừa đủ để nội dung lấp đầy khung 21:9 */
+        height: 131.25%; /* Scale to fill 21:9 frame */
       }
 
-      /* iframe nằm trọn vẹn trong thẻ crop */
+      /* iframe fills the crop container */
       .video-crop iframe {
         position: absolute !important;
         top: 0;
@@ -96,10 +96,10 @@ const TrailerSection = () => {
         width: 100% !important;
         height: 100% !important;
         border: none;
-        pointer-events: none; /* Khóa tương tác chuột để YouTube không can thiệp, dùng custom buttons */
+        pointer-events: none; /* Block mouse interaction, use custom buttons */
       }
 
-      /* Phần còn lại của CSS giữ nguyên */
+      /* Control buttons */
       .player-controls {
         position: absolute;
         top: 12px;
@@ -124,7 +124,7 @@ const TrailerSection = () => {
         transition: background .18s ease, transform .1s ease;
         backdrop-filter: blur(8px);
         -webkit-backdrop-filter: blur(8px);
-        pointer-events: auto; /* Đảm bảo nút vẫn bấm được */
+        pointer-events: auto; /* Ensure buttons are clickable */
       }
 
       .ctrl-btn:active { transform: scale(0.96); }

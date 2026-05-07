@@ -2,7 +2,7 @@ import React, { Suspense, lazy } from 'react'
 import Navbar from './components/Navbar'
 import { Route, Routes, useLocation } from 'react-router-dom'
 
-// Feature: lazy-loaded routes
+// Lazy-loaded routes
 const Home = lazy(() => import('./pages/Home'));
 const Movies = lazy(() => import('./pages/Movies'));
 const MovieDetails = lazy(() => import('./pages/MovieDetails'));
@@ -13,24 +13,23 @@ const MyMovies = lazy(() => import('./pages/MyMovies'));
 
 import { Toaster } from 'react-hot-toast'
 import Footer from './components/Footer'
-// Feat: admin
+// Admin pages
 import Layout from './pages/admin/Layout';
 import DashBoard from './pages/admin/DashBoard';
 import AddShows from './pages/admin/AddShows'
 import ListShows from './pages/admin/ListShows';
 import ListBookings from './pages/admin/ListBookings';
-// Feature: main App with routing
 const App = () => {
-  // Admin route check
+  // Hide navbar/footer on admin routes
   const isAdminRoute = useLocation().pathname.startsWith('/admin')
 
   return (
     <>
-      {/* App layout + toast */}
+
       <Toaster />
-      {/* Feature: navigation bar (hidden on admin routes) */}
+
       {!isAdminRoute && <Navbar />}
-      {/* Feature: routing */}
+
       <Suspense fallback={<div className="min-h-[60vh] flex items-center justify-center text-white">Loading...</div>}>
         <Routes>
           <Route path='/' element={<Home />} />
@@ -50,7 +49,7 @@ const App = () => {
           </Route>
         </Routes>
       </Suspense>
-      {/* Feature: footer */}
+
       {!isAdminRoute && <Footer />}
     </>
   )

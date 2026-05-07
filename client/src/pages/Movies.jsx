@@ -4,9 +4,9 @@ import MovieCard from '../components/MovieCard'
 import BlurCircle from '../components/BlurCircle'
 import Loading from '../components/Loading'
 
-// Feature: movies listing page
+
 const Movies = () => {
-  // chore: State management for movies list and loading
+
   const [movies, setMovies] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
@@ -20,7 +20,7 @@ const Movies = () => {
         setMovies(data);
         setHasError(false);
       } catch (error) {
-        // fix: Corrected error message grammar
+
         console.error("No movies available", error);
         setHasError(true);
       } finally {
@@ -41,7 +41,7 @@ const Movies = () => {
   // feat: Movies list or empty state
   return movies.length > 0 ? (
     <>
-      {/* Animation styles for gradient effect */}
+
       <style>
         {`
           @keyframes slowPulseBand {
@@ -54,10 +54,10 @@ const Movies = () => {
         `}
       </style>
 
-      {/* feat: Main movies grid container */}
+
       <div className='relative pt-30 mb-5 px-6 md:px-16 lg:px-40 xl:px-44 overflow-hidden min-h-[80vh]'>
 
-        {/* chore: Gradient background effect */}
+
         <div
           className="absolute left-1/2 -translate-x-1/2 w-[150%] h-45 rounded-[100%] blur-[120px] 
           animate-slow-pulse pointer-events-none"
@@ -69,13 +69,13 @@ const Movies = () => {
         <BlurCircle top='50px' left='400px' />
         <BlurCircle top='100px' right='0' />
 
-        {/* feat: Movies grid layout */}
+
         <div className="relative z-10">
-          {/* Section title */}
+
           <h1 className='text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-20'>
             Now Showing
           </h1>
-          {/* Movies grid */}
+
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6 w-full">
             {movies.map((movie) => (
               <MovieCard movie={movie} key={movie._id} />
@@ -86,7 +86,7 @@ const Movies = () => {
       </div>
     </>
   ) : (
-    // Empty state message
+
     <div className='min-h-[80vh] flex items-center justify-center'>
       <h1 className='text-3xl font-bold text-center text-white'>No movies available</h1>
     </div>

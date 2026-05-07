@@ -52,7 +52,7 @@ const SeatLayout = () => {
 
   const [selectedSeats, setSelectedSeats] = useState([])
   const [selectedTime, setSelectedTime] = useState(null)
-  const [selectedHall, setSelectedHall] = useState('') // ✅ Add hall selection state
+  const [selectedHall, setSelectedHall] = useState('') 
   const [show, setShow] = useState(null)
   const [isVisible, setIsVisible] = useState(false)
   const [occupiedSeats, setOccupiedSeats] = useState([])
@@ -61,7 +61,7 @@ const SeatLayout = () => {
   const [isLoading, setIsLoading] = useState(false)
   const imageBaseUrl = "https://image.tmdb.org/t/p/original";
 
-  // Seat configuration với pricing tiers
+  // Seat configuration with pricing tiers
   const seatRows = [
     { row: 'A', count: 9, type: 'front', label: 'Front Premium' },
     { row: 'B', count: 9, type: 'front', label: 'Front Premium' },
@@ -187,31 +187,31 @@ const SeatLayout = () => {
   }
   useEffect(() => {
     let mounted = true;
-    let timerId = null; // Thêm timerId để chạy hiệu ứng mượt mà
+    let timerId = null;
 
     const loadData = async () => {
-      setIsLoading(true); // Bật trạng thái loading
-      setIsVisible(false); // Reset lại hiệu ứng tàng hình khi đổi phim khác
+      setIsLoading(true);
+      setIsVisible(false);
 
       try {
-        // Gọi API lấy dữ liệu phim
+        // Fetch movie data
         const movieData = await fetchShow();
 
         if (!mounted) return;
 
-        // Lưu dữ liệu vào state
+        // Save data to state
         setShow(movieData);
 
-        // ✅ KÍCH HOẠT HIỆU ỨNG HIỂN THỊ (FADE-IN)
-        // Dùng setTimeout một chút xíu (100ms) để DOM kịp vẽ xong thì mới làm nó rõ dần lên
+        // Trigger fade-in after DOM renders
+        
         timerId = setTimeout(() => {
           if (mounted) setIsVisible(true);
         }, 100);
 
       } catch (error) {
-        console.error('Lỗi khi tải thông tin phim:', error);
+        console.error('Error loading movie data:', error);
       } finally {
-        if (mounted) setIsLoading(false); // Tắt loading
+        if (mounted) setIsLoading(false);
       }
     };
 
@@ -219,11 +219,11 @@ const SeatLayout = () => {
 
     return () => {
       mounted = false;
-      if (timerId) clearTimeout(timerId); // Dọn dẹp timer khi thoát trang
+      if (timerId) clearTimeout(timerId);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
-  // ✅ Update useEffect to fetch price when time selected
+  
   useEffect(() => {
     let mounted = true
     const loadPriceAndSeats = async () => {
@@ -328,7 +328,7 @@ const SeatLayout = () => {
     }
   }
 
-  // ✅ Add function to get unique halls from show data
+  
   const getAvailableHalls = () => {
     if (!show?.dateTime?.[date]) return []
     const halls = new Set()
@@ -339,7 +339,7 @@ const SeatLayout = () => {
     return Array.from(halls).sort()
   }
 
-  // ✅ Add function to get filtered times based on selected hall
+  
   const getFilteredTimes = () => {
     if (!show?.dateTime?.[date]) return []
 
@@ -348,7 +348,7 @@ const SeatLayout = () => {
     return show.dateTime[date].filter(item => item.hall === selectedHall)
   }
 
-  // ✅ Add hall selection handler
+  
   const handleHallSelect = (hall) => {
     setSelectedHall(hall)
     setSelectedTime(null) // Reset time selection when hall changes
@@ -384,16 +384,16 @@ const SeatLayout = () => {
   }
 
   const getSeatPrice = (row) => {
-    return showPrice || 0 // Tất cả seats cùng giá showPrice
+    return showPrice || 0
   }
 
-  // ✅ Update getSeatStyles - remove animate-pulse, sẽ dùng custom class
+  // Get seat button styles based on status
   const getSeatStyles = (status, rowType) => {
     const baseStyles = 'w-8 h-8 rounded-lg border-2 text-xs font-bold transition-all duration-300 transform relative overflow-hidden'
 
     switch (status) {
       case 'selected':
-        // ✅ Thêm sync-pulse class thay vì animate-pulse
+        
         return `${baseStyles} bg-gradient-to-br from-green-500 to-green-600 text-white border-green-400 shadow-lg shadow-green-500/50 sync-pulse`
       case 'occupied':
         return `${baseStyles} bg-gradient-to-br from-red-600 to-red-800 text-white border-red-500 cursor-not-allowed opacity-80`
@@ -409,7 +409,7 @@ const SeatLayout = () => {
     }
   }
 
-  // ✅ Update renderSeatRow với sync animation
+  // Render a single seat row
   const renderSeatRow = (rowData) => {
     const { row, count, type } = rowData // Remove price from destructuring
     const seats = []
@@ -439,13 +439,13 @@ const SeatLayout = () => {
         <div key={seatId} className="relative group">
           <button
             onClick={() => handleSeatClick(seatId)}
-            disabled={status === 'occupied'} // ✅ Disable until price loaded
+            disabled={status === 'occupied'} 
             className={getSeatStyles(status, type)}
           >
             {/* Seat number */}
             <span className="relative z-10">{i}</span>
 
-            {/* ✅ Sync glow effects */}
+            
             {status === 'selected' && (
               <>
                 <div className="absolute inset-0 bg-green-500/40 rounded-lg blur-sm sync-glow"></div>
@@ -454,7 +454,7 @@ const SeatLayout = () => {
               </>
             )}
 
-            {/* ✅ Updated tooltip với showPrice */}
+            {/* Seat tooltip */}
             {status !== 'occupied' && (
               <div className="absolute -top-12 left-1/2 transform -translate-x-1/2 bg-black/90 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none whitespace-nowrap z-20">
                 ${showPrice > 0 ? showPrice : '...'} • {seatId}
@@ -491,7 +491,7 @@ const SeatLayout = () => {
 
   return show ? (
     <div className="min-h-screen bg-black relative overflow-hidden">
-      {/* ✅ Inject custom styles */}
+      
       <style>{customStyles}</style>
 
       {/* Enhanced Background Effects */}
@@ -512,7 +512,7 @@ const SeatLayout = () => {
           }`}>
           <div className="bg-white/5 mt-10 backdrop-blur-xl rounded-3xl border border-white/10 p-8 lg:sticky lg:top-20 shadow-2xl">
 
-            {/* ✅ Step 1: Date Selection Header */}
+            
             <div className="flex items-center gap-4 mb-8">
               <div className="w-12 h-12 bg-linear-to-br from-primary/30 to-primary/10 rounded-2xl flex items-center justify-center backdrop-blur-sm">
                 <Calendar className="w-6 h-6 text-primary" />
@@ -530,7 +530,7 @@ const SeatLayout = () => {
               </div>
             </div>
 
-            {/* ✅ Step 2: Hall Selection (Second) */}
+            
             <div className="mb-8">
               <h4 className="text-white font-semibold mb-4 flex items-center gap-2">
                 <MapPin className="w-5 h-5 text-primary" />
@@ -579,7 +579,7 @@ const SeatLayout = () => {
               )}
             </div>
 
-            {/* ✅ Step 3: Time Selection (Third) */}
+            
             <div className="mb-8">
               <h4 className="text-white font-semibold mb-4 flex items-center gap-2">
                 <ClockIcon className="w-5 h-5 text-primary" />
@@ -661,7 +661,7 @@ const SeatLayout = () => {
                       <span className="font-medium">{Number(show.vote_average ?? 0).toFixed(1)}</span>
                     </div>
 
-                    {/* ✅ Show progress steps */}
+                    
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
                         <Calendar className="w-4 h-4 text-primary" />
@@ -691,7 +691,7 @@ const SeatLayout = () => {
               </div>
             </div>
 
-            {/* ✅ Enhanced Pricing Info */}
+            {/* Pricing Info */}
             <div className="mt-6 space-y-3">
               <h5 className="text-white font-semibold mb-3">Seat Pricing</h5>
               <div className="space-y-2 text-sm">
@@ -731,7 +731,7 @@ const SeatLayout = () => {
             </h1>
             <p className="text-gray-400 text-lg">Choose your preferred seats for the best cinema experience</p>
 
-            {/* ✅ Progress indicator */}
+            
             <div className="mt-6 flex justify-center">
               <div className="flex items-center gap-4 bg-white/5 backdrop-blur-sm rounded-2xl px-6 py-3 border border-white/10">
                 <div className="flex items-center gap-2">
@@ -812,14 +812,14 @@ const SeatLayout = () => {
             </div>
           </div>
 
-          {/* Enhanced Legend với sync animation */}
+          {/* Legend */}
           <div className="flex justify-center gap-12 mb-12">
             <div className="flex items-center gap-3">
               <div className="w-6 h-6 bg-transparent border-2 border-gray-600 rounded-lg"></div>
               <span className="text-gray-400 font-medium">Available</span>
             </div>
             <div className="flex items-center gap-3">
-              {/* ✅ Sync animation cho legend */}
+              
               <div className="w-6 h-6 bg-linear-to-br from-green-500 to-green-600 rounded-lg shadow-lg shadow-green-500/30 sync-pulse"></div>
               <span className="text-gray-400 font-medium">Selected</span>
             </div>
@@ -854,7 +854,7 @@ const SeatLayout = () => {
                 <span className="text-gray-400 font-medium">Selected Seats:</span>
                 <div className="flex gap-2 flex-wrap">
                   {selectedSeats.map(seat => (
-                    /* ✅ Sync animation cho selected seat tags */
+                    
                     <span key={seat} className="px-3 py-1 bg-green-500/20 text-green-400 rounded-lg text-sm font-bold border border-green-500/30 sync-pulse">
                       {seat}
                     </span>

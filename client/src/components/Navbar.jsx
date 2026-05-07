@@ -25,7 +25,7 @@ const Navbar = () => {
     { name: 'Favorites', path: '/favorite' },
   ];
 
-  // Feature: change navbar style when page is scrolled
+  // Change navbar style on scroll
   useEffect(() => {
     const handleScroll = () => {
       if (tickingRef.current) return;
@@ -48,7 +48,7 @@ const Navbar = () => {
         ? 'py-3 bg-black/60 backdrop-blur-md border-white/10 shadow-lg' 
         : 'py-5 bg-black/0 backdrop-blur-none border-transparent'
     }`}>
-      {/* Logo links to home */}
+      
       <Link to='/' className='max-md:flex-1 group transition-transform duration-300 hover:scale-105' >
         <img src={assets.logo} alt="logo" className='w-50 h-auto' />
         </Link>

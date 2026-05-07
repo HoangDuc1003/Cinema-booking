@@ -52,7 +52,7 @@
 
       <div className='px-6 md:px-6 lg:px-40 pt-30 md:pt-40'>
         
-        {/* chore: Gradient background effect */}
+
         <div
           className="absolute left-1/2 -translate-x-1/2 w-[150%] h-45 rounded-[100%] blur-[120px] 
             animate-slow-pulse pointer-events-none"
@@ -112,11 +112,11 @@
         <div className='relative px-6 md:px-16 lg:px-40 xl:px-44 overflow-hidden mb-10'>
 
         </div>
-        {/* chore: Decorative blur circles */}
+
         <BlurCircle top='150px' left='0' />
         <BlurCircle bottom='50px' right='50px' />
         <div className="grid sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6 w-full ">
-          {/* feat: Responsive movie grid layout */}
+
           {movies.map((show) => (
             <MovieCard key={show._id} movie={show} />
           ))}
