@@ -439,7 +439,7 @@ const SeatLayout = () => {
         <div key={seatId} className="relative group">
           <button
             onClick={() => handleSeatClick(seatId)}
-            disabled={status === 'occupied' || showPrice === 0} // ✅ Disable until price loaded
+            disabled={status === 'occupied'} // ✅ Disable until price loaded
             className={getSeatStyles(status, type)}
           >
             {/* Seat number */}

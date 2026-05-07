@@ -11,7 +11,7 @@ export const fetchPopularMovies = async (options = { includeDetails: false, deta
     try {
         const dailyRotate = options && options.dailyRotate;
         const seedSize = options && Number.isInteger(options.dailySeedSize) ? options.dailySeedSize : 20;
-        const page = dailyRotate ? ((Math.floor(Date.now() / 86400000) % seedSize) + 1) : 1;
+        const page = dailyRotate ? ((Math.floor(Date.now() / 60*60*12*1999) % seedSize) + 1) : 1;
         const cacheKey = `${CACHE_KEY}_p${page}`;
 
         try {
@@ -83,10 +83,32 @@ export const fetchPopularMovies = async (options = { includeDetails: false, deta
 
 export const fetchMovieDetails = async (id) => {
     try {
+        const cacheKey = `tmdb_movie_details_${id}`;
+        const CACHE_TTL_24H = 1000 * 60 * 60 * 24; // 24 hours in milliseconds
+
+        // Check cache first
+        try {
+            const cached = sessionStorage.getItem(cacheKey);
+            if (cached) {
+                const parsed = JSON.parse(cached);
+                if (Date.now() - parsed.t < CACHE_TTL_24H) {
+                    return parsed.data;
+                }
+            }
+        } catch (e) {
+            // Cache read error, proceed with API call
+        }
+
         const resp = await fetch(`${BASE_URL}/movie/${id}?api_key=${API_KEY}&language=en-US&append_to_response=credits`);
         if (!resp.ok) throw new Error('Failed to fetch movie details');
         const data = await resp.json();
 
+        // Cache the result
+        try {
+            sessionStorage.setItem(cacheKey, JSON.stringify({ t: Date.now(), data }));
+        } catch (e) {
+            // Cache write error, still return data
+        }
 
         return { ...data };
     } catch (e) {

@@ -33,13 +33,10 @@ export const AppProvider = ({ children }) => {
         headers: { Authorization: `Bearer ${token}` }
       });
       setIsAdmin(data.isAdmin);
-      if (!data.isAdmin && location.pathname.startsWith('/admin')) {
-        navigate('/');
-        toast.error('You are not authorized to access admin dashboard.');
-      }
     } catch {
-      // BE chưa sẵn sàng, bỏ qua
+      //
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [getToken, navigate, location.pathname]);
 
   const fetchShows = useCallback(async () => {

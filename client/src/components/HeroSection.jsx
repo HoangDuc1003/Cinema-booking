@@ -46,7 +46,19 @@ const STYLES = `
     50%      { opacity: 0.2; } 
   }
   
-  /* Pure White Vertical Flare (Tâm sáng ở ngay mép phải màn hình) */
+  @keyframes panRight {
+  0% { 
+    transform: scale(1.1) translateX(-2%); 
+  }
+  100% { 
+    transform: scale(1.1) translateX(2%); 
+  }
+}
+
+.animate-pan-right {
+  animation: panRight 10s linear forwards; 
+}
+
   @keyframes verticalWhiteFlare {
     0%   { opacity: 0; transform: translateX(50%) scaleX(0.1) scaleY(1); }
     30%  { opacity: 1; transform: translateX(50%) scaleX(3.5) scaleY(1.1); } 
@@ -101,6 +113,7 @@ const STYLES = `
     -moz-osx-font-smoothing: grayscale;
     -webkit-text-size-adjust: 100%;
   }
+    
 
   .hero-backdrop {
     will-change: transform, opacity;
@@ -219,7 +232,7 @@ const HeroSection = () => {
           key={`bg-${currentIndex}`}
           src={bgUrl}
           alt={movie.title}
-          className="hero-backdrop w-full h-full object-cover object-center"
+          className="hero-backdrop w-full h-full object-cover object-center animate-pan-right"
           style={{ opacity: 1 }} 
         />
         {/* Soft Breathing Dark Layer */}

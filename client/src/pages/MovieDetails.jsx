@@ -50,7 +50,7 @@
     return show ? (
       
 
-      <div className='px-6 md:px-6 lg:px-40 pt-30 md:pt-50'>
+      <div className='px-6 md:px-6 lg:px-40 pt-30 md:pt-40'>
         
         {/* chore: Gradient background effect */}
         <div

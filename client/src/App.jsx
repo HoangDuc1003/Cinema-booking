@@ -1,6 +1,7 @@
 import React, { Suspense, lazy } from 'react'
 import Navbar from './components/Navbar'
 import { Route, Routes, useLocation } from 'react-router-dom'
+
 // Feature: lazy-loaded routes
 const Home = lazy(() => import('./pages/Home'));
 const Movies = lazy(() => import('./pages/Movies'));
@@ -9,9 +10,15 @@ const SeatLayout = lazy(() => import('./pages/SeatLayout'));
 const Favorite = lazy(() => import('./pages/Farvorite'));
 const MyBookings = lazy(() => import('./pages/MyBookings'));
 const MyMovies = lazy(() => import('./pages/MyMovies'));
+
 import { Toaster } from 'react-hot-toast'
 import Footer from './components/Footer'
-
+// Feat: admin
+import Layout from './pages/admin/Layout';
+import DashBoard from './pages/admin/DashBoard';
+import AddShows from './pages/admin/AddShows'
+import ListShows from './pages/admin/ListShows';
+import ListBookings from './pages/admin/ListBookings';
 // Feature: main App with routing
 const App = () => {
   // Admin route check
@@ -34,6 +41,13 @@ const App = () => {
           <Route path='/favorite' element={<Favorite />} />
           <Route path='/my-movies' element={<MyMovies />} />
           <Route path="/movies/:id/:date" element={<SeatLayout />} />
+          <Route path="/admin/*" element={<Layout />}>
+            <Route index element={<DashBoard />} />
+            <Route path="add-shows" element={<AddShows />} />
+            <Route path="list-shows" element={<ListShows />} />
+            <Route path="add-bookings" element={<AddShows />} />
+            <Route path="list-bookings" element={<ListBookings />} />
+          </Route>
         </Routes>
       </Suspense>
       {/* Feature: footer */}
