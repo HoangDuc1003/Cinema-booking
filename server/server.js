@@ -15,12 +15,15 @@ const port  = 3000;
 
 await connectDB()
 
-app.use('/api/inngest', serve({ client: inngest, functions }));
 
 // 2. MIDDLEWARE KHÁC
 app.use(express.json())
 app.use(cors())
+
+app.use('/api/inngest', serve({ client: inngest, functions }));
+
 app.use(clerkMiddleware())
+
 
 // api route 
 app.get('/',(req,res)=>res.send('Server is live!'))
