@@ -15,13 +15,16 @@ const port  = 3000;
 
 await connectDB()
 
-//middleware
+app.use('/api/inngest', serve({ client: inngest, functions }));
+
+// 2. MIDDLEWARE KHÁC
 app.use(express.json())
 app.use(cors())
 app.use(clerkMiddleware())
 
-//api route 
+// api route 
 app.get('/',(req,res)=>res.send('Server is live!'))
-app.use("/api/inngest", serve({ client: inngest, functions }));
+
 app.listen(port, ()=> console.log(`Server is listening at http://localhost:${port}`));
 
+export default app;
