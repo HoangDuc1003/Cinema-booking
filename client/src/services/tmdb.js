@@ -139,7 +139,7 @@ export const fetchLatestTrailers = async (opts = { limit: 10, ttlHours: 2, pages
                         release_date: mv.release_date,
                         backdrop_path: mv.backdrop_path ? `${IMAGE_BASE}/w1280${mv.backdrop_path}` : null,
                         videoUrl: `https://www.youtube.com/embed/${video.key}`,
-                        thumbnail: `https://img.youtube.com/vi/${video.key}/maxresdefault.jpg`,
+                        thumbnail: `https://img.youtube.com/vi/${video.key}/hqdefault.jpg`,
                         videoName: video.name,
                         qualityLabel: '1080p'
                     });

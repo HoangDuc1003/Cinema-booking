@@ -1,56 +1,73 @@
-import {Inngest} from 'inngest';
+import { Inngest } from 'inngest';
+import connectDB from '../configs/db.js';
 import User from '../models/User.js';
-// create a client to send and receive events
-export const inngest = new Inngest({id:"Cinema-booking"});
-//inngest functions to save uses data to DataBase
+
+// Create Inngest client
+export const inngest = new Inngest({ id: "Cinema-booking" });
+
+// Sync user creation from Clerk to MongoDB
 const syncUserCreation = inngest.createFunction(
     {
-        id: 'sync-user-from-clerk' ,
-        triggers:[{ event: 'clerk/user.created' }]
+        id: 'sync-user-from-clerk',
+        triggers: [{ event: 'clerk/user.created' }]
     },
-    async ({event}) =>{
-        const {id,first_name,last_name,email_address,image_url} = event.data
+    async ({ event }) => {
+        await connectDB();
+
+        const { id, first_name, last_name, email_addresses, image_url } = event.data;
+
         const userData = {
-            _id:id,
-            email:email_address[0].email_address,
-            name:first_name+' '+last_name,
-            image:image_url
-        }
-        await User.create(userData)
+            _id: id,
+            email: email_addresses?.[0]?.email_address || '',
+            name: `${first_name || ''} ${last_name || ''}`.trim() || 'User',
+            image: image_url || ''
+        };
+
+        await User.create(userData);
+        return { success: true, userId: id };
     }
-)
-//inngest functions to delete uses from DataBase
+);
+
+// Delete user from MongoDB when deleted in Clerk
 const syncUserDeletion = inngest.createFunction(
     {
-        id: 'delete-user-with-clerk' ,
-        triggers:[{ event: 'clerk/user.deleted' }]
+        id: 'delete-user-with-clerk',
+        triggers: [{ event: 'clerk/user.deleted' }]
     },
-    async ({event}) =>{
-        const{id} = event.data
-        await User.findByIdAndDelete(id)
-    }
-)
-//inngest functions to update uses from DataBase
-const syncUsersyncUserUpdation = inngest.createFunction(
-    {
-        id: 'update-user-from-clerk' ,
-        triggers:[{ event: 'clerk/user.updated' }]
-    },
-    async ({event}) =>{
-        const {id,first_name,last_name,email_address,image_url} = event.data
-        const userData = {
-            _id:id,
-            email:email_address[0].email_address,
-            name:first_name+' '+last_name,
-            image:image_url
-        }
-        await User.findByIdAndUpdate(id,userData)
-    }
-)
+    async ({ event }) => {
+        await connectDB();
 
-//create an empty array where we'll export future inngest functions
-export const functions =[
+        const { id } = event.data;
+        const result = await User.findByIdAndDelete(id);
+        return { success: true, deleted: !!result, userId: id };
+    }
+);
+
+// Update user in MongoDB when updated in Clerk
+const syncUserUpdation = inngest.createFunction(
+    {
+        id: 'update-user-from-clerk',
+        triggers: [{ event: 'clerk/user.updated' }]
+    },
+    async ({ event }) => {
+        await connectDB();
+
+        const { id, first_name, last_name, email_addresses, image_url } = event.data;
+
+        const userData = {
+            email: email_addresses?.[0]?.email_address || '',
+            name: `${first_name || ''} ${last_name || ''}`.trim() || 'User',
+            image: image_url || ''
+        };
+
+        await User.findByIdAndUpdate(id, userData);
+        return { success: true, userId: id };
+    }
+);
+
+// Export all functions for the Inngest serve handler
+export const functions = [
     syncUserCreation,
     syncUserDeletion,
-    syncUsersyncUserUpdation
+    syncUserUpdation
 ];
