@@ -36,7 +36,3 @@ lerna-debug.log*
 .vscode/*
 !.vscode/extensions.json
 .idea/
-
-# ---Fix comment ---
-fix_comments.ps1
-fix_comments.js
