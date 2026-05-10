@@ -1,7 +1,7 @@
 import React, { Suspense, lazy } from 'react'
 import Navbar from './components/Navbar'
 import { Route, Routes, useLocation } from 'react-router-dom'
-
+import { SignIn } from '@clerk/react';
 // Lazy-loaded routes
 const Home = lazy(() => import('./pages/Home'));
 const Movies = lazy(() => import('./pages/Movies'));
@@ -19,10 +19,11 @@ import DashBoard from './pages/admin/DashBoard';
 import AddShows from './pages/admin/AddShows'
 import ListShows from './pages/admin/ListShows';
 import ListBookings from './pages/admin/ListBookings';
+import { useAppContext } from './context/AppContext';
 const App = () => {
   // Hide navbar/footer on admin routes
   const isAdminRoute = useLocation().pathname.startsWith('/admin')
-
+  const {user} = useAppContext ()
   return (
     <>
 
@@ -40,7 +41,11 @@ const App = () => {
           <Route path='/favorite' element={<Favorite />} />
           <Route path='/my-movies' element={<MyMovies />} />
           <Route path="/movies/:id/:date" element={<SeatLayout />} />
-          <Route path="/admin/*" element={<Layout />}>
+          <Route path="/admin/*" element={user?<Layout />:(
+            <div className='min-h-screen flex justify-center items-center'>
+              <SignIn fallbackRedirecUrl={'/admin'}/>
+            </div>
+          )}>
             <Route index element={<DashBoard />} />
             <Route path="add-shows" element={<AddShows />} />
             <Route path="list-shows" element={<ListShows />} />

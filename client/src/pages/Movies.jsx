@@ -16,7 +16,7 @@ const Movies = () => {
     const loadMovies = async () => {
       try {
         setIsLoading(true);
-        const data = await fetchPopularMovies();
+        const data = await fetchPopularMovies({ dailyRotate: true, dailySeedSize: 20, pages: 2, maxAdult: 2 });
         setMovies(data);
         setHasError(false);
       } catch (error) {

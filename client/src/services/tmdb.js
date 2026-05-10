@@ -6,33 +6,57 @@ const IMAGE_BASE = 'https://image.tmdb.org/t/p';
 // Cache settings
 const CACHE_KEY = 'tmdb_popular_v1';
 const CACHE_TTL = 1000 * 60 * 15;
+const CACHE_TTL_DAILY = 1000 * 60 * 60 * 24; // 24 hours for daily rotation
 
-export const fetchPopularMovies = async (options = { includeDetails: false, detailLimit: 10, dailyRotate: false, dailySeedSize: 20 }) => {
+export const fetchPopularMovies = async (options = { includeDetails: false, detailLimit: 10, dailyRotate: false, dailySeedSize: 20, pages: 1, maxAdult: 2 }) => {
     try {
         const dailyRotate = options && options.dailyRotate;
         const seedSize = options && Number.isInteger(options.dailySeedSize) ? options.dailySeedSize : 20;
-        const page = dailyRotate ? ((Math.floor(Date.now() / 60*60*12*1999) % seedSize) + 1) : 1;
-        const cacheKey = `${CACHE_KEY}_p${page}`;
+        const basePage = dailyRotate ? ((Math.floor(Date.now() / (1000 * 60 * 60 * 24)) % seedSize) + 1) : 1;
+        const totalPages = options?.pages || 1;
+        const maxAdult = options?.maxAdult ?? 2;
+        const cacheKey = `${CACHE_KEY}_p${basePage}_n${totalPages}`;
+
+        // Use localStorage for daily rotation (persists across tab closes), sessionStorage otherwise
+        const storage = dailyRotate ? localStorage : sessionStorage;
+        const ttl = dailyRotate ? CACHE_TTL_DAILY : CACHE_TTL;
 
         try {
-            const cached = sessionStorage.getItem(cacheKey);
+            const cached = storage.getItem(cacheKey);
             if (cached) {
                 const parsed = JSON.parse(cached);
-                if (Date.now() - parsed.t < CACHE_TTL) return parsed.data;
+                if (Date.now() - parsed.t < ttl) return parsed.data;
             }
         } catch (e) {
             //
         }
 
-        const response = await fetch(`${BASE_URL}/movie/popular?api_key=${API_KEY}&language=en-US&page=${page}`);
-        if (!response.ok) throw new Error('Network error!');
-        const data = await response.json();
+        // Fetch one or more pages
+        let allMovies = [];
+        for (let p = 0; p < totalPages; p++) {
+            const pageNum = basePage + p;
+            const response = await fetch(`${BASE_URL}/movie/popular?api_key=${API_KEY}&language=en-US&include_adult=false&page=${pageNum}`);
+            if (!response.ok) throw new Error('Network error!');
+            const data = await response.json();
+            allMovies.push(...data.results);
+        }
 
-        let results = data.results.map((movie) => ({
+        // Filter adult content: allow at most maxAdult adult-flagged movies
+        let adultCount = 0;
+        allMovies = allMovies.filter(movie => {
+            if (movie.adult) {
+                adultCount++;
+                return adultCount <= maxAdult;
+            }
+            return true;
+        });
+
+        let results = allMovies.map((movie) => ({
             _id: movie.id.toString(),
             id: movie.id,
             title: movie.title,
             overview: movie.overview,
+            adult: movie.adult || false,
             poster_path: movie.poster_path ? `${IMAGE_BASE}/w500${movie.poster_path}` : null,
             backdrop_path: movie.backdrop_path ? `${IMAGE_BASE}/w780${movie.backdrop_path}` : null,
             release_date: movie.release_date,
@@ -69,7 +93,7 @@ export const fetchPopularMovies = async (options = { includeDetails: false, deta
         }
 
         try {
-            sessionStorage.setItem(cacheKey, JSON.stringify({ t: Date.now(), data: results }));
+            storage.setItem(cacheKey, JSON.stringify({ t: Date.now(), data: results }));
         } catch (e) {
             //
         }
@@ -137,6 +161,7 @@ export const fetchLatestTrailers = async (opts = { limit: 10, ttlHours: 2, pages
                         title: mv.title,
                         overview: mv.overview,
                         release_date: mv.release_date,
+                        vote_average: mv.vote_average,
                         backdrop_path: mv.backdrop_path ? `${IMAGE_BASE}/w1280${mv.backdrop_path}` : null,
                         videoUrl: `https://www.youtube.com/embed/${video.key}`,
                         thumbnail: `https://img.youtube.com/vi/${video.key}/hqdefault.jpg`,

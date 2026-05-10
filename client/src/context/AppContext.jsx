@@ -1,101 +1,103 @@
-import { createContext, useContext, useEffect, useCallback, useState } from 'react';
-import axios from 'axios';
-import { useAuth, useUser } from '@clerk/react';
-import { useLocation, useNavigate } from 'react-router-dom';
-import toast from 'react-hot-toast';
-import { dummyShowsData } from '../assets/assets';
+import { createContext, useContext, useEffect, useState, useCallback } from "react"
+import axios from "axios";
+import { useUser, useAuth } from "@clerk/react";
+import { useLocation, useNavigate } from "react-router-dom";
+import toast from 'react-hot-toast'
 
-const apiBaseUrl = (import.meta.env.VITE_BASE_URL || '').trim().replace(/\/+$/, '');
-axios.defaults.baseURL = apiBaseUrl;
-
+axios.defaults.baseURL = import.meta.env.VITE_BASE_URL
 // eslint-disable-next-line react-refresh/only-export-components
-export const AppContext = createContext();
-
-// eslint-disable-next-line react-refresh/only-export-components
-export const useAppContext = () => useContext(AppContext);
+export const AppContext = createContext()
 
 export const AppProvider = ({ children }) => {
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [shows, setShows] = useState([]);
-  const [favoriteMovies, setFavoriteMovies] = useState([]);
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [shows, setShows] = useState([])
+  const [favoriteMovies, setFavoriteMovies] = useState([])
 
-  const { user } = useUser();
-  const { getToken } = useAuth();
-  const location = useLocation();
-  const navigate = useNavigate();
-  const image_base_url = import.meta.env.VITE_TMDB_IMAGE_BASE_URL;
+  const { user } = useUser()
+  const { getToken } = useAuth()
+  const location = useLocation()
+  const navigate = useNavigate()
 
-  const fetchIsAdmin = useCallback(async () => {
-    try {
-      const token = await getToken();
-      if (!token) return;
-      const { data } = await axios.get('/api/admin/is-admin', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      setIsAdmin(data.isAdmin);
-    } catch {
-      //
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [getToken, navigate, location.pathname]);
-
+  // 1. Hàm lấy danh sách show (Dùng useCallback bọc lại)
   const fetchShows = useCallback(async () => {
     try {
-      // TODO: Uncomment when backend is ready
-      // const { data } = await axios.get('/api/show/all');
-      // if (data.success) setShows(data.shows);
-      // else toast.error(data.message);
-
-      setShows(dummyShowsData);
-    } catch {
-      // Backend not ready, skip
+      const { data } = await axios.get('api/show/all');
+      if (data.success) {
+        setShows(data.shows);
+      } else {
+        toast.error(data.message);
+      }
+    } catch (error) {
+      console.error(error);
     }
   }, []);
 
+  const fetchIsAdmin = useCallback(async () => {
+    try {
+      const { data } = await axios.get('/api/admin/is-admin', {
+        headers: { Authorization: `Bearer ${await getToken()}` }
+      });
+      setIsAdmin(data.isAdmin);
+
+      if (!data.isAdmin && location.pathname.startsWith('/admin')) {
+        navigate('/');
+        toast.error("You are not authorized to access the admin dashboard");
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  }, [getToken, location.pathname, navigate]);
+
   const fetchFavoriteMovies = useCallback(async () => {
     try {
-      const token = await getToken();
-      if (!token) return;
-      const { data } = await axios.get('/api/user/favorites', {
-        headers: { Authorization: `Bearer ${token}` }
+      const { data } = await axios.get('/api/user/favorite', {
+        headers: { Authorization: `Bearer ${await getToken()}` } 
       });
       if (data.success) {
         setFavoriteMovies(data.movies);
+      } else {
+        toast.error(data.message);
       }
-    } catch {
-      // Backend not ready, skip
+    } catch (error) {
+      console.error(error);
     }
   }, [getToken]);
-
   useEffect(() => {
-    if (user) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      fetchIsAdmin();
-      fetchFavoriteMovies();
-    }
-  }, [user, fetchIsAdmin, fetchFavoriteMovies]);
+    const loadShows = async () => {
+      await fetchShows();
+    };
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchShows();
+    loadShows(); 
   }, [fetchShows]);
+  useEffect(() => {
+    const loadUserData = async () => {
+      if (user) {
+        await fetchIsAdmin();
+        await fetchFavoriteMovies();
+      }
+    };
+    loadUserData(); 
+  }, [user, fetchIsAdmin, fetchFavoriteMovies]);
 
   const value = {
     axios,
-    fetchIsAdmin,
     user,
     getToken,
     navigate,
     isAdmin,
     shows,
     favoriteMovies,
-    fetchFavoriteMovies,
-    image_base_url,
-  };
+    fetchShows, 
+    fetchIsAdmin,
+    fetchFavoriteMovies
+  }
 
   return (
     <AppContext.Provider value={value}>
       {children}
     </AppContext.Provider>
-  );
-};
+  )
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export const useAppContext = () => useContext(AppContext) 

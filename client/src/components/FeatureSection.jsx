@@ -24,7 +24,7 @@ const FeatureSection = () => {
             setIsLoading(true);
             try {
                 setHasError(false);
-                const data = await fetchPopularMovies();
+                const data = await fetchPopularMovies({ dailyRotate: true, dailySeedSize: 20 });
                 setMovies((Array.isArray(data) ? data.slice(0, 10) : []));
             } catch (e) {
                 console.error('FeatureSection load error', e);

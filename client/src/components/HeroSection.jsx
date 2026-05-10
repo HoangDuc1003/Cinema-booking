@@ -228,7 +228,7 @@ const HeroSection = () => {
           key={`bg-${currentIndex}`}
           src={bgUrl}
           alt={movie.title}
-          className="hero-backdrop w-full h-full object-cover object-center animate-pan-right"
+          className="hero-backdrop w-full h-full object-cover object-center animate-pan-right align-top"
           style={{ opacity: 1 }} 
         />
         {/* Soft Breathing Dark Layer */}
@@ -299,7 +299,7 @@ const HeroSection = () => {
             )}
 
             <h1 className="d1 hero-title font-black leading-[1.1] mb-5 cinematic-shadow text-white" 
-                style={{ fontSize: 'clamp(36px, 4.5vw, 68px)', wordBreak: 'normal', overflowWrap: 'normal' }}>
+                style={{ fontSize: 'clamp(36px, 4.5vw, 54px)', wordBreak: 'normal', overflowWrap: 'normal' }}>
               {titleWords.map((word, wIndex) => {
                 const animName = wIndex % 2 === 0 ? 'charFromLeft' : 'charFromRight';
                 return (
@@ -317,13 +317,13 @@ const HeroSection = () => {
               <span className="flex items-center gap-1.5"><Star className="w-4 h-4 text-yellow-400 fill-yellow-400" />{rating}</span>
             </div>
 
-            <p className="hero-overview hero-fade-up  text-gray-200 d3 text-base leading-relaxed mb-8 line-clamp-4  font-medium w-120">
+            <p className="hero-overview hero-fade-up  text-gray-200 d3 text-base leading-relaxed mb-8 line-clamp-3  font-medium w-100">
               {movie.overview}
             </p>
 
             <div className="hero-actions hero-fade-up d4 flex items-center gap-4 flex-wrap">
               <button onClick={() => navigate(`/movies/${movie.id}`)}
-                className="group flex items-center gap-3 px-10 py-6 bg-linear-to-r from-primary to-primary-dull
+                className="group flex items-center gap-3 px-10 py-5  bg-linear-to-r from-primary to-primary-dull
                  hover:from-primary-dull hover:to-primary text-white font-semibold rounded-full shadow-lg shadow-primary/30 
                  hover:shadow-xl hover:shadow-primary/60 hover:scale-105 active:scale-95 transition-all duration-300 border
                   border-primary/30 hover:border-primary/60 relative overflow-hidden">
@@ -340,11 +340,11 @@ const HeroSection = () => {
       </div>
 
       <div className="absolute bottom-8 left-8 md:left-14 lg:left-20 z-20 flex flex-col gap-3">
-        <div className="flex items-center gap-2 mb-1">
+        <div className="flex items-center gap-2 mb-1 rgba(229,9,20,0.36)">
           {movies.map((_, i) => (
             <button key={i} onClick={() => handleThumbClick(i)}
               className="rounded-full transition-all duration-500 ease-out"
-              style={{ height: 6, width: i === currentIndex ? 32 : 6, background: i === currentIndex ? '#fff' : 'rgba(0,0,0,0.3)' }}
+              style={{ height: 6, width: i === currentIndex ? 32 : 6, background: i === currentIndex ? '#fff' : 'rgba(229,9,20,0.36)' }}
             />
           ))}
         </div>

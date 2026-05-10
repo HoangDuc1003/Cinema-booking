@@ -1,5 +1,5 @@
-import Show from "../models/Show"
-import Booking from "../models/Booking"
+import Show from "../models/Show.js"
+import Booking from "../models/Booking.js"
 
 //function to check availability of selected seats for a movie
 const checkSeatsAvailability = async (showId, selectedSeats) => {
@@ -43,8 +43,23 @@ export const createBooking = async (req,res) =>{
         await showData.save();
 
         //stripe gateway initialize
-        res.json({success:true,message:""})
+        res.json({success:true,message:"Booked successfully"});
     } catch (error) {
-        
+        console.log(error);
+        res.json({success:false,message:error.message});
+    }
+}
+
+export const getOccupiedSeats = async (req,res) => {
+    try {
+        const {showId} = req.params;
+        const showData = await Show.findById(showId)
+
+        const occupiedSeats = Object.keys(showData.occupiedSeats)
+
+        res.json({success:true,occupiedSeats});
+    } catch (error) {
+        console.log(error);
+        res.json({success:false,message:error.message});
     }
 }
