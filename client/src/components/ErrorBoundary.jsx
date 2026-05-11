@@ -26,8 +26,8 @@ class ErrorBoundary extends React.Component {
       }
 
       return (
-        <div className="min-h-[100vh] flex flex-col px-6 text-center align-center justify-center mt-30">
-          <div className="relative mb-8 ">
+        <div className="min-h-[70vh] flex flex-col items-center justify-center px-6 text-center">
+          <div className="relative mb-8 mx-auto">
             {/* Decorative error icon with glow */}
             <div className="w-20 h-20 rounded-full bg-red-500/10 flex items-center justify-center border border-red-500/20">
               <svg xmlns="http://www.w3.org/2000/svg" className="w-10 h-10 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -38,11 +38,11 @@ class ErrorBoundary extends React.Component {
           </div>
 
           <h2 className="text-2xl font-bold text-white mb-3">Something went wrong</h2>
-          <p className="text-gray-400 mb-8 max-w-md leading-relaxed">
+          <p className="text-gray-400 mb-8 max-w-md mx-auto leading-relaxed">
             An unexpected error occurred while loading this section. This has been logged for investigation.
           </p>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center justify-center gap-4">
             <button
               onClick={this.handleReset}
               className="px-8 py-3 bg-gradient-to-r from-[#F84565] to-[#D63854] text-white font-semibold 
