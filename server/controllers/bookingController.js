@@ -89,10 +89,10 @@ const createStripeSession = async (booking, movieTitle, origin) => {
 
 // POST /api/booking/create - Create booking and redirect to Stripe
 export const createBooking = async (req, res) => {
-    const session = await mongoose.startSession();
-    session.startTransaction();
-
+    let session;
     try {
+        session = await mongoose.startSession();
+        session.startTransaction();
         const { userId } = req.auth();
         const { showId, selectedSeats, totalAmount } = req.body;
         const origin = getOrigin(req);
@@ -139,7 +139,14 @@ export const createBooking = async (req, res) => {
         if (!showData) {
             await session.abortTransaction();
             session.endSession();
-            return res.json({ success: false, message: "Show not found" });
+            return res.status(404).json({ success: false, message: "Show not found" });
+        }
+
+        // 1. Validate Seats Array
+        if (!selectedSeats || selectedSeats.length === 0) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({ success: false, message: "No seats selected" });
         }
 
         // Use frontend-calculated total (includes seat-type multipliers), fallback to flat price
@@ -166,7 +173,7 @@ export const createBooking = async (req, res) => {
             // Document wasn't found or condition failed (race condition - seat already taken)
             await session.abortTransaction();
             session.endSession();
-            return res.json({ 
+            return res.status(409).json({ 
                 success: false, 
                 message: "Race condition detected! Một hoặc nhiều ghế vừa bị người khác đặt. Vui lòng chọn lại." 
             });
@@ -183,17 +190,25 @@ export const createBooking = async (req, res) => {
         // Commit Transaction
         await session.commitTransaction();
         session.endSession();
+        session = null; // Prevent catch block from using it
 
         // Create Stripe checkout session (outside transaction for speed/safety)
         // If Stripe fails, the booking remains 'unpaid' and we can release seats later if needed
-        const url = await createStripeSession(booking, updatedShow.movie.title, origin);
-        
-        res.json({ success: true, url, message: "Booking created successfully" });
+        try {
+            const url = await createStripeSession(booking, updatedShow.movie.title, origin);
+            res.json({ success: true, url, message: "Booking created successfully" });
+        } catch (stripeError) {
+            console.log("[Stripe Error]:", stripeError);
+            res.status(500).json({ success: false, message: "Booking created but failed to generate payment link." });
+        }
+
     } catch (error) {
-        await session.abortTransaction();
-        session.endSession();
+        if (session) {
+            await session.abortTransaction();
+            session.endSession();
+        }
         console.log("[Booking Transaction Error]:", error);
-        res.json({ success: false, message: "Internal server error during checkout" });
+        res.status(500).json({ success: false, message: "Internal server error during checkout: " + error.message });
     }
 }
 
