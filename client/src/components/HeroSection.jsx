@@ -98,7 +98,8 @@ const STYLES = `
   /* Mobile Adjustments */
   @media (max-width: 640px) {
     .hero-title { font-size: clamp(24px, 6.5vw, 32px) !important; }
-    .hero-meta, .hero-overview { display: none !important; }
+    .hero-overview { display: none !important; }
+    .hero-meta { font-size: 12px !important; gap: 0.75rem !important; margin-bottom: 0.75rem !important; }
     .thumb-bar { gap: 0.5rem !important; padding: 0.5rem !important; }
     .thumb-bar img { height: 44px !important; }
   }
@@ -291,10 +292,10 @@ const HeroSection = () => {
 
 
       <div
-        className="relative z-10 px-8 md:px-14 lg:px-20 mb-12 max-md:mt-auto max-md:mb-24 transition-opacity duration-300 ease-out"
+        className="relative z-10 px-6 sm:px-8 md:px-14 lg:px-20 mb-8 sm:mb-12 max-md:mt-auto max-md:mb-20 transition-opacity duration-300 ease-out"
         style={{ 
           maxWidth: '45%', 
-          minWidth: 320, 
+          minWidth: 280, 
           isolation: 'isolate',
           opacity: hideText ? 0 : 1 
         }}
@@ -302,9 +303,9 @@ const HeroSection = () => {
         {!hideText && (
           <div key={`content-block-${flyKey}`}>
             {movie.genres?.length > 0 && (
-              <div className="hero-fade-up d1 flex flex-wrap gap-2 mb-4">
+              <div className=" d1 flex flex-wrap gap-1.5 sm:gap-2 mb-2 sm:mb-4">
                 {movie.genres.slice(0, 3).map((g) => (
-                  <span key={g.id} className="px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest backdrop-blur-md cinematic-shadow"
+                  <span key={g.id} className="px-2 sm:px-3 py-0.5 sm:py-1 rounded-full text-[9px] sm:text-[10px] font-bold uppercase tracking-widest  "
                     style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff' }}>
                     {g.name}
                   </span>
@@ -312,8 +313,8 @@ const HeroSection = () => {
               </div>
             )}
 
-            <h1 className="d1 hero-title font-black leading-[1.1] mb-5 cinematic-shadow text-white" 
-                style={{ fontSize: 'clamp(36px, 4.5vw, 54px)', wordBreak: 'normal', overflowWrap: 'normal' }}>
+            <h1 className="d1 hero-title font-black leading-[1.1] mb-3 sm:mb-5 text-white " 
+                style={{ fontSize: 'clamp(28px, 4.5vw, 54px)', wordBreak: 'normal', overflowWrap: 'normal' }}>
               {titleWords.map((word, wIndex) => {
                 const animName = wIndex % 2 === 0 ? 'charFromLeft' : 'charFromRight';
                 return (
@@ -331,29 +332,29 @@ const HeroSection = () => {
               <span className="flex items-center gap-1.5"><Star className="w-4 h-4 text-yellow-400 fill-yellow-400" />{rating||"8.9"}</span>
             </div>
 
-            <p className="hero-overview hero-fade-up  text-gray-200 d3 text-base leading-relaxed mb-8 line-clamp-3  font-medium w-100 ">
+            <p className="hero-overview hero-fade-up text-gray-200 d3 text-sm sm:text-base leading-relaxed mb-4 sm:mb-8 line-clamp-2 sm:line-clamp-3 font-medium max-w-[400px]">
               {movie.overview}
             </p>
 
-            <div className="hero-actions hero-fade-up d4 flex items-center gap-3 md:gap-4 flex-wrap">
+            <div className="hero-actions hero-fade-up d4 flex items-center gap-2 sm:gap-3 md:gap-4">
               <button onClick={() => navigate(`/movies/${movie._id || movie.id}`)}
-                className="group flex items-center gap-2 md:gap-3 px-6 py-3 md:px-10 md:py-5  bg-linear-to-r from-primary to-primary-dull
+                className="group flex items-center gap-1.5 sm:gap-2 md:gap-3 px-4 py-2.5 sm:px-6 sm:py-3 md:px-10 md:py-5 bg-linear-to-r from-primary to-primary-dull
                  hover:from-primary-dull hover:to-primary text-white font-semibold rounded-full shadow-lg shadow-primary/30 
                  hover:shadow-xl hover:shadow-primary/60 hover:scale-105 active:scale-95 transition-all duration-300 border
-                  border-primary/30 hover:border-primary/60 relative overflow-hidden text-sm md:text-base">
-                <Ticket className="w-5 h-5 md:w-6 md:h-6 " /> Book Now
+                  border-primary/30 hover:border-primary/60 relative overflow-hidden text-xs sm:text-sm md:text-base whitespace-nowrap">
+                <Ticket className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6" /> Book Now
               </button>
-              <button className="group flex items-center gap-2 md:gap-3 px-5 py-2.5 md:px-8 md:py-4 bg-white/15 hover:bg-white/25 text-white 
+              <button className="group flex items-center gap-1.5 sm:gap-2 md:gap-3 px-3.5 py-2 sm:px-5 sm:py-2.5 md:px-8 md:py-4 bg-white/15 hover:bg-white/25 text-white 
               font-semibold rounded-full border border-white/40 hover:border-primary/40 backdrop-blur-sm hover:scale-105 
-              transition-all duration-300 relative overflow-hidden cursor-pointer text-sm md:text-base">
-                <Play className="w-4 h-4" /> Trailer
+              transition-all duration-300 relative overflow-hidden cursor-pointer text-xs sm:text-sm md:text-base whitespace-nowrap">
+                <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Trailer
               </button>
             </div>
           </div>
         )}
       </div>
 
-      <div className="absolute bottom-8 left-8 md:left-14 lg:left-20 z-20 hidden md:flex flex-col gap-3">
+      <div className="absolute bottom-2 left-8 md:left-14 lg:left-20 z-20 hidden md:flex flex-col gap-3">
         <div className="flex items-center gap-2 mb-1 rgba(229,9,20,0.36)">
           {movies.map((_, i) => (
             <button key={i} onClick={() => handleThumbClick(i)}

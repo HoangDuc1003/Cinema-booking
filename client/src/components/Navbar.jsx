@@ -53,9 +53,9 @@ const Navbar = () => {
         <img src={assets.logo} alt="logo" className='w-36 md:w-50 h-auto' />
         </Link>
         
-        <div className={`max-md:absolute max-md:top-0 max-md:left-0 max-md:font-medium 
-        max-md:text-lg z-50 flex flex-col md:flex-row items-center max-md:justify-center gap-8 md:px-8 py-3 mx-4 
-        max-md:h-screen md:rounded-full backdrop-blur-xl bg-black/80 md:bg-white/10 
+        <div className={`max-md:fixed max-md:top-0 max-md:left-0 max-md:right-0 max-md:font-medium 
+        max-md:text-lg z-50 flex flex-col md:flex-row items-center max-md:justify-center gap-8 md:px-8 py-3 
+        max-md:h-screen md:rounded-full backdrop-blur-xl bg-black md:bg-white/10 
         md:border border-gray-300/20 md:shadow-xl overflow-hidden transition-all duration-500 ease-out ${isOpen?
         'max-md:w-full max-md:translate-x-0 max-md:opacity-100':'max-md:w-0 max-md:-translate-x-full max-md:opacity-0'}`}>
           

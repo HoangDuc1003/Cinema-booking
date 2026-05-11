@@ -554,7 +554,7 @@ const TrailerSection = () => {
 
   return (
     
-    <section className="px-6 md:px-16 lg:px-24 py-16 md:py-20 relative overflow-hidden">
+    <section className="px-6 md:px-16 lg:px-24 py-16 md:py-20 relative overflow-hidden min-h-screen md:min-h-[80vh]">
       <BlurCircle top='80px' right='-60px' delay="0.5s" />
       <BlurCircle top='600px' left='-65px' delay="1s" />
       <BlurCircle top='800px' right='-100px' delay="1.5s" />

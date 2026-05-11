@@ -4,13 +4,6 @@ import MovieGrid from '../components/MovieGrid'
 import BlurCircle from '../components/BlurCircle'
 import Loading from '../components/Loading'
 
-/**
- * Release — Upcoming movie releases.
- *
- * CHANGES:
- * 1. Replaced manual MovieCard grid with MovieGrid for scroll animations.
- * 2. Added mounted flag to prevent setState on unmounted component.
- */
 const Release = () => {
   const [movies, setMovies] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -37,7 +30,7 @@ const Release = () => {
   if (isLoading) return <Loading />;
 
   return (
-    <div className='relative pt-30 mb-60 px-6 md:px-16 lg:px-40 xl:px-44 overflow-hidden min-h-[80vh]'>
+    <div className='relative pt-30 mb-10 px-6 md:px-16 lg:px-40 xl:px-44 overflow-hidden min-h-[100vh]'>
       {/* Blue glow band */}
       <div
         className="absolute left-1/2 -translate-x-1/2 w-[150%] h-45 rounded-[100%] blur-[120px] animate-slow-pulse pointer-events-none"
@@ -46,7 +39,7 @@ const Release = () => {
       <BlurCircle top='150px' left='0'/>
       <BlurCircle bottom='50px' right='50px'/>
       <h1 className='relative text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-20'>Upcoming Releases</h1>
-      <MovieGrid movies={movies} animated={true} staggerDelay={80} />
+      <MovieGrid movies={movies} animated={true} staggerDelay={10} />
     </div>
   );
 };

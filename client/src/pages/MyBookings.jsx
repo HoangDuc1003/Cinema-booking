@@ -34,8 +34,7 @@ const MyBookings = () => {
       if (!user) { setIsLoading(false); return; }
       try {
         const { data } = await axios.get('/api/booking/my-bookings', {
-          headers: { Authorization: `Bearer ${await getToken()}` },
-          timeout: 5000,
+          headers: { Authorization: `Bearer ${await getToken()}` }
         });
         if (mounted && data.success) setBookings(data.bookings || []);
       } catch { /* backend unavailable */ }
@@ -118,10 +117,10 @@ const MyBookings = () => {
   if (isLoading && !sortedBookings.length) return <Loading message="Loading your bookings..." />;
 
   return (
-    <div className='relative px-6 md:px-16 lg:px-40 pt-30 min-h-[80vh] mb-10'>
+    <div className='relative px-4 sm:px-6 md:px-16 lg:px-40 pt-24 sm:pt-30 min-h-[80vh] mb-10 max-w-[100vw] overflow-x-hidden'>
       {/* Background effects */}
       <div
-        className="absolute left-1/2 -translate-x-1/2 w-[150%] h-45 rounded-[100%] blur-[120px] animate-slow-pulse pointer-events-none"
+        className="absolute left-1/2 -translate-x-1/2 w-[120%] sm:w-[150%] h-45 rounded-[100%] blur-[120px] animate-slow-pulse pointer-events-none"
         style={{ top: '-20px', zIndex: 0, background: 'rgba(0, 123, 255, 0.5)' }}
       />
       <BlurCircle top='100px' left='100px' />
@@ -140,7 +139,7 @@ const MyBookings = () => {
               <AnimatedCard key={item._id || index} index={index} staggerDelay={60} duration={500}>
                 {/* Booking card */}
                 <div className={`relative flex flex-row overflow-hidden rounded-2xl border
-                  transition-all duration-300 group h-32
+                  transition-all duration-300 group min-h-[7rem] sm:h-32
                   ${isPaid
                     ? 'border-green-500/20 hover:border-green-500/40'
                     : 'border-primary/20 hover:border-primary/40'
@@ -160,7 +159,7 @@ const MyBookings = () => {
 
                   <div className="relative z-10 flex flex-row w-full h-full">
                     {/* Poster */}
-                    <div className="relative w-22 shrink-0 overflow-hidden">
+                    <div className="relative w-18 sm:w-22 shrink-0 overflow-hidden">
                       <img
                         src={posterUrl}
                         alt={item.show?.movie?.title || ''}
@@ -184,65 +183,65 @@ const MyBookings = () => {
                     </div>
 
                     {/* Booking info */}
-                    <div className="flex-1 flex flex-col justify-center px-4 py-3 min-w-0">
-                      <h3 className="text-base font-bold text-white truncate mb-2 leading-tight">
+                    <div className="flex-1 flex flex-col justify-center px-2.5 sm:px-4 py-2 sm:py-3 min-w-0">
+                      <h3 className="text-sm sm:text-base font-bold text-white truncate mb-1 sm:mb-2 leading-tight">
                         {item.show?.movie?.title || 'Unknown Movie'}
                       </h3>
-                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-300">
-                        <div className="flex items-center gap-1.5">
-                          <Clock className="w-3.5 h-3.5 text-primary shrink-0" />
+                      <div className="flex flex-wrap gap-x-2 sm:gap-x-4 gap-y-0.5 sm:gap-y-1 text-[10px] sm:text-xs text-gray-300">
+                        <div className="flex items-center gap-1">
+                          <Clock className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-primary shrink-0" />
                           <span>{timeFormat(item.show?.movie?.runtime)}</span>
                         </div>
-                        <div className="flex items-center gap-1.5">
-                          <MapPin className="w-3.5 h-3.5 text-primary shrink-0" />
-                          <span className="truncate max-w-[120px]">{item.show?.hall || 'N/A'}</span>
+                        <div className="flex items-center gap-1">
+                          <MapPin className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-primary shrink-0" />
+                          <span className="truncate max-w-[80px] sm:max-w-[120px]">{item.show?.hall || 'N/A'}</span>
                         </div>
-                        <div className="flex items-center gap-1.5">
-                          <Ticket className="w-3.5 h-3.5 text-primary shrink-0" />
+                        <div className="flex items-center gap-1">
+                          <Ticket className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-primary shrink-0" />
                           <span>{item.bookedSeats?.length || 0} seat{(item.bookedSeats?.length || 0) !== 1 ? 's' : ''}</span>
                         </div>
-                        <div className="flex items-center gap-1.5">
-                          <CreditCard className="w-3.5 h-3.5 text-primary shrink-0" />
+                        <div className="flex items-center gap-1">
+                          <CreditCard className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-primary shrink-0" />
                           <span className="font-semibold text-white">{currency}{item.amount}</span>
                         </div>
                       </div>
                       {/* Seat chips */}
-                      <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                        {(item.bookedSeats || []).slice(0, 8).map(seat => (
+                      <div className="flex items-center gap-1 sm:gap-1.5 mt-1.5 sm:mt-2 flex-wrap">
+                        {(item.bookedSeats || []).slice(0, 6).map(seat => (
                           <span key={seat}
-                            className="px-2 py-0.5 bg-primary/20 text-white text-[10px] font-bold rounded border border-primary/30 backdrop-blur-sm">
+                            className="px-1.5 sm:px-2 py-0.5 bg-primary/20 text-white text-[9px] sm:text-[10px] font-bold rounded border border-primary/30 backdrop-blur-sm">
                             {seat}
                           </span>
                         ))}
-                        {(item.bookedSeats?.length || 0) > 8 && (
-                          <span className="text-[10px] text-gray-400">+{item.bookedSeats.length - 8}</span>
+                        {(item.bookedSeats?.length || 0) > 6 && (
+                          <span className="text-[9px] sm:text-[10px] text-gray-400">+{item.bookedSeats.length - 6}</span>
                         )}
                       </div>
                     </div>
 
                     {/* Date and actions */}
-                    <div className="relative w-40 shrink-0 flex flex-col items-end justify-between p-3">
-                      <p className="text-[10px] text-gray-300 text-right leading-tight">
+                    <div className="relative w-28 sm:w-40 shrink-0 flex flex-col items-end justify-between p-2 sm:p-3">
+                      <p className="text-[9px] sm:text-[10px] text-gray-300 text-right leading-tight">
                         {item.show?.showDateTime ? dateFormat(item.show.showDateTime) : 'Date N/A'}
                       </p>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5 sm:gap-2">
                         {!isPaid && (
                           <>
                             <button
                               onClick={() => handlePayNow(item)}
-                              className="px-3 py-1.5 bg-gradient-to-r from-[#F84565] to-[#D63854]
+                              className="px-2 sm:px-3 py-1 sm:py-1.5 bg-gradient-to-r from-[#F84565] to-[#D63854]
                                 hover:from-[#D63854] hover:to-[#F84565] text-white font-semibold rounded-lg
                                 shadow-md shadow-[#F84565]/25 hover:shadow-[#F84565]/50
-                                hover:scale-105 active:scale-95 transition-all duration-300 text-[11px] whitespace-nowrap"
+                                hover:scale-105 active:scale-95 transition-all duration-300 text-[10px] sm:text-[11px] whitespace-nowrap"
                             >
                               Pay Now
                             </button>
                             <button
                               onClick={() => handleDelete(item._id)}
-                              className="p-1.5 bg-black/40 hover:bg-red-500/20 text-gray-400 hover:text-red-500 rounded-lg border border-white/5 hover:border-red-500/30 transition-all duration-300"
+                              className="p-1 sm:p-1.5 bg-black/40 hover:bg-red-500/20 text-gray-400 hover:text-red-500 rounded-lg border border-white/5 hover:border-red-500/30 transition-all duration-300"
                               title="Delete booking"
                             >
-                              <Trash2 className="w-4 h-4" />
+                              <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                             </button>
                           </>
                         )}

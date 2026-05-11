@@ -55,7 +55,7 @@ const Movies = () => {
   if (hasError) return <Loading message="Failed to load movies. Retrying..." />;
 
   return (
-    <div className='relative pt-30 mb-5 px-6 md:px-16 lg:px-40 xl:px-44 overflow-hidden min-h-[80vh]'>
+    <div className='relative pt-30 pb-5 px-6 md:px-16 lg:px-40 xl:px-44 overflow-hidden min-h-[100vh]'>
       {/* Animated glow band — moved animation to index.css */}
       <div
         className="absolute left-1/2 -translate-x-1/2 w-[150%] h-45 rounded-[100%] blur-[120px] 
@@ -106,7 +106,7 @@ const Movies = () => {
         </div>
 
         {displayedMovies.length > 0 ? (
-          <MovieGrid movies={displayedMovies} animated={true} staggerDelay={60} />
+          <MovieGrid movies={displayedMovies} animated={true} staggerDelay={10} />
         ) : (
           <div className='min-h-[40vh] flex items-center justify-center'>
             <p className='text-xl font-medium text-gray-400'>

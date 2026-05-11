@@ -46,7 +46,7 @@ const customStyles = `
 
 // Memoized Seat Component to prevent re-rendering the whole grid
 const Seat = React.memo(({ seatId, status, type, showPrice, onClick }) => {
-  const baseStyles = 'w-8 h-8 rounded-lg border-2 text-xs font-bold transition-all duration-300 transform relative overflow-hidden'
+  const baseStyles = 'w-7 h-7 sm:w-8 sm:h-8 rounded-lg border-2 text-[10px] sm:text-xs font-bold transition-all duration-300 transform relative overflow-hidden'
 
   let styles = baseStyles;
   switch (status) {
@@ -463,12 +463,12 @@ const SeatLayout = () => {
       const status = getSeatStatus(seatId)
 
       if (count === 9 && i === 5) {
-        seats.push(<div key={`gap-${row}-1`} className="w-10"></div>)
+        seats.push(<div key={`gap-${row}-1`} className="w-6 sm:w-10"></div>)
       } else if (count === 18) {
         if (i === 5) {
-          seats.push(<div key={`gap-${row}-1`} className="w-8"></div>)
+          seats.push(<div key={`gap-${row}-1`} className="w-4 sm:w-8"></div>)
         } else if (i === 14) {
-          seats.push(<div key={`gap-${row}-2`} className="w-16"></div>)
+          seats.push(<div key={`gap-${row}-2`} className="w-6 sm:w-16"></div>)
         }
       }
 
@@ -485,12 +485,12 @@ const SeatLayout = () => {
     }
 
     return (
-      <div key={row} className="flex items-center justify-center gap-2 mb-4 group">
-        <span className="w-8 text-center text-gray-400 text-sm font-bold">{row}</span>
-        <div className="flex items-center gap-2">
+      <div key={row} className="flex items-center justify-center gap-1 sm:gap-2 mb-2 sm:mb-3 group">
+        <span className="w-6 sm:w-8 text-center text-gray-400 text-xs sm:text-sm font-bold">{row}</span>
+        <div className="flex items-center gap-1 sm:gap-2">
           {seats}
         </div>
-        <span className="w-8 text-center text-gray-400 text-sm font-bold">{row}</span>
+        <span className="w-6 sm:w-8 text-center text-gray-400 text-xs sm:text-sm font-bold">{row}</span>
       </div>
     )
   }
@@ -511,7 +511,7 @@ const SeatLayout = () => {
   }, [selectedSeats, seatRows, showPrice])
 
   return show ? (
-    <div className="min-h-screen bg-black relative overflow-hidden">
+    <div className="min-h-screen max-w-[100vw] bg-black relative overflow-x-hidden">
       <style>{customStyles}</style>
 
       {/* Enhanced Background Effects */}
@@ -524,13 +524,13 @@ const SeatLayout = () => {
       <div className="absolute bottom-40 left-20 w-2 h-2 bg-yellow-500/40 rounded-full animate-ping duration-4000 delay-1000"></div>
       <div className="absolute top-1/2 right-10 w-2 h-2 bg-green-500/50 rounded-full animate-pulse duration-5000 delay-2000"></div>
 
-      <div className="relative z-10 flex flex-col lg:flex-row gap-8 p-6 md:p-12 lg:p-16 xl:p-20">
+      <div className="relative z-10 flex flex-col lg:flex-row gap-4 sm:gap-6 lg:gap-8 p-3 sm:p-6 md:p-8 lg:p-12 xl:p-16">
 
         {/* Enhanced Left Sidebar */}
-        <div className={`lg:w-96 transition-all duration-1000 ${isVisible ? 'translate-x-0 opacity-100' : '-translate-x-10 opacity-0 '}`}>
-          <div className="bg-white/5 mt-10 backdrop-blur-xl rounded-3xl border border-white/10 p-8 lg:sticky lg:top-20 shadow-2xl">
+        <div className={`lg:w-80 xl:lg:w-96 transition-all duration-1000 ${isVisible ? 'translate-x-0 opacity-100' : '-translate-x-10 opacity-0 '}`}>
+          <div className="bg-white/5 mt-10 backdrop-blur-xl rounded-2xl sm:rounded-3xl border border-white/10 p-4 sm:p-6 lg:p-8 lg:sticky lg:top-20 shadow-2xl">
 
-            <div className="flex items-center gap-4 mb-8">
+            <div className="flex items-center gap-3 sm:gap-4 mb-5 sm:mb-8">
               <div className="w-12 h-12 bg-linear-to-br from-primary/30 to-primary/10 rounded-2xl flex items-center justify-center backdrop-blur-sm">
                 <Calendar className="w-6 h-6 text-primary" />
               </div>
@@ -547,7 +547,7 @@ const SeatLayout = () => {
               </div>
             </div>
 
-            <div className="mb-8">
+            <div className="mb-5 sm:mb-8">
               <h4 className="text-white font-semibold mb-4 flex items-center gap-2">
                 <MapPin className="w-5 h-5 text-primary" />
                 Step 1: Select Cinema Hall
@@ -592,7 +592,7 @@ const SeatLayout = () => {
               )}
             </div>
 
-            <div className="mb-8">
+            <div className="mb-5 sm:mb-8">
               <h4 className="text-white font-semibold mb-4 flex items-center gap-2">
                 <ClockIcon className="w-5 h-5 text-primary" />
                 Step 2: Select Show Time
@@ -731,7 +731,7 @@ const SeatLayout = () => {
         {/* Enhanced Right Section */}
         <div className={`flex-1 transition-all duration-1000 delay-300 ${isVisible ? 'translate-y-0 opacity-100 mt-10' : 'translate-y-10 opacity-0'}`}>
           <div className="text-center mb-12">
-            <h1 className="text-4xl md:text-5xl font-bold mb-4 bg-linear-to-r from-white via-primary to-white bg-clip-text text-transparent">
+           <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-3 bg-linear-to-r from-white via-primary to-white bg-clip-text text-transparent">
               Select Your Seat
             </h1>
             {isMockData && (
@@ -750,8 +750,8 @@ const SeatLayout = () => {
               )}
             </p>
 
-            <div className="mt-6 flex justify-center">
-              <div className="flex items-center gap-4 bg-white/5 backdrop-blur-sm rounded-2xl px-6 py-3 border border-white/10">
+            <div className="mt-4 flex justify-center">
+              <div className="flex items-center gap-2 sm:gap-4 bg-white/5 backdrop-blur-sm rounded-xl sm:rounded-2xl px-3 sm:px-6 py-2 sm:py-3 border border-white/10 flex-wrap justify-center">
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 bg-primary rounded-full"></div>
                   <span className="text-primary text-sm font-medium">Date Selected</span>
@@ -782,9 +782,9 @@ const SeatLayout = () => {
           </div>
 
           {/* Enhanced Screen */}
-          <div className="flex flex-col items-center mb-16">
-            <div className="relative mb-6">
-              <div className="w-125 max-w-full h-3 bg-linear-to-r from-transparent via-primary to-transparent rounded-full shadow-lg shadow-primary/30"></div>
+          <div className="flex flex-col items-center mb-6 sm:mb-10">
+            <div className="relative mb-4">
+              <div className="w-80 sm:w-125 max-w-full h-2 sm:h-3 bg-linear-to-r from-transparent via-primary to-transparent rounded-full shadow-lg shadow-primary/30"></div>
               <div className="absolute inset-0 bg-linear-to-r from-transparent via-primary/30 to-transparent rounded-full blur-lg"></div>
               <div className="absolute -inset-2 bg-linear-to-r from-transparent via-primary/10 to-transparent rounded-full blur-2xl"></div>
             </div>
@@ -792,12 +792,12 @@ const SeatLayout = () => {
           </div>
 
           {/* Enhanced Seat Map */}
-          <div className="max-w-7xl mx-auto overflow-x-auto pb-4">
-            <div className="min-w-max px-4">
+          <div className="max-w-full mx-auto overflow-x-auto pb-2">
+            <div className="px-2 sm:px-4">
               {/* Front Section */}
-              <div className="mb-12">
-                <div className="text-center mb-6">
-                  <span className="text-yellow-500 text-lg font-bold px-4 py-2 bg-yellow-500/10 rounded-full border border-yellow-500/20">
+              <div className="mb-4 sm:mb-6 mt-1 sm:mt-2">
+                <div className="text-center mb-3 sm:mb-4">
+                  <span className="text-yellow-500 text-sm sm:text-base font-bold px-3 py-1.5 sm:px-4 sm:py-2 bg-yellow-500/10 rounded-full border border-yellow-500/20">
                     Front Premium • ${showPrice > 0 ? showPrice * 2 : '...'}
                   </span>
                 </div>
@@ -805,9 +805,9 @@ const SeatLayout = () => {
               </div>
 
               {/* Middle Section */}
-              <div className="mb-12">
-                <div className="text-center mb-6">
-                  <span className="text-primary text-lg font-bold px-4 py-2 bg-primary/10 rounded-full border border-primary/20">
+              <div className="mb-4 sm:mb-6">
+                <div className="text-center mb-3 sm:mb-4">
+                  <span className="text-primary text-sm sm:text-base font-bold px-3 py-1.5 sm:px-4 sm:py-2 bg-primary/10 rounded-full border border-primary/20">
                     Middle VIP • ${showPrice > 0 ? showPrice * 1.5 : '...'}
                   </span>
                 </div>
@@ -815,9 +815,9 @@ const SeatLayout = () => {
               </div>
 
               {/* Back Section */}
-              <div className="mb-12">
-                <div className="text-center mb-6">
-                  <span className="text-green-500 text-lg font-bold px-4 py-2 bg-green-500/10 rounded-full border border-green-500/20">
+              <div className="mb-4 sm:mb-6">
+                <div className="text-center mb-3 sm:mb-4">
+                  <span className="text-green-500 text-sm sm:text-base font-bold px-3 py-1.5 sm:px-4 sm:py-2 bg-green-500/10 rounded-full border border-green-500/20">
                     Back Standard • ${showPrice > 0 ? showPrice : '...'}
                   </span>
                 </div>
@@ -827,7 +827,7 @@ const SeatLayout = () => {
           </div>
 
           {/* Legend */}
-          <div className="flex justify-center flex-wrap gap-6 md:gap-12 mb-12 mt-8">
+          <div className="flex justify-center flex-wrap gap-4 sm:gap-6 md:gap-12 mb-6 sm:mb-8 mt-4 sm:mt-6">
             <div className="flex items-center gap-3">
               <div className="w-6 h-6 bg-transparent border-2 border-gray-600 rounded-lg"></div>
               <span className="text-gray-400 font-medium">Available</span>
@@ -844,7 +844,7 @@ const SeatLayout = () => {
 
           {/* Enhanced Summary & Checkout */}
           {selectedSeats.length > 0 && (
-            <div className="bg-linear-to-br from-white/10 to-white/5 backdrop-blur-xl rounded-3xl border border-white/20 p-8 shadow-2xl">
+            <div className="bg-linear-to-br from-white/10 to-white/5 backdrop-blur-xl rounded-2xl sm:rounded-3xl border border-white/20 p-4 sm:p-6 shadow-2xl">
               <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 bg-primary/20 rounded-2xl flex items-center justify-center">
@@ -877,7 +877,7 @@ const SeatLayout = () => {
               <button
                 disabled={!selectedTime || selectedSeats.length === 0}
                 onClick={bookTickets}
-                className="w-full bg-linear-to-r from-primary to-primary-dull hover:from-primary-dull hover:to-primary disabled:from-gray-600 disabled:to-gray-700 disabled:cursor-not-allowed text-white font-bold py-6 rounded-2xl transition-all duration-300 hover:scale-105 disabled:hover:scale-100 shadow-lg shadow-primary/30 hover:shadow-2xl hover:shadow-primary/50 disabled:shadow-none flex items-center justify-center gap-3 text-lg relative overflow-hidden group"
+                className="w-full bg-linear-to-r from-primary to-primary-dull hover:from-primary-dull hover:to-primary disabled:from-gray-600 disabled:to-gray-700 disabled:cursor-not-allowed text-white font-bold py-4 sm:py-5 rounded-xl sm:rounded-2xl transition-all duration-300 hover:scale-105 disabled:hover:scale-100 shadow-lg shadow-primary/30 hover:shadow-2xl hover:shadow-primary/50 disabled:shadow-none flex items-center justify-center gap-3 text-base sm:text-lg relative overflow-hidden group"
               >
                 <span className="relative z-10">Proceed to Checkout</span>
                 <ArrowRight className="w-6 h-6 relative z-10 group-hover:translate-x-1 transition-transform duration-300" />
