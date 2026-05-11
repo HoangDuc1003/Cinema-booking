@@ -2,7 +2,7 @@ import axios from "axios"
 import Movie from "../models/Movie.js"
 import Show from "../models/Show.js"
 import Booking from "../models/Booking.js"
-import stripe from 'stripe'
+import Stripe from 'stripe'
 
 // Check if selected seats are still available
 const checkSeatsAvailability = async (showId, selectedSeats) => {
@@ -58,7 +58,10 @@ const ensureMovieExists = async (movieId) => {
 
 // Create Stripe checkout session for a booking
 const createStripeSession = async (booking, movieTitle, origin) => {
-    const stripeInstance = new stripe(process.env.STRIPE_SECRET_KEY);
+    if (!process.env.STRIPE_SECRET_KEY) {
+        throw new Error('Stripe is not configured. Please set STRIPE_SECRET_KEY in environment variables.');
+    }
+    const stripeInstance = new Stripe(process.env.STRIPE_SECRET_KEY);
     const amount = Number(booking.amount);
     if (!amount || amount <= 0) {
         throw new Error(`Invalid booking amount: ${booking.amount}`);
@@ -273,7 +276,10 @@ export const payAllBookings = async (req, res) => {
             return res.json({ success: false, message: "No unpaid bookings found" });
         }
 
-        const stripeInstance = new stripe(process.env.STRIPE_SECRET_KEY);
+        if (!process.env.STRIPE_SECRET_KEY) {
+            return res.json({ success: false, message: 'Stripe is not configured. Please set STRIPE_SECRET_KEY in environment variables.' });
+        }
+        const stripeInstance = new Stripe(process.env.STRIPE_SECRET_KEY);
         
         // Calculate total amount
         const totalAmount = unpaidBookings.reduce((sum, booking) => sum + Number(booking.amount), 0);

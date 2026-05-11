@@ -3,8 +3,6 @@ import cors from 'cors';
 import 'dotenv/config';
 import connectDB from '../configs/db.js';
 import { clerkMiddleware } from '@clerk/express'
-import { inngest, functions } from '../inngest/index.js';
-import { serve } from 'inngest/express'
 import showRouter from '../routes/showRoutes.js';
 import bookingRouter from '../routes/bookingRoutes.js';
 import adminRouter from '../routes/adminRoutes.js';
@@ -28,12 +26,37 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), stri
 
 // Middleware
 app.use(express.json())
-app.use(cors())
-app.use(clerkMiddleware())
+app.use(cors({
+    origin: true,
+    credentials: true
+}))
+
+// Clerk middleware — pass secretKey explicitly for Vercel compatibility
+app.use(clerkMiddleware({
+    secretKey: process.env.CLERK_SECRET_KEY,
+    publishableKey: process.env.CLERK_PUBLISHABLE_KEY,
+}))
 
 // Routes
 app.get('/', (req, res) => res.send('Server is live!'))
-app.use('/api/inngest', serve({ client: inngest, functions }));
+
+// Inngest route — only mount if Inngest is properly initialized
+const mountInngest = async () => {
+    try {
+        const { inngest, functions } = await import('../inngest/index.js');
+        if (functions && functions.length > 0) {
+            const { serve } = await import('inngest/express');
+            app.use('/api/inngest', serve({ client: inngest, functions }));
+            console.log('\x1b[32m✔ Inngest functions mounted\x1b[0m');
+        } else {
+            console.warn('\x1b[33m⚠ Inngest skipped — no functions available\x1b[0m');
+        }
+    } catch (error) {
+        console.warn('\x1b[33m⚠ Inngest skipped —\x1b[0m', error.message);
+    }
+};
+mountInngest();
+
 app.use('/api/show', showRouter)
 app.use('/api/booking', bookingRouter)
 app.use('/api/admin', adminRouter)

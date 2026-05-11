@@ -1,9 +1,14 @@
-import stripe from 'stripe';
+import Stripe from 'stripe';
 import Booking from '../models/Booking.js';
 
 // POST /api/webhooks/stripe - Handle Stripe payment events
 export const stripeWebhooks = async (req, res) => {
-    const stripeInstance = new stripe(process.env.STRIPE_SECRET_KEY);
+    if (!process.env.STRIPE_SECRET_KEY) {
+        console.error('[Stripe Webhook] STRIPE_SECRET_KEY not configured');
+        return res.status(500).json({ error: 'Stripe not configured' });
+    }
+
+    const stripeInstance = new Stripe(process.env.STRIPE_SECRET_KEY);
     const sig = req.headers['stripe-signature'];
 
     let event;

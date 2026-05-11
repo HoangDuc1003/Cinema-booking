@@ -154,7 +154,7 @@ const MyBookings = () => {
                         className="absolute -inset-4 w-[calc(100%+2rem)] h-[calc(100%+2rem)] object-cover"
                         style={{ filter: 'blur(20px) brightness(0.35) saturate(1.5)' }}
                       />
-                      <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-black/50 to-black/30" />
+                      <div className="absolute inset-0 bg-linear-to-r from-black/80 via-black/50 to-black/30" />
                     </>
                   )}
 
