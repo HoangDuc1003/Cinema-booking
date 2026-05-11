@@ -173,8 +173,22 @@ const HeroSection = () => {
     const load = async () => {
       try {
         setIsLoading(true);
-        const data = await fetchPopularMovies({ includeDetails: true, detailLimit: 5, dailyRotate: true, dailySeedSize: 20 });
-        setMovies(data.slice(0, 5));
+        const cacheKey = 'hero_movies_cache';
+        const cacheTimeKey = 'hero_movies_cache_time';
+        const cachedData = localStorage.getItem(cacheKey);
+        const cachedTime = localStorage.getItem(cacheTimeKey);
+        const now = new Date().getTime();
+
+        // 24 hours = 24 * 60 * 60 * 1000 = 86400000 ms
+        if (cachedData && cachedTime && now - parseInt(cachedTime) < 86400000) {
+          setMovies(JSON.parse(cachedData));
+        } else {
+          const data = await fetchPopularMovies({ includeDetails: true, detailLimit: 5, randomRotate: true, dailySeedSize: 20 });
+          const top5 = data.slice(0, 5);
+          localStorage.setItem(cacheKey, JSON.stringify(top5));
+          localStorage.setItem(cacheTimeKey, now.toString());
+          setMovies(top5);
+        }
       } catch (e) {
         console.error('Hero load error:', e);
       } finally {
@@ -277,7 +291,7 @@ const HeroSection = () => {
 
 
       <div
-        className="relative z-10 px-8 md:px-14 lg:px-20 mb-12 transition-opacity duration-300 ease-out"
+        className="relative z-10 px-8 md:px-14 lg:px-20 mb-12 max-md:mt-auto max-md:mb-24 transition-opacity duration-300 ease-out"
         style={{ 
           maxWidth: '45%', 
           minWidth: 320, 
@@ -313,25 +327,25 @@ const HeroSection = () => {
 
             <div className="hero-meta hero-fade-up d2 flex items-center flex-wrap gap-5 text-[15px] font-medium text-white mb-6 cinematic-shadow">
               <span className="flex items-center gap-1.5"><CalendarIcon className="w-4 h-4" />{year}</span>
-              <span className="flex items-center gap-1.5"><ClockIcon className="w-4 h-4" />{runtimeStr || '—'}</span>
-              <span className="flex items-center gap-1.5"><Star className="w-4 h-4 text-yellow-400 fill-yellow-400" />{rating}</span>
+              <span className="flex items-center gap-1.5"><ClockIcon className="w-4 h-4" />{runtimeStr || "1h30m"}</span>
+              <span className="flex items-center gap-1.5"><Star className="w-4 h-4 text-yellow-400 fill-yellow-400" />{rating||"8.9"}</span>
             </div>
 
-            <p className="hero-overview hero-fade-up  text-gray-200 d3 text-base leading-relaxed mb-8 line-clamp-3  font-medium w-100">
+            <p className="hero-overview hero-fade-up  text-gray-200 d3 text-base leading-relaxed mb-8 line-clamp-3  font-medium w-100 ">
               {movie.overview}
             </p>
 
-            <div className="hero-actions hero-fade-up d4 flex items-center gap-4 flex-wrap">
+            <div className="hero-actions hero-fade-up d4 flex items-center gap-3 md:gap-4 flex-wrap">
               <button onClick={() => navigate(`/movies/${movie.id}`)}
-                className="group flex items-center gap-3 px-10 py-5  bg-linear-to-r from-primary to-primary-dull
+                className="group flex items-center gap-2 md:gap-3 px-6 py-3 md:px-10 md:py-5  bg-linear-to-r from-primary to-primary-dull
                  hover:from-primary-dull hover:to-primary text-white font-semibold rounded-full shadow-lg shadow-primary/30 
                  hover:shadow-xl hover:shadow-primary/60 hover:scale-105 active:scale-95 transition-all duration-300 border
-                  border-primary/30 hover:border-primary/60 relative overflow-hidden">
-                <Ticket className="w-6 h-6 " /> Book Now
+                  border-primary/30 hover:border-primary/60 relative overflow-hidden text-sm md:text-base">
+                <Ticket className="w-5 h-5 md:w-6 md:h-6 " /> Book Now
               </button>
-              <button className="group flex items-center gap-3 px-8 py-4 bg-white/15 hover:bg-white/25 text-white 
+              <button className="group flex items-center gap-2 md:gap-3 px-5 py-2.5 md:px-8 md:py-4 bg-white/15 hover:bg-white/25 text-white 
               font-semibold rounded-full border border-white/40 hover:border-primary/40 backdrop-blur-sm hover:scale-105 
-              transition-all duration-300 relative overflow-hidden cursor-pointer">
+              transition-all duration-300 relative overflow-hidden cursor-pointer text-sm md:text-base">
                 <Play className="w-4 h-4" /> Trailer
               </button>
             </div>
@@ -339,7 +353,7 @@ const HeroSection = () => {
         )}
       </div>
 
-      <div className="absolute bottom-8 left-8 md:left-14 lg:left-20 z-20 flex flex-col gap-3">
+      <div className="absolute bottom-8 left-8 md:left-14 lg:left-20 z-20 hidden md:flex flex-col gap-3">
         <div className="flex items-center gap-2 mb-1 rgba(229,9,20,0.36)">
           {movies.map((_, i) => (
             <button key={i} onClick={() => handleThumbClick(i)}

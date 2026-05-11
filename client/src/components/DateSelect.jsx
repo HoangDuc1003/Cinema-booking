@@ -4,40 +4,30 @@ import { ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useNavigate } from 'react-router-dom'
 
-const DateSelect = ({ id }) => {
+const DateSelect = ({ id, availableDates }) => {
     
     const navigate = useNavigate();
-    const [mockDates, setMockDates] = useState([]);
     const [selected, setSelected] = useState(null);
+
+    // Group dates by day for the UI
+    const dates = Object.keys(availableDates || {}).sort();
 
     const onBookHandler = () =>{
         if(!selected){
             return toast.error('Please select a date');
         }
         else {
-            navigate(`/movies/${id}/${selected.toISOString().split('T')[0]}`);
+            navigate(`/movies/${id}/${selected}`);
             window.scrollTo(0,0);
         }
     }
 
+    // Auto-select first date if available
     useEffect(() => {
-        const today = new Date();
-        const next10Days = [];
-
-        for (let i = 0; i < 10; i++) {
-            const d = new Date(today);
-            d.setDate(today.getDate() + i);
-            next10Days.push(d);
+        if (dates.length > 0 && !selected) {
+            setSelected(dates[0]);
         }
-
-        const random7Days = next10Days
-            .sort(() => 0.5 - Math.random())
-            .slice(0, 7)
-            .sort((a, b) => a - b);
-            
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setMockDates(random7Days);
-    }, []);
+    }, [dates]);
 
     return (
         <div id='dateSelect' className='pt-30'>
@@ -54,23 +44,27 @@ const DateSelect = ({ id }) => {
                         <ChevronLeftIcon width={28} className="cursor-pointer hover:text-primary transition-colors" />
 
                         <span className='grid grid-cols-3 md:flex flex-wrap md:max-w-lg gap-4'>
-                            {mockDates.map((date, index) => (
-                                <button
-                                    onClick={() => setSelected(date)}
-                                    key={id}
-                                    className={`flex flex-col items-center justify-center h-18 w-14 aspect-square rounded cursor-pointer border 
-                                        transition-all ${
-                                        
-                                        selected === date 
-                                        ? "bg-primary text-white border-primary  hover:from-primary-dull hover:to-primary hover:shadow-xl hover:shadow-primary/60 hover:scale-105 active:scale-95 transition-all duration-300 border" 
-                                        : "bg-white/5 border-transparent hover:bg-primary/20 hover:border-primary text-white hover:from-primary-dull hover:to-primary hover:shadow-xl hover:shadow-primary/60 hover:scale-105 active:scale-95 transition-all duration-300 border"
-                                    }`}
-                                >
-                                    <span className='text-xs opacity-70'>{date.toLocaleDateString('en-US', { weekday: "short" })}</span>
-                                    <span className='text-lg font-bold'>{date.getDate()}</span>
-                                    <span className='text-xs opacity-70'>{date.toLocaleDateString('en-US', { month: "short" })}</span>
-                                </button>
-                            ))}
+                            {dates.length > 0 ? dates.map((dateStr, index) => {
+                                const date = new Date(dateStr);
+                                return (
+                                    <button
+                                        onClick={() => setSelected(dateStr)}
+                                        key={index}
+                                        className={`flex flex-col items-center justify-center h-18 w-14 aspect-square rounded cursor-pointer border 
+                                            transition-all ${
+                                            selected === dateStr 
+                                            ? "bg-primary text-white border-primary hover:scale-105 active:scale-95 shadow-xl shadow-primary/60" 
+                                            : "bg-white/5 border-transparent hover:bg-primary/20 hover:border-primary text-white hover:scale-105 active:scale-95"
+                                        }`}
+                                    >
+                                        <span className='text-xs opacity-70'>{date.toLocaleDateString('en-US', { weekday: "short" })}</span>
+                                        <span className='text-lg font-bold'>{date.getDate()}</span>
+                                        <span className='text-xs opacity-70'>{date.toLocaleDateString('en-US', { month: "short" })}</span>
+                                    </button>
+                                );
+                            }) : (
+                                <p className='text-gray-400'>No showtimes available for this movie.</p>
+                            )}
                         </span>
 
                         <ChevronRightIcon width={28} className="cursor-pointer hover:text-primary transition-colors" />

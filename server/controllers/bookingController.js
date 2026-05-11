@@ -63,3 +63,19 @@ export const getOccupiedSeats = async (req,res) => {
         res.json({success:false,message:error.message});
     }
 }
+
+export const getUserBookings = async (req, res) => {
+    try {
+        const { userId } = req.auth();
+        const bookings = await Booking.find({ user: userId })
+            .populate({
+                path: 'show',
+                populate: { path: 'movie' }
+            })
+            .sort({ createdAt: -1 });
+        res.json({ success: true, bookings });
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: error.message });
+    }
+}

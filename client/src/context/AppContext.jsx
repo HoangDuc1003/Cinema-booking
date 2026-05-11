@@ -4,38 +4,52 @@ import { useUser, useAuth } from "@clerk/react";
 import { useLocation, useNavigate } from "react-router-dom";
 import toast from 'react-hot-toast'
 
-axios.defaults.baseURL = import.meta.env.VITE_BASE_URL
-// eslint-disable-next-line react-refresh/only-export-components
+// Use base URL from env if available, otherwise fallback to empty string 
+const baseURL = import.meta.env.VITE_BASE_URL || "";
+const api = axios.create({
+    baseURL: baseURL
+});
+
+// Global interceptor for debugging
+api.interceptors.response.use(
+    response => response,
+    error => {
+        const message = error.response?.data?.message || error.message || "Network Error";
+        console.error(`[API Error] ${error.config?.url}:`, message);
+        return Promise.reject(error);
+    }
+);
+
 export const AppContext = createContext()
 
 export const AppProvider = ({ children }) => {
   const [isAdmin, setIsAdmin] = useState(false)
   const [shows, setShows] = useState([])
   const [favoriteMovies, setFavoriteMovies] = useState([])
-
+  const image_base_url = import.meta.env.VITE_TMDB_IMAGE_BASE_URL
   const { user } = useUser()
   const { getToken } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
 
-  // 1. Hàm lấy danh sách show (Dùng useCallback bọc lại)
   const fetchShows = useCallback(async () => {
     try {
-      const { data } = await axios.get('api/show/all');
+      const { data } = await api.get('/api/show/all');
       if (data.success) {
         setShows(data.shows);
       } else {
         toast.error(data.message);
       }
     } catch (error) {
-      console.error(error);
+      // Handled by interceptor
     }
   }, []);
 
   const fetchIsAdmin = useCallback(async () => {
     try {
-      const { data } = await axios.get('/api/admin/is-admin', {
-        headers: { Authorization: `Bearer ${await getToken()}` }
+      const token = await getToken();
+      const { data } = await api.get('/api/admin/is-admin', {
+        headers: { Authorization: `Bearer ${token}` }
       });
       setIsAdmin(data.isAdmin);
 
@@ -44,14 +58,15 @@ export const AppProvider = ({ children }) => {
         toast.error("You are not authorized to access the admin dashboard");
       }
     } catch (error) {
-      console.error(error);
+      // Handled by interceptor
     }
   }, [getToken, location.pathname, navigate]);
 
   const fetchFavoriteMovies = useCallback(async () => {
     try {
-      const { data } = await axios.get('/api/user/favorite', {
-        headers: { Authorization: `Bearer ${await getToken()}` } 
+      const token = await getToken();
+      const { data } = await api.get('/api/user/favorites', {
+        headers: { Authorization: `Bearer ${token}` } 
       });
       if (data.success) {
         setFavoriteMovies(data.movies);
@@ -59,28 +74,23 @@ export const AppProvider = ({ children }) => {
         toast.error(data.message);
       }
     } catch (error) {
-      console.error(error);
+      // Handled by interceptor
     }
   }, [getToken]);
-  useEffect(() => {
-    const loadShows = async () => {
-      await fetchShows();
-    };
 
-    loadShows(); 
-  }, [fetchShows]);
   useEffect(() => {
-    const loadUserData = async () => {
-      if (user) {
-        await fetchIsAdmin();
-        await fetchFavoriteMovies();
-      }
-    };
-    loadUserData(); 
+    fetchShows(); 
+  }, [fetchShows]);
+
+  useEffect(() => {
+    if (user) {
+      fetchIsAdmin();
+      fetchFavoriteMovies();
+    }
   }, [user, fetchIsAdmin, fetchFavoriteMovies]);
 
   const value = {
-    axios,
+    axios: api, // Provide our configured instance
     user,
     getToken,
     navigate,
@@ -99,5 +109,4 @@ export const AppProvider = ({ children }) => {
   )
 }
 
-// eslint-disable-next-line react-refresh/only-export-components
 export const useAppContext = () => useContext(AppContext) 

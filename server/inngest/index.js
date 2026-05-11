@@ -1,9 +1,20 @@
 import { Inngest } from 'inngest';
 import connectDB from '../configs/db.js';
 import User from '../models/User.js';
+import { importTrendingMoviesLogic } from '../services/movieService.js';
 
 // Create Inngest client
 export const inngest = new Inngest({ id: "Cinema-booking" });
+
+// Background job: Daily trending movie import
+const dailyTrendingImport = inngest.createFunction(
+    { id: "daily-trending-import", cron: "0 0 * * *" },
+    async () => {
+        await connectDB();
+        const result = await importTrendingMoviesLogic();
+        return { success: true, count: result.count };
+    }
+);
 
 // Sync user creation from Clerk to MongoDB
 const syncUserCreation = inngest.createFunction(
@@ -69,5 +80,6 @@ const syncUserUpdation = inngest.createFunction(
 export const functions = [
     syncUserCreation,
     syncUserDeletion,
-    syncUserUpdation
+    syncUserUpdation,
+    dailyTrendingImport
 ];

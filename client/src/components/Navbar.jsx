@@ -49,8 +49,8 @@ const Navbar = () => {
         : 'py-5 bg-black/0 backdrop-blur-none border-transparent'
     }`}>
       
-      <Link to='/' className='max-md:flex-1 group transition-transform duration-300 hover:scale-105' >
-        <img src={assets.logo} alt="logo" className='w-50 h-auto' />
+      <Link to='/' className='group transition-transform duration-300 hover:scale-105' >
+        <img src={assets.logo} alt="logo" className='w-36 md:w-50 h-auto' />
         </Link>
         
         <div className={`max-md:absolute max-md:top-0 max-md:left-0 max-md:font-medium 

@@ -10,16 +10,16 @@ const CACHE_TTL_DAILY = 1000 * 60 * 60 * 24; // 24 hours for daily rotation
 
 export const fetchPopularMovies = async (options = { includeDetails: false, detailLimit: 10, dailyRotate: false, dailySeedSize: 20, pages: 1, maxAdult: 2 }) => {
     try {
-        const dailyRotate = options && options.dailyRotate;
+        const randomRotate = options && options.randomRotate;
         const seedSize = options && Number.isInteger(options.dailySeedSize) ? options.dailySeedSize : 20;
-        const basePage = dailyRotate ? ((Math.floor(Date.now() / (1000 * 60 * 60 * 24)) % seedSize) + 1) : 1;
+        const basePage = randomRotate ? (Math.floor(Math.random() * seedSize) + 1) : 1;
         const totalPages = options?.pages || 1;
         const maxAdult = options?.maxAdult ?? 2;
         const cacheKey = `${CACHE_KEY}_p${basePage}_n${totalPages}`;
 
-        // Use localStorage for daily rotation (persists across tab closes), sessionStorage otherwise
-        const storage = dailyRotate ? localStorage : sessionStorage;
-        const ttl = dailyRotate ? CACHE_TTL_DAILY : CACHE_TTL;
+        // Use sessionStorage so it changes per session/reload if randomized
+        const storage = sessionStorage;
+        const ttl = CACHE_TTL;
 
         try {
             const cached = storage.getItem(cacheKey);
@@ -175,3 +175,35 @@ export const fetchLatestTrailers = async (opts = { limit: 10, ttlHours: 2, pages
         return results;
     } catch (e) { return []; }
 };
+
+export const fetchUpcomingMovies = async () => {
+    try {
+        const response = await fetch(`${BASE_URL}/movie/upcoming?api_key=${API_KEY}&language=en-US&page=1`);
+        if (!response.ok) throw new Error('Failed to fetch upcoming movies');
+        const data = await response.json();
+        return data.results.map(movie => ({
+            ...movie,
+            poster_path: movie.poster_path ? `${IMAGE_BASE}/w500${movie.poster_path}` : null,
+            backdrop_path: movie.backdrop_path ? `${IMAGE_BASE}/w780${movie.backdrop_path}` : null,
+        }));
+    } catch (error) {
+        console.error(error);
+        return [];
+    }
+}
+
+export const fetchNowPlayingMovies = async () => {
+    try {
+        const response = await fetch(`${BASE_URL}/movie/now_playing?api_key=${API_KEY}&language=en-US&page=1`);
+        if (!response.ok) throw new Error('Failed to fetch now playing movies');
+        const data = await response.json();
+        return data.results.map(movie => ({
+            ...movie,
+            poster_path: movie.poster_path ? `${IMAGE_BASE}/w500${movie.poster_path}` : null,
+            backdrop_path: movie.backdrop_path ? `${IMAGE_BASE}/w780${movie.backdrop_path}` : null,
+        }));
+    } catch (error) {
+        console.error(error);
+        return [];
+    }
+}

@@ -1,14 +1,13 @@
 import React, { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { assets, dummyDateTimeData, dummyShowsData } from '../assets/assets'
-import Loading from '../components/Loading'
 import { ClockIcon, ArrowRight, Users, Calendar, Star, MapPin, ArrowLeft } from 'lucide-react'
-import isoTimeFormat from '../lib/isoTimeFormat'
 import BlurCircle from '../components/BlurCircle'
 import toast from 'react-hot-toast'
 import timeFormat from '../lib/timeFormat'
 import { useAppContext } from '../context/AppContext'
 import axios from 'axios'
+import Loading from '../components/Loading'
+import isoTimeFormat from '../lib/isoTimeFormat'
 // fetchShow below will handle backend / TMDB / mock cases
 
 const customStyles = `
@@ -52,7 +51,7 @@ const SeatLayout = () => {
 
   const [selectedSeats, setSelectedSeats] = useState([])
   const [selectedTime, setSelectedTime] = useState(null)
-  const [selectedHall, setSelectedHall] = useState('') 
+  const [selectedHall, setSelectedHall] = useState('')
   const [show, setShow] = useState(null)
   const [isVisible, setIsVisible] = useState(false)
   const [occupiedSeats, setOccupiedSeats] = useState([])
@@ -74,7 +73,7 @@ const SeatLayout = () => {
     { row: 'I', count: 18, type: 'back', label: 'Back Standard' },
     { row: 'J', count: 18, type: 'back', label: 'Back Standard' }
   ]
-  
+
   const fetchShow = async () => {
     try {
       const { data } = await axios.get(`/api/show/${id}`)
@@ -117,7 +116,7 @@ const SeatLayout = () => {
     // Final fallback: construct a mock show from local dummy data so UI works without backend
     const movie = dummyShowsData.find(s => String(s._id) === String(id) || String(s.id) === String(id)) ?? dummyShowsData[0]
     const mockDateTime = {}
-    Object.entries(dummyDateTimeData).forEach(([d, arr]) => {
+    Object.entries(movie.dateTime).forEach(([d, arr]) => {
       mockDateTime[d] = arr.map((item, idx) => ({
         time: item.time,
         showId: item.showId ?? `${movie.id}-${idx}`,
@@ -146,25 +145,10 @@ const SeatLayout = () => {
     }
   }
 
-   
+
   const fetchShowPrice = async (showIdParam) => {
-    try {
-      const showId = showIdParam ?? selectedTime?.showId ?? selectedTime?._id ?? selectedTime?.id
-      if (!showId) return null
-      const { data } = await axios.get(`/api/show/showprice/${showId}`, {
-        headers: { Authorization: `Bearer ${await getToken()}` }
-      })
-      if (data.success) {
-        return data.showPrice ?? 0
-      } else {
-        toast.error(data.message)
-        return null
-      }
-    } catch (error) {
-      console.error('Error fetching show price:', error)
-      toast.error('Failed to fetch show price')
-      return null
-    }
+    // Price is now passed down from getShow API
+    return null;
   }
 
   const bookTickets = async () => {
@@ -203,7 +187,7 @@ const SeatLayout = () => {
         setShow(movieData);
 
         // Trigger fade-in after DOM renders
-        
+
         timerId = setTimeout(() => {
           if (mounted) setIsVisible(true);
         }, 100);
@@ -221,9 +205,9 @@ const SeatLayout = () => {
       mounted = false;
       if (timerId) clearTimeout(timerId);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
-  
+
   useEffect(() => {
     let mounted = true
     const loadPriceAndSeats = async () => {
@@ -253,7 +237,7 @@ const SeatLayout = () => {
 
     loadPriceAndSeats()
     return () => { mounted = false }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date, selectedTime, show?.dateTime])
 
   const handleSeatClick = (seatId) => {
@@ -328,7 +312,7 @@ const SeatLayout = () => {
     }
   }
 
-  
+
   const getAvailableHalls = () => {
     if (!show?.dateTime?.[date]) return []
     const halls = new Set()
@@ -339,7 +323,7 @@ const SeatLayout = () => {
     return Array.from(halls).sort()
   }
 
-  
+
   const getFilteredTimes = () => {
     if (!show?.dateTime?.[date]) return []
 
@@ -348,7 +332,7 @@ const SeatLayout = () => {
     return show.dateTime[date].filter(item => item.hall === selectedHall)
   }
 
-  
+
   const handleHallSelect = (hall) => {
     setSelectedHall(hall)
     setSelectedTime(null) // Reset time selection when hall changes
@@ -393,7 +377,7 @@ const SeatLayout = () => {
 
     switch (status) {
       case 'selected':
-        
+
         return `${baseStyles} bg-gradient-to-br from-green-500 to-green-600 text-white border-green-400 shadow-lg shadow-green-500/50 sync-pulse`
       case 'occupied':
         return `${baseStyles} bg-gradient-to-br from-red-600 to-red-800 text-white border-red-500 cursor-not-allowed opacity-80`
@@ -439,13 +423,13 @@ const SeatLayout = () => {
         <div key={seatId} className="relative group">
           <button
             onClick={() => handleSeatClick(seatId)}
-            disabled={status === 'occupied'} 
+            disabled={status === 'occupied'}
             className={getSeatStyles(status, type)}
           >
             {/* Seat number */}
             <span className="relative z-10">{i}</span>
 
-            
+
             {status === 'selected' && (
               <>
                 <div className="absolute inset-0 bg-green-500/40 rounded-lg blur-sm sync-glow"></div>
@@ -477,7 +461,17 @@ const SeatLayout = () => {
   }
 
   const calculateTotal = () => {
-    return selectedSeats.length * showPrice
+    let x = 0;
+    if (seatRows.filter(row => row.type === 'front').some(row => selectedSeats.includes(row.id))) {
+      x += showPrice * 2 * selectedSeats.length
+    }
+    if (seatRows.filter(row => row.type === 'middle').some(row => selectedSeats.includes(row.id))) {
+      x += showPrice * 1.5 * selectedSeats.length
+    }
+    if (seatRows.filter(row => row.type === 'back').some(row => selectedSeats.includes(row.id))) {
+      x += showPrice * selectedSeats.length
+    }
+    return x
   }
 
   const getSectionColor = (type) => {
@@ -491,7 +485,7 @@ const SeatLayout = () => {
 
   return show ? (
     <div className="min-h-screen bg-black relative overflow-hidden">
-      
+
       <style>{customStyles}</style>
 
       {/* Enhanced Background Effects */}
@@ -512,7 +506,7 @@ const SeatLayout = () => {
           }`}>
           <div className="bg-white/5 mt-10 backdrop-blur-xl rounded-3xl border border-white/10 p-8 lg:sticky lg:top-20 shadow-2xl">
 
-            
+
             <div className="flex items-center gap-4 mb-8">
               <div className="w-12 h-12 bg-linear-to-br from-primary/30 to-primary/10 rounded-2xl flex items-center justify-center backdrop-blur-sm">
                 <Calendar className="w-6 h-6 text-primary" />
@@ -530,7 +524,7 @@ const SeatLayout = () => {
               </div>
             </div>
 
-            
+
             <div className="mb-8">
               <h4 className="text-white font-semibold mb-4 flex items-center gap-2">
                 <MapPin className="w-5 h-5 text-primary" />
@@ -543,8 +537,8 @@ const SeatLayout = () => {
                     key={hall}
                     onClick={() => handleHallSelect(hall)}
                     className={`p-4 rounded-xl border transition-all duration-300 text-left ${selectedHall === hall
-                        ? 'border-primary bg-primary/10 text-white shadow-lg shadow-primary/20'
-                        : 'border-gray-600/50 bg-gray-700/20 text-gray-300 hover:border-primary/50 hover:bg-primary/5'
+                      ? 'border-primary bg-primary/10 text-white shadow-lg shadow-primary/20'
+                      : 'border-gray-600/50 bg-gray-700/20 text-gray-300 hover:border-primary/50 hover:bg-primary/5'
                       }`}
                     style={{
                       animationDelay: `${index * 50}ms`
@@ -579,7 +573,7 @@ const SeatLayout = () => {
               )}
             </div>
 
-            
+
             <div className="mb-8">
               <h4 className="text-white font-semibold mb-4 flex items-center gap-2">
                 <ClockIcon className="w-5 h-5 text-primary" />
@@ -602,8 +596,8 @@ const SeatLayout = () => {
                       key={`${item.time}-${item.hall}`}
                       onClick={() => handleTimeSelect(item)}
                       className={`w-full flex items-center justify-between p-5 rounded-2xl transition-all duration-300 group ${selectedTime?.showId === item.showId
-                          ? 'bg-linear-to-r from-primary to-primary-dull text-white shadow-lg shadow-primary/30 scale-105'
-                          : 'bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 hover:border-primary/30 hover:scale-102'
+                        ? 'bg-linear-to-r from-primary to-primary-dull text-white shadow-lg shadow-primary/30 scale-105'
+                        : 'bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 hover:border-primary/30 hover:scale-102'
                         }`}
                       style={{
                         animationDelay: `${index * 100}ms`
@@ -661,7 +655,7 @@ const SeatLayout = () => {
                       <span className="font-medium">{Number(show.vote_average ?? 0).toFixed(1)}</span>
                     </div>
 
-                    
+
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
                         <Calendar className="w-4 h-4 text-primary" />
@@ -731,7 +725,7 @@ const SeatLayout = () => {
             </h1>
             <p className="text-gray-400 text-lg">Choose your preferred seats for the best cinema experience</p>
 
-            
+
             <div className="mt-6 flex justify-center">
               <div className="flex items-center gap-4 bg-white/5 backdrop-blur-sm rounded-2xl px-6 py-3 border border-white/10">
                 <div className="flex items-center gap-2">
@@ -785,7 +779,7 @@ const SeatLayout = () => {
             <div className="mb-12">
               <div className="text-center mb-6">
                 <span className="text-yellow-500 text-lg font-bold px-4 py-2 bg-yellow-500/10 rounded-full border border-yellow-500/20">
-                  Front Premium • ${showPrice > 0 ? showPrice : '...'}
+                  Front Premium • ${showPrice > 0 ? showPrice * 2 : '...'}
                 </span>
               </div>
               {seatRows.filter(row => row.type === 'front').map(renderSeatRow)}
@@ -795,7 +789,7 @@ const SeatLayout = () => {
             <div className="mb-12">
               <div className="text-center mb-6">
                 <span className="text-primary text-lg font-bold px-4 py-2 bg-primary/10 rounded-full border border-primary/20">
-                  Middle VIP • ${showPrice > 0 ? showPrice : '...'}
+                  Middle VIP • ${showPrice > 0 ? showPrice * 1.5 : '...'}
                 </span>
               </div>
               {seatRows.filter(row => row.type === 'middle').map(renderSeatRow)}
@@ -819,7 +813,7 @@ const SeatLayout = () => {
               <span className="text-gray-400 font-medium">Available</span>
             </div>
             <div className="flex items-center gap-3">
-              
+
               <div className="w-6 h-6 bg-linear-to-br from-green-500 to-green-600 rounded-lg shadow-lg shadow-green-500/30 sync-pulse"></div>
               <span className="text-gray-400 font-medium">Selected</span>
             </div>
@@ -854,7 +848,7 @@ const SeatLayout = () => {
                 <span className="text-gray-400 font-medium">Selected Seats:</span>
                 <div className="flex gap-2 flex-wrap">
                   {selectedSeats.map(seat => (
-                    
+
                     <span key={seat} className="px-3 py-1 bg-green-500/20 text-green-400 rounded-lg text-sm font-bold border border-green-500/30 sync-pulse">
                       {seat}
                     </span>

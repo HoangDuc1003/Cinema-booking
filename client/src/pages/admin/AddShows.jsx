@@ -1,27 +1,36 @@
 import React, { useState, useEffect } from 'react';
-import { dummyShowsData } from '../../assets/assets';
 import Loading from '../../components/Loading';
 import Title from '../../components/admin/Title';
-
+import BlurCircle from '../../components/BlurCircle';
 import { StarIcon, XIcon, PlusIcon } from 'lucide-react'; 
 import { kConverter } from '../../lib/kConverter';
+import { useAppContext } from '../../context/AppContext';
+import toast from 'react-hot-toast'
 
 const AddShows = () => {
+  const {axios,getToken,user} = useAppContext();
   const currency = import.meta.env.VITE_CURRENCY || "$";
   const [nowPlayingMovies, setNowPlayingMovies] = useState([]);
   const [selectedMovie, setSelectedMovie] = useState(null);
-  
-  // Date-time map: { "2025-05-10": ["10:00", "14:00"], ... }
   const [dateTimeSelection, setDateTimeSelection] = useState({}); 
   const [dateTimeInput, setDateTimeInput] = useState("");
   const [showPrice, setShowPrice] = useState("");
+  const [addShow,setAddShow] = useState(false);
 
   const fetchNowPlayingMovies = async () => {
-    setNowPlayingMovies(dummyShowsData);
+    try{
+      const { data } = await axios.get('/api/show/now-playing', {
+        headers: { Authorization: `Bearer ${await getToken()}` }
+      });
+      if (data.success) {
+        setNowPlayingMovies(data.movies);
+      }
+    }catch(error){
+      console.log("Error fetching movies:",error)
+    }
   };
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchNowPlayingMovies();
   }, []);
 
@@ -65,25 +74,52 @@ const AddShows = () => {
   };
 
   // Submit handler (mock)
-  const handleSubmit = () => {
-    if (!selectedMovie || !showPrice || Object.keys(dateTimeSelection).length === 0) {
-        alert("Please fill in movie, price and at least 1 showtime!");
+  const handleSubmit = async() => {
+    try {
+      setAddShow(true)
+      if (!selectedMovie || !showPrice || Object.keys(dateTimeSelection).length === 0) {
+        toast.error("Please fill in movie, price and at least 1 showtime!");
+        setAddShow(false)
         return;
+      }
+      
+      const showInput = Object.entries(dateTimeSelection).map(([date,times]) => ({date,times}))
+      const payload ={
+        movieId : selectedMovie.id, 
+        showInput,
+        showPrice:Number(showPrice)
+      }
+
+      const { data } = await axios.post('/api/show/add',payload,{
+        headers : {Authorization: `Bearer ${await getToken()}`}
+      })
+
+      if(data.success){
+        toast.success(data.message)
+        setDateTimeSelection({})
+        setShowPrice("")
+        setSelectedMovie(null)
+        await fetchShows()
+      }else{
+        toast.error(data.message)
+      }
+    } catch (error) {
+      console.error("Submission error: ",error);
+      toast.error("Error adding show. Please try again.");
     }
-    console.log("Data to submit:", {
-        movieId: selectedMovie._id,
-        price: showPrice,
-        shows: dateTimeSelection
-    });
-    alert("Shows added successfully (check console)!");
-    // Reset form here if needed
+    setAddShow(false)
   };
 
   return nowPlayingMovies.length > 0 ? (
     <>
       <Title text1="Add " text2="Show" />
-      <p className='mt-10 text-lg font-medium'>Now Playing Movies</p>
-      
+      <div className='relative flex flex-wrap gap-4 '>
+        <BlurCircle top="-100px" left='0'/>
+        <BlurCircle top="200px" right='0'/>
+        <BlurCircle top="500px" left='0'/>
+        <BlurCircle bottom="0" right='0'/>
+      <p className='text-lg font-medium'>Now Playing Movies</p>
+      </div>
       {/* Movie list */}
       <div className='overflow-x-auto pb-4'>
         <div className='group flex flex-wrap gap-4 mt-4 w-max'>
@@ -91,11 +127,15 @@ const AddShows = () => {
             <div 
                 key={movie.id} 
                 onClick={() => setSelectedMovie(movie)}
-                className={`relative max-w-40 cursor-pointer transition duration-300 rounded-lg overflow-hidden border-2
+                className={`relative max-w-35 cursor-pointer transition duration-300 rounded-lg overflow-hidden border-2
                     ${selectedMovie?.id === movie.id ? 'border-primary' : 'border-transparent group-hover:not-hover:opacity-40 hover:-translate-y-1'}`}
             >
               <div className='relative'>
-                <img src={movie.poster_path} alt="" className='w-full object-cover brightness-90' />
+               <img 
+                  src={`https://image.tmdb.org/t/p/w500${movie.poster_path}`} 
+                  alt={movie.title} 
+                  className='w-full object-cover brightness-90' 
+                />
                 <div className='text-sm flex items-center justify-between p-2 bg-black/70 w-full absolute left-0 bottom-0'>
                   <p className='flex items-center gap-1 text-gray-400'>
                     <StarIcon className="w-4 h-4 text-primary fill-primary" />
@@ -109,11 +149,10 @@ const AddShows = () => {
         </div>
       </div>
 
-      {/* Show form (visible when a movie is selected) */}
-      {selectedMovie && (
+      {/* Show form (always visible) */}
         <div className='mt-10 max-w-4xl bg-primary/5 border border-primary/20 p-6 rounded-lg'>
             <h2 className='text-xl font-bold mb-6 text-white'>
-                Set Shows for: <span className="text-primary">{selectedMovie.title}</span>
+                Set Shows for: <span className="text-primary">{selectedMovie?.title || "No Movie Selected"}</span>
             </h2>
 
             <div className='flex flex-col md:flex-row gap-6'>
@@ -178,13 +217,13 @@ const AddShows = () => {
             <div className='mt-8 text-right'>
                 <button 
                     onClick={handleSubmit}
+                    disabled = {addShow}
                     className='bg-linear-to-r from-primary to-primary-dull hover:shadow-lg hover:shadow-primary/50 text-white font-medium px-8 py-3 rounded-md transition transform hover:scale-105 active:scale-95'
                 >
                     Add Shows
                 </button>
             </div>
         </div>
-      )}
     </>
   ) : <Loading />;
 }

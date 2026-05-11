@@ -1,6 +1,6 @@
 import { clerkClient } from "@clerk/express";
 import Booking from "../models/Booking.js";
-
+import Movies from "../models/Movie.js";
 
 //api controller function to get user bookings
 export const getUserBookings = async (req, res) => {
@@ -45,7 +45,7 @@ export const updateFavorite = async (req, res) => {
 
 export const getFavorites = async (req,res) =>{
     try {
-        const user = await clerkClient.users.getUser(req.auth.userId)
+        const user = await clerkClient.users.getUser(req.auth().userId)
         const favorites = user.privateMetadata.favorites;
 
         //getting movies from database
