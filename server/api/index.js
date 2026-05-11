@@ -1,14 +1,14 @@
 import express from 'express';
 import cors from 'cors';
 import 'dotenv/config';
-import connectDB from './configs/db.js';
+import connectDB from '../configs/db.js';
 import { clerkMiddleware } from '@clerk/express'
-import { inngest, functions } from './inngest/index.js';
+import { inngest, functions } from '../inngest/index.js';
 import { serve } from 'inngest/express'
-import showRouter from './routes/showRoutes.js';
-import bookingRouter from './routes/bookingRoutes.js';
-import adminRouter from './routes/adminRoutes.js';
-import userRouter from './routes/userRoutes.js';
+import showRouter from '../routes/showRoutes.js';
+import bookingRouter from '../routes/bookingRoutes.js';
+import adminRouter from '../routes/adminRoutes.js';
+import userRouter from '../routes/userRoutes.js';
 
 // Handle process-level errors
 process.on('unhandledRejection', (reason) => {

@@ -2,10 +2,10 @@
   "name": "server",
   "version": "1.0.0",
   "description": "",
-  "main": "server.js",
+  "main": "api/index.js",
   "scripts": {
-    "server": "nodemon server.js",
-    "start": "node server.js"
+    "server": "nodemon api/index.js",
+    "start": "node api/index.js"
   },
   "keywords": [],
   "author": "",
@@ -16,12 +16,19 @@
     "axios": "^1.16.0",
     "cloudinary": "^2.10.0",
     "cors": "^2.8.6",
+    "domexception": "^1.0.1",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "inngest": "^4.3.0",
-    "mongoose": "^9.6.1"
+    "mongoose": "^9.6.1",
+    "stripe": "^22.1.1",
+    "svix": "^1.93.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"
+  },
+  "overrides": {
+    "serialize-error-cjs": "0.2.0",
+    "node-domexception": "file:./mocks/node-domexception"
   }
 }
