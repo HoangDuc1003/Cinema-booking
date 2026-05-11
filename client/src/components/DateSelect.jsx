@@ -4,14 +4,6 @@ import { ChevronLeftIcon, ChevronRightIcon, Sparkles } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useNavigate } from 'react-router-dom'
 
-/**
- * DateSelect — Date picker for movie showtimes.
- *
- * CHANGES:
- * 1. Added isMockData prop — shows a subtle "Demo Showtimes" indicator
- *    so users understand these are generated, not real showtimes.
- * 2. Added scroll pagination for dates using chevron buttons.
- */
 const DateSelect = ({ id, availableDates, isMockData = false }) => {
     const navigate = useNavigate();
     const [selected, setSelected] = useState(null);
@@ -36,6 +28,7 @@ const DateSelect = ({ id, availableDates, isMockData = false }) => {
     // Auto-select first date if available
     useEffect(() => {
         if (dates.length > 0 && !selected) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setSelected(dates[0]);
         }
     }, [dates, selected]);

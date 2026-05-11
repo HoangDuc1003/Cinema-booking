@@ -3,24 +3,10 @@ import MovieCard from './MovieCard';
 import AnimatedCard from './AnimatedCard';
 
 /**
- * MovieGrid — Reusable grid layout for movie cards with scroll animations.
- *
- * WHY extract this:
- * The exact same grid + MovieCard mapping pattern was duplicated in 5 places:
- * Movies.jsx, FeatureSection.jsx, Favorite.jsx, Release.jsx, MovieDetails.jsx.
- * Each had slightly different grid column configs but identical logic.
- * DRY principle: one change here updates all 5 locations.
- *
- * WHY useMemo on movieItems:
- * Without memo, the .map() creates new React elements on EVERY parent re-render,
- * even if `movies` array hasn't changed. useMemo skips the mapping entirely
- * unless `movies` reference changes. Combined with React.memo on MovieCard,
- * this eliminates unnecessary re-renders of the entire grid.
- *
- * @param {Array} movies - Array of movie objects
- * @param {string} columns - Tailwind grid column classes (default: responsive 1-4 cols)
- * @param {boolean} animated - Whether to wrap cards in AnimatedCard (default: true)
- * @param {number} staggerDelay - Ms between each card's animation (default: 80)
+ * @param {Array} movies 
+ * @param {string} columns 
+ * @param {boolean} animated 
+ * @param {number} staggerDelay 
  */
 const MovieGrid = ({
   movies = [],

@@ -2,31 +2,6 @@ import React from 'react';
 import useIntersectionObserver from '../hooks/useIntersectionObserver';
 
 /**
- * AnimatedCard — Scroll-triggered entrance animation wrapper.
- *
- * DESIGN DECISIONS:
- *
- * 1. WHY CSS transform + opacity ONLY:
- *    These are the ONLY two CSS properties that trigger GPU compositing without
- *    causing layout reflow or repaint. Properties like `top`, `left`, `margin`,
- *    or `height` would trigger expensive layout recalculations for EVERY frame.
- *    transform + opacity run on the GPU compositor thread, completely off the
- *    main thread → zero jank even with 40+ animated cards.
- *
- * 2. WHY will-change:
- *    Tells the browser to promote this element to its own compositor layer
- *    BEFORE the animation starts. Without it, the browser must create the layer
- *    on-the-fly when animation triggers, causing a single-frame hitch.
- *    We remove will-change after animation completes to free GPU memory.
- *
- * 3. WHY cubic-bezier(0.16, 1, 0.3, 1):
- *    This is an "ease-out-expo" curve — fast start, very slow end. It creates
- *    the premium "deceleration" feel seen in iOS/Material Design. Linear or
- *    basic ease-out feels mechanical in comparison.
- *
- * 4. WHY Intersection Observer over scroll events:
- *    See useIntersectionObserver hook for detailed reasoning.
- *
  * @param {React.ReactNode} children - The card content to animate
  * @param {number} index - Card index for stagger delay calculation
  * @param {number} staggerDelay - Ms between each card's animation start (default: 80ms)

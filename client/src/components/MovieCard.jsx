@@ -26,6 +26,7 @@ const MovieCard = ({ movie }) => {
 
   useEffect(() => {
     const favorites = JSON.parse(localStorage.getItem('nitro_favorites') || '[]');
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsFavorited(favorites.some(f => f.id === movie.id));
   }, [movie.id]);
 

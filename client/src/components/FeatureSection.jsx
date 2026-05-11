@@ -6,22 +6,6 @@ import { fetchPopularMovies } from '../services/tmdb'
 import MovieGrid from './MovieGrid'
 import Loading from './Loading'
 
-/**
- * FeatureSection — "Now Showing" movie grid on the home page.
- *
- * FIXES APPLIED:
- * 1. REMOVED document.createElement('style') injection — this was a memory leak.
- *    The <style> tag was appended to <head> but NEVER removed on unmount.
- *    If the user navigated away and back 10 times, 10 duplicate <style> tags
- *    would accumulate in the DOM. The styleRef guard only prevented duplicates
- *    within the same mount, not across re-mounts.
- *    FIX: Moved CSS to index.css (global) or use inline styles.
- *
- * 2. REPLACED manual MovieCard mapping with <MovieGrid> — eliminates 15 lines
- *    of duplicated grid logic and automatically adds scroll animations.
- *
- * 3. REMOVED unused `useRef` import (was only used for the buggy styleRef).
- */
 const FeatureSection = () => {
   const navigate = useNavigate();
   const [movies, setMovies] = useState([]);

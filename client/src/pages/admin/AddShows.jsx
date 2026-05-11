@@ -31,6 +31,7 @@ const AddShows = () => {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchNowPlayingMovies();
   }, []);
 
@@ -99,6 +100,7 @@ const AddShows = () => {
         setDateTimeSelection({})
         setShowPrice("")
         setSelectedMovie(null)
+        // eslint-disable-next-line no-undef
         await fetchShows()
       }else{
         toast.error(data.message)

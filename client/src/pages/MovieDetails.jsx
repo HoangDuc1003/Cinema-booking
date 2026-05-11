@@ -11,28 +11,6 @@ import { useAppContext } from '../context/AppContext';
 import toast from 'react-hot-toast';
 import generateMockShowtimes from '../lib/generateMockShowtimes';
 
-/**
- * MovieDetails — Individual movie detail page.
- *
- * PERFORMANCE STRATEGY — Two-phase loading for sub-1-second render:
- *
- * PHASE 1 (Critical path — blocks render, target <500ms):
- *   fetchMovieDetails(id) from TMDB → cached in sessionStorage for 24h.
- *   First visit: ~300-500ms (single API call).
- *   Revisit: ~5ms (sessionStorage hit).
- *   Mock showtimes generated synchronously (~1ms).
- *   → Page renders with movie info + bookable dates.
- *
- * PHASE 2 (Non-critical — runs AFTER render, never blocks):
- *   Backend API check (with 2s timeout): upgrades to real showtimes if available.
- *   Suggestions fetch: populates "You May Also Like" grid.
- *   → These load in background, UI updates seamlessly when ready.
- *
- * WHY this beats Promise.allSettled:
- *   allSettled waits for ALL promises, including the slowest one.
- *   When backend is down, that's a 10-30s hang before anything renders.
- *   Two-phase approach shows content immediately, upgrades later.
- */
 const MovieDetails = () => {
   const [movies, setMovies] = useState([]);
   const { id } = useParams();
@@ -65,13 +43,10 @@ const MovieDetails = () => {
   useEffect(() => {
     if (show) {
       const favorites = JSON.parse(localStorage.getItem('nitro_favorites') || '[]');
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setIsFavorited(favorites.some(f => f.id === show.id));
     }
   }, [show]);
-
-  // ═══════════════════════════════════════════════════════════════════
-  // PHASE 1: Critical path — fetch movie details ONLY (fast, cached)
-  // ═══════════════════════════════════════════════════════════════════
   useEffect(() => {
     let mounted = true;
 
@@ -107,20 +82,15 @@ const MovieDetails = () => {
     return () => { mounted = false; };
   }, [id]);
 
-  // ═══════════════════════════════════════════════════════════════════
-  // PHASE 2: Non-critical — load suggestions + check backend (deferred)
-  // ═══════════════════════════════════════════════════════════════════
   useEffect(() => {
     // Only run after Phase 1 completes (show is set)
     if (!show) return;
     let mounted = true;
-
-    // Load "You May Also Like" suggestions
     fetchPopularMovies()
       .then(data => {
         if (mounted) setMovies(Array.isArray(data) ? data.slice(0, 4) : []);
       })
-      .catch(() => {}); // Non-critical — fail silently
+      .catch(() => {});
 
     // Check backend for real showtimes (2s timeout — don't block UI)
     const controller = new AbortController();
@@ -157,6 +127,7 @@ const MovieDetails = () => {
     return `https://image.tmdb.org/t/p/original${path}`;
   }, [show?.poster_path]);
 
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const releaseYear = useMemo(() =>
     show?.release_date ? show.release_date.split("-")[0] : 'N/A',
     [show?.release_date]
@@ -185,7 +156,7 @@ const MovieDetails = () => {
             alt={show.title}
             className='max-md:mx-auto rounded-2xl h-130 w-90 object-cover group-hover:scale-105 transition-transform duration-500'
           />
-          <div className="absolute top-0 left-[-150%] w-1/2 h-full z-10 block transform -skew-x-12 bg-gradient-to-r from-transparent
+          <div className="absolute top-0 left-[-150%] w-1/2 h-full z-10 block transform -skew-x-12 bg-linear-to-r from-transparent
             via-white/40 to-transparent transition-all duration-700 group-hover:left-[150%]">
           </div>
         </div>
@@ -214,8 +185,8 @@ const MovieDetails = () => {
               <PlayCircleIcon className="w-5 h-5" />
               Watch Trailer
             </button>
-            <a href="#dateSelect" className="group flex items-center gap-3 px-8 py-4 bg-gradient-to-r from-[#F84565] to-[#D63854]
-              hover:from-[#D63854] hover:to-[#F84565] text-white font-semibold rounded-full shadow-lg shadow-[#F84565]/30 
+            <a href="#dateSelect" className="group flex items-center gap-3 px-8 py-4 bg-linear-to-r from-primary to-[#D63854]
+              hover:from-[#D63854] hover:to-[#F84565] text-white font-semibold rounded-full shadow-lg shadow-primary/30 
               hover:shadow-xl hover:shadow-[#F84565]/60 hover:scale-105 active:scale-95 transition-all duration-300 border
               border-[#F84565]/30 hover:border-[#F84565]/60 relative overflow-hidden">
               Buy Tickets

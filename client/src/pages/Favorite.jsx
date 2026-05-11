@@ -3,14 +3,7 @@ import MovieGrid from '../components/MovieGrid'
 import BlurCircle from '../components/BlurCircle'
 import Loading from '../components/Loading'
 
-/**
- * Favorite — Displays user's favorited movies from localStorage.
- *
- * CHANGES:
- * 1. Replaced manual MovieCard grid with MovieGrid for scroll animations.
- * 2. No other changes needed — this page already had proper cleanup for
- *    the favoritesUpdated event listener. Good pattern.
- */
+
 const Favorite = () => {
   const [movies, setMovies] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
