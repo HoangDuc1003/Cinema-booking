@@ -9,27 +9,29 @@ import showRouter from '../routes/showRoutes.js';
 import bookingRouter from '../routes/bookingRoutes.js';
 import adminRouter from '../routes/adminRoutes.js';
 import userRouter from '../routes/userRoutes.js';
+import { stripeWebhooks } from '../controllers/stripeWebhooks.js';
 
-// Handle process-level errors
+// Error handlers
 process.on('unhandledRejection', (reason) => {
     console.error('\x1b[31m[Unhandled Rejection]\x1b[0m', reason);
 });
-
 process.on('uncaughtException', (error) => {
     console.error('\x1b[31m[Uncaught Exception]\x1b[0m', error);
     process.exit(1);
 });
 
-// Core middleware
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Core middleware
+// Stripe webhook must use raw body (before express.json)
+app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), stripeWebhooks);
+
+// Middleware
 app.use(express.json())
 app.use(cors())
 app.use(clerkMiddleware())
 
-// API routes
+// Routes
 app.get('/', (req, res) => res.send('Server is live!'))
 app.use('/api/inngest', serve({ client: inngest, functions }));
 app.use('/api/show', showRouter)
@@ -42,14 +44,12 @@ const startServer = async () => {
     try {
         await connectDB();
     } catch (error) {
-        console.error('\x1b[31m[Critical] Database connection failed at startup:\x1b[0m', error.message);
-        console.error('\x1b[33m[Tip] The server is still starting, but API calls requiring a database will fail.\x1b[0m');
-        console.error('\x1b[33m[Tip] Check your internet connection or try using a different DNS (e.g., 8.8.8.8).\x1b[0m');
+        console.error('\x1b[31m[Critical] DB connection failed:\x1b[0m', error.message);
+        console.error('\x1b[33m[Tip] Server still starts, but DB calls will fail.\x1b[0m');
     }
-
     app.listen(port, () => {
-        console.log(`\x1b[32m✔ Server is running on port ${port}\x1b[0m`);
-        console.log(`\x1b[36m➜ Local:   http://127.0.0.1:${port}\x1b[0m`);
+        console.log(`\x1b[32m✔ Server running on port ${port}\x1b[0m`);
+        console.log(`\x1b[36m➜ Local: http://127.0.0.1:${port}\x1b[0m`);
     });
 };
 

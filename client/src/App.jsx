@@ -6,28 +6,8 @@ import { Toaster } from 'react-hot-toast'
 import Footer from './components/Footer'
 import ErrorBoundary from './components/ErrorBoundary'
 import { useAppContext } from './context/AppContext';
+import Loading from './components/Loading';
 
-/**
- * App — Root application component.
- *
- * CHANGES:
- * 1. LAZY-LOADED admin routes — Admin pages (Layout, DashBoard, AddShows,
- *    ListShows, ListBookings) were previously eager-imported, meaning EVERY
- *    user downloaded admin code even though only admins need it.
- *    Impact: ~15-20KB saved from initial bundle for 99% of users.
- *
- * 2. ADDED ErrorBoundary wrapping each route — prevents a crash in one page
- *    from taking down the entire app. Navbar/Footer stay functional.
- *
- * 3. REMOVED duplicate SeatLayout route — `/movies/:id/date` and `/movies/:id/:date`
- *    were both pointing to SeatLayout. The first one is a literal string "date"
- *    which conflicts with the dynamic `:date` param. Kept only the dynamic one.
- *
- * 4. IMPROVED Suspense fallback — Added a minimal skeleton loader instead of
- *    plain text "Loading..." for better perceived performance.
- */
-
-// User-facing pages (already lazy-loaded — good!)
 const Home = lazy(() => import('./pages/Home'));
 const Movies = lazy(() => import('./pages/Movies'));
 const MovieDetails = lazy(() => import('./pages/MovieDetails'));
@@ -49,7 +29,7 @@ const ListBookings = lazy(() => import('./pages/admin/ListBookings'));
 const PageFallback = () => (
   <div className="min-h-[60vh] flex items-center justify-center">
     <div className="flex flex-col items-center gap-4">
-      <div className="w-12 h-12 rounded-full border-2 border-t-[#F84565] border-white/10 animate-spin" />
+      <div className="w-12 h-12 rounded-full border-2 border-t-primary border-white/10 animate-spin" />
       <p className="text-gray-500 text-sm font-medium tracking-wide">Loading...</p>
     </div>
   </div>
@@ -89,6 +69,11 @@ const App = () => {
                 <MyBookings />
               </ErrorBoundary>
             } />
+            <Route path='/loading/:nextUrl' element={
+              <ErrorBoundary>
+                <Loading />
+              </ErrorBoundary>
+            } />
             <Route path='/favorite' element={
               <ErrorBoundary>
                 <Favorite />
@@ -109,14 +94,11 @@ const App = () => {
                 <MyMovies />
               </ErrorBoundary>
             } />
-            {/* Single dynamic route for SeatLayout — removed duplicate "/movies/:id/date" */}
             <Route path="/movies/:id/:date" element={
               <ErrorBoundary>
                 <SeatLayout />
               </ErrorBoundary>
             } />
-
-            {/* Admin routes — now lazy-loaded */}
             <Route path="/admin/*" element={user ? (
               <ErrorBoundary>
                 <Layout />

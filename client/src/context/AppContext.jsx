@@ -23,21 +23,6 @@ api.interceptors.response.use(
 // eslint-disable-next-line react-refresh/only-export-components
 export const AppContext = createContext()
 
-/**
- * AppProvider — Global application state.
- *
- * FIXES:
- * 1. fetchIsAdmin no longer depends on `location.pathname`.
- *    BEFORE: Every route navigation triggered a re-fetch of admin status,
- *    because location.pathname was in the dependency array of both
- *    fetchIsAdmin (useCallback) and the useEffect that calls it.
- *    This caused unnecessary API calls on EVERY navigation.
- *    FIX: Admin redirect logic moved to a separate useEffect that runs
- *    only when isAdmin state changes, not on every navigation.
- *
- * 2. Added useRef for admin check to prevent duplicate calls during
- *    React StrictMode double-mount in development.
- */
 export const AppProvider = ({ children }) => {
   const [isAdmin, setIsAdmin] = useState(false)
   const [shows, setShows] = useState([])
@@ -111,8 +96,6 @@ export const AppProvider = ({ children }) => {
   }, [user, fetchIsAdmin, fetchFavoriteMovies]);
 
   // FIX: Separate effect for admin route protection.
-  // Only runs when isAdmin changes (once after fetchIsAdmin resolves),
-  // NOT on every navigation like before.
   useEffect(() => {
     if (user && !isAdmin && location.pathname.startsWith('/admin')) {
       navigate('/');

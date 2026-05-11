@@ -5,7 +5,6 @@ import BlurCircle from '../components/BlurCircle'
 import toast from 'react-hot-toast'
 import timeFormat from '../lib/timeFormat'
 import { useAppContext } from '../context/AppContext'
-import axios from 'axios'
 import Loading from '../components/Loading'
 import isoTimeFormat from '../lib/isoTimeFormat'
 import { fetchMovieDetails } from '../services/tmdb'
@@ -100,7 +99,7 @@ const Seat = React.memo(({ seatId, status, type, showPrice, onClick }) => {
 });
 
 const SeatLayout = () => {
-  const { getToken, user } = useAppContext()
+  const { getToken, user, axios } = useAppContext()
   const { id, date } = useParams()
   const navigate = useNavigate()
   const location = useLocation()
@@ -235,53 +234,30 @@ const SeatLayout = () => {
       const showId = selectedTime?.showId ?? selectedTime?._id ?? selectedTime?.id
       if (!showId) return toast.error('No show selected')
 
-      // For mock showtimes — save to localStorage and navigate instantly
-      if (typeof showId === 'string' && showId.startsWith('mock_')) {
-        // Build booking object matching backend structure for consistent rendering
-        const booking = {
-          _id: `demo_${Date.now()}`,
-          isDemo: true,
-          isPaid: false,
-          bookedSeats: [...selectedSeats],
-          amount: calculateTotal,
-          createdAt: new Date().toISOString(),
-          show: {
-            movie: {
-              title: show.title,
-              poster_path: show.poster_path,
-              runtime: show.runtime,
-            },
-            showDateTime: selectedTime.time,
-            hall: selectedTime.hall,
-            price: selectedTime.price,
-          },
-        };
+      // Include mock showtime metadata for backend to create show on-the-fly
+      const isMock = typeof showId === 'string' && showId.startsWith('mock_');
+      const payload = {
+        showId,
+        selectedSeats,
+        totalAmount: calculateTotal,
+        ...(isMock && {
+          movieId: String(show.id || show._id),
+          showDateTime: selectedTime.time,
+          hall: selectedTime.hall,
+          price: selectedTime.price
+        })
+      };
 
-        // Save to localStorage (append to existing demo bookings)
-        const existing = JSON.parse(localStorage.getItem('nitro_demo_bookings') || '[]');
-        existing.unshift(booking); // newest first
-        localStorage.setItem('nitro_demo_bookings', JSON.stringify(existing));
-
-        // Flash success + navigate instantly
-        toast.success(`Booking confirmed! ${selectedSeats.length} seat(s) reserved.`, {
-          icon: '🎬',
-          duration: 3000,
-          style: { background: '#1a1a1a', color: '#fff', border: '1px solid #10b981' }
-        });
-
-        navigate('/my-bookings');
-        window.scrollTo(0, 0);
-        return;
-      }
-
-      // Real booking — goes through backend + Stripe
-      const { data } = await axios.post('/api/booking/create', { showId, selectedSeats }, {
+      // Create booking and redirect to My Bookings
+      const { data } = await axios.post('/api/booking/create', payload, {
         headers: { Authorization: `Bearer ${await getToken()}` }
-      })
+      });
       if (data.success) {
-        window.location.href = data.url
+        toast.success("Booking confirmed!");
+        navigate('/my-bookings');
+        scrollTo(0,0)
       } else {
-        toast.error(data.message)
+        toast.error(data.message);
       }
     } catch (error) {
       toast.error(error.message || 'Failed to book tickets')
@@ -396,12 +372,9 @@ const SeatLayout = () => {
     }
 
     // FIX: Determine action BEFORE setState to avoid side-effects inside updater.
-    // Calling toast() inside setSelectedSeats triggers a render of <Toaster/>
-    // while SeatLayout's render is still in progress → React warning.
     setSelectedSeats(prev => {
       const isSelected = prev.includes(seatId);
       if (!isSelected && prev.length >= 8) {
-        // Schedule toast OUTSIDE the updater via microtask
         queueMicrotask(() => toast.error('You can only select up to 8 seats', { icon: '👥', style: { background: '#1a1a1a', color: '#fff', border: '1px solid #333' } }));
         return prev;
       }
@@ -521,11 +494,10 @@ const SeatLayout = () => {
       </div>
     )
   }
-
-  // Optimized Pricing Calculation
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const calculateTotal = React.useMemo(() => {
     let total = 0;
-    selectedSeats.forEach(seatId => {
+    selectedSeats.forEach((seatId) => {
       const rowLetter = seatId.charAt(0);
       const rowConfig = seatRows.find(r => r.row === rowLetter);
 
@@ -534,7 +506,7 @@ const SeatLayout = () => {
         else if (rowConfig.type === 'middle') total += showPrice * 1.5;
         else if (rowConfig.type === 'back') total += showPrice;
       }
-    });
+    })
     return Math.round(total);
   }, [selectedSeats, seatRows, showPrice])
 

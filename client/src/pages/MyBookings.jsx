@@ -5,18 +5,16 @@ import AnimatedCard from '../components/AnimatedCard'
 import timeFormat from '../lib/timeFormat'
 import { dateFormat } from '../lib/dateFormat'
 import { useAppContext } from '../context/AppContext'
-import { Ticket, Clock, MapPin, CreditCard, Trash2, Sparkles } from 'lucide-react'
+import { Ticket, Clock, MapPin, CreditCard, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import MovieGrid from '../components/MovieGrid'
 import { fetchPopularMovies } from '../services/tmdb'
 
 const MyBookings = () => {
   const currency = import.meta.env.VITE_CURRENCY || '$'
-  const [backendBookings, setBackendBookings] = useState([])
-  const [demoBookings, setDemoBookings] = useState([])
+  const [bookings, setBookings] = useState([])
   const [suggestions, setSuggestions] = useState([])
   const [isLoading, setIsLoading] = useState(true)
-
   const { getToken, user, axios } = useAppContext();
 
   const getImageUrl = (path) => {
@@ -25,82 +23,103 @@ const MyBookings = () => {
     return `https://image.tmdb.org/t/p/w500${path}`;
   };
 
-  // Load demo bookings from localStorage INSTANTLY
-  useEffect(() => {
-    try {
-      const demos = JSON.parse(localStorage.getItem('nitro_demo_bookings') || '[]');
-      setDemoBookings(demos);
-    } catch {
-      setDemoBookings([]);
-    }
-  }, []);
-
-  // Load backend bookings and suggestions in background (non-blocking)
+  // Fetch bookings and suggestions on mount
   useEffect(() => {
     let mounted = true;
-
-    // Load suggestions
     fetchPopularMovies().then(data => {
       if (mounted) setSuggestions(Array.isArray(data) ? data.slice(0, 4) : []);
     }).catch(() => {});
 
-    // Load backend bookings
-    const loadBackendBookings = async () => {
+    const loadBookings = async () => {
       if (!user) { setIsLoading(false); return; }
       try {
         const { data } = await axios.get('/api/booking/my-bookings', {
           headers: { Authorization: `Bearer ${await getToken()}` },
           timeout: 5000,
         });
-        if (mounted && data.success) setBackendBookings(data.bookings || []);
-      } catch {
-        // Backend unavailable — demo bookings still show
-      } finally {
-        if (mounted) setIsLoading(false);
-      }
+        if (mounted && data.success) setBookings(data.bookings || []);
+      } catch { /* backend unavailable */ }
+      finally { if (mounted) setIsLoading(false); }
     };
-    loadBackendBookings();
-
+    loadBookings();
     return () => { mounted = false; };
   }, [user]);
 
-  // Merge both sources, newest first
-  const allBookings = useMemo(() => {
-    const combined = [
-      ...demoBookings.map(b => ({ ...b, isDemo: true })),
-      ...backendBookings.map(b => ({ ...b, isDemo: false })),
-    ];
-    combined.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-    return combined;
-  }, [demoBookings, backendBookings]);
+  // Sort newest first
+  const sortedBookings = useMemo(() => {
+    return [...bookings].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  }, [bookings]);
 
-  const deleteDemoBooking = useCallback((bookingId) => {
-    setDemoBookings(prev => {
-      const updated = prev.filter(b => b._id !== bookingId);
-      localStorage.setItem('nitro_demo_bookings', JSON.stringify(updated));
-      return updated;
-    });
-    toast.success('Booking removed', {
-      icon: '🗑️',
+  // Calculate unpaid totals
+  const unpaidBookings = useMemo(() => sortedBookings.filter(b => !b.isPaid), [sortedBookings]);
+  const totalAmount = useMemo(() => unpaidBookings.reduce((sum, b) => sum + Number(b.amount || 0), 0), [unpaidBookings]);
+
+  // Pay Now → create Stripe session and redirect to checkout
+  const handlePayNow = useCallback(async (item) => {
+    const toastId = toast.loading('Redirecting to payment...', {
       style: { background: '#1a1a1a', color: '#fff', border: '1px solid #333' }
     });
-  }, []);
+    try {
+      const { data } = await axios.post('/api/booking/pay-now', { bookingId: item._id }, {
+        headers: { Authorization: `Bearer ${await getToken()}` }
+      });
+      if (data.success) {
+        toast.dismiss(toastId);
+        window.location.href = data.url;
+      } else {
+        toast.error(data.message || 'Payment failed', { id: toastId });
+      }
+    } catch (error) {
+      toast.error(error.message || 'Payment error', { id: toastId });
+    }
+  }, [axios, getToken]);
 
-  const handlePayNow = useCallback(() => {
-    toast('Stripe payment coming soon!', {
-      icon: '💳',
-      style: { background: '#1a1a1a', color: '#fff', border: '1px solid #F84565' }
+  // Delete unpaid booking
+  const handleDelete = useCallback(async (id) => {
+    const toastId = toast.loading('Deleting booking...', {
+      style: { background: '#1a1a1a', color: '#fff', border: '1px solid #333' }
     });
-  }, []);
+    try {
+      const { data } = await axios.delete(`/api/booking/${id}`, {
+        headers: { Authorization: `Bearer ${await getToken()}` }
+      });
+      if (data.success) {
+        toast.success('Booking deleted', { id: toastId });
+        setBookings(prev => prev.filter(b => b._id !== id));
+      } else {
+        toast.error(data.message || 'Failed to delete', { id: toastId });
+      }
+    } catch (error) {
+      toast.error(error.message || 'Error deleting booking', { id: toastId });
+    }
+  }, [axios, getToken]);
 
-  const hasAnyContent = allBookings.length > 0;
-  const showLoading = isLoading && !hasAnyContent;
+  // Pay All
+  const handlePayAll = useCallback(async () => {
+    if (!unpaidBookings.length) return;
+    const toastId = toast.loading('Processing payment...', {
+      style: { background: '#1a1a1a', color: '#fff', border: '1px solid #333' }
+    });
+    try {
+      const { data } = await axios.post('/api/booking/pay-all', {}, {
+        headers: { Authorization: `Bearer ${await getToken()}` }
+      });
+      if (data.success) {
+        toast.dismiss(toastId);
+        window.location.href = data.url;
+      } else {
+        toast.error(data.message || 'Payment failed', { id: toastId });
+      }
+    } catch (error) {
+      toast.error(error.message || 'Payment error', { id: toastId });
+    }
+  }, [axios, getToken, unpaidBookings]);
 
-  if (showLoading) return <Loading message="Loading your bookings..." />;
+  if (isLoading && !sortedBookings.length) return <Loading message="Loading your bookings..." />;
 
   return (
     <div className='relative px-6 md:px-16 lg:px-40 pt-30 min-h-[80vh] mb-10'>
-      {/* Blue glow band — same as Movies/MovieDetails pages */}
+      {/* Background effects */}
       <div
         className="absolute left-1/2 -translate-x-1/2 w-[150%] h-45 rounded-[100%] blur-[120px] animate-slow-pulse pointer-events-none"
         style={{ top: '-20px', zIndex: 0, background: 'rgba(0, 123, 255, 0.5)' }}
@@ -110,42 +129,37 @@ const MyBookings = () => {
 
       <h1 className='relative z-10 text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-8'>My Bookings</h1>
 
-      {allBookings.length > 0 ? (
-        <div className="relative z-10 space-y-4 max-w-4xl">
-          {allBookings.map((item, index) => {
+      {sortedBookings.length > 0 ? (
+        <div className="relative z-10 flex flex-col lg:flex-row gap-8">
+          <div className="flex-1 space-y-4">
+            {sortedBookings.map((item, index) => {
             const posterUrl = getImageUrl(item.show?.movie?.poster_path);
-            const isDemo = item.isDemo;
             const isPaid = item.isPaid;
 
             return (
               <AnimatedCard key={item._id || index} index={index} staggerDelay={60} duration={500}>
-                {/* Card wrapper — compact, fixed height on md+ */}
+                {/* Booking card */}
                 <div className={`relative flex flex-row overflow-hidden rounded-2xl border
                   transition-all duration-300 group h-32
-                  ${isDemo
-                    ? 'border-amber-500/25 hover:border-amber-500/50'
-                    : isPaid
-                      ? 'border-green-500/20 hover:border-green-500/40'
-                      : 'border-primary/20 hover:border-primary/40'
+                  ${isPaid
+                    ? 'border-green-500/20 hover:border-green-500/40'
+                    : 'border-primary/20 hover:border-primary/40'
                   }`}
                 >
-                  {/* Blurred background covering the ENTIRE card based on the movie poster */}
+                  {/* Blurred poster background */}
                   {posterUrl && (
                     <>
                       <img
-                        src={posterUrl}
-                        alt=""
-                        aria-hidden="true"
+                        src={posterUrl} alt="" aria-hidden="true"
                         className="absolute -inset-4 w-[calc(100%+2rem)] h-[calc(100%+2rem)] object-cover"
                         style={{ filter: 'blur(20px) brightness(0.35) saturate(1.5)' }}
                       />
-                      {/* Gradient overlay to ensure text remains readable */}
                       <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-black/50 to-black/30" />
                     </>
                   )}
 
                   <div className="relative z-10 flex flex-row w-full h-full">
-                    {/* === LEFT: Poster === */}
+                    {/* Poster */}
                     <div className="relative w-22 shrink-0 overflow-hidden">
                       <img
                         src={posterUrl}
@@ -155,13 +169,7 @@ const MyBookings = () => {
                       />
                       {/* Status badge */}
                       <div className="absolute top-2 left-2">
-                        {isDemo ? (
-                          <span className="flex items-center gap-1 px-1.5 py-0.5 bg-black/60 border border-amber-500/50
-                            rounded-md text-amber-400 text-[9px] font-bold uppercase backdrop-blur-sm">
-                            <Sparkles className="w-2.5 h-2.5" />
-                            Demo
-                          </span>
-                        ) : isPaid ? (
+                        {isPaid ? (
                           <span className="px-1.5 py-0.5 bg-black/60 border border-green-500/50
                             rounded-md text-green-400 text-[9px] font-bold uppercase backdrop-blur-sm">
                             ✓ Paid
@@ -175,12 +183,11 @@ const MyBookings = () => {
                       </div>
                     </div>
 
-                    {/* === MIDDLE: Info === */}
+                    {/* Booking info */}
                     <div className="flex-1 flex flex-col justify-center px-4 py-3 min-w-0">
                       <h3 className="text-base font-bold text-white truncate mb-2 leading-tight">
                         {item.show?.movie?.title || 'Unknown Movie'}
                       </h3>
-
                       <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-300">
                         <div className="flex items-center gap-1.5">
                           <Clock className="w-3.5 h-3.5 text-primary shrink-0" />
@@ -199,8 +206,7 @@ const MyBookings = () => {
                           <span className="font-semibold text-white">{currency}{item.amount}</span>
                         </div>
                       </div>
-
-                      {/* Seat chips row */}
+                      {/* Seat chips */}
                       <div className="flex items-center gap-1.5 mt-2 flex-wrap">
                         {(item.bookedSeats || []).slice(0, 8).map(seat => (
                           <span key={seat}
@@ -214,38 +220,31 @@ const MyBookings = () => {
                       </div>
                     </div>
 
-                    {/* === RIGHT: Date + Actions === */}
+                    {/* Date and actions */}
                     <div className="relative w-40 shrink-0 flex flex-col items-end justify-between p-3">
-                      {/* Date — top right */}
                       <p className="text-[10px] text-gray-300 text-right leading-tight">
                         {item.show?.showDateTime ? dateFormat(item.show.showDateTime) : 'Date N/A'}
                       </p>
-
-                      {/* Action buttons — bottom right */}
                       <div className="flex items-center gap-2">
-                        {/* Pay Now — shown for both demo and unpaid real bookings */}
                         {!isPaid && (
-                          <button
-                            onClick={handlePayNow}
-                            className="px-3 py-1.5 bg-gradient-to-r from-[#F84565] to-[#D63854]
-                              hover:from-[#D63854] hover:to-[#F84565] text-white font-semibold rounded-lg
-                              shadow-md shadow-[#F84565]/25 hover:shadow-[#F84565]/50
-                              hover:scale-105 active:scale-95 transition-all duration-300 text-[11px] whitespace-nowrap"
-                          >
-                            Pay Now
-                          </button>
-                        )}
-                        {/* Delete — demo bookings only */}
-                        {isDemo && (
-                          <button
-                            onClick={() => deleteDemoBooking(item._id)}
-                            className="p-1.5 rounded-lg bg-black/40 hover:bg-red-500/30 border border-white/20
-                              hover:border-red-500/50 text-gray-300 hover:text-white
-                              transition-all duration-300 hover:scale-105 active:scale-95 backdrop-blur-md"
-                            title="Remove"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          <>
+                            <button
+                              onClick={() => handlePayNow(item)}
+                              className="px-3 py-1.5 bg-gradient-to-r from-[#F84565] to-[#D63854]
+                                hover:from-[#D63854] hover:to-[#F84565] text-white font-semibold rounded-lg
+                                shadow-md shadow-[#F84565]/25 hover:shadow-[#F84565]/50
+                                hover:scale-105 active:scale-95 transition-all duration-300 text-[11px] whitespace-nowrap"
+                            >
+                              Pay Now
+                            </button>
+                            <button
+                              onClick={() => handleDelete(item._id)}
+                              className="p-1.5 bg-black/40 hover:bg-red-500/20 text-gray-400 hover:text-red-500 rounded-lg border border-white/5 hover:border-red-500/30 transition-all duration-300"
+                              title="Delete booking"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </>
                         )}
                       </div>
                     </div>
@@ -254,6 +253,50 @@ const MyBookings = () => {
               </AnimatedCard>
             );
           })}
+          </div>
+
+          {/* Right Sidebar - Total Invoice */}
+          {unpaidBookings.length > 0 && (
+            <div className="w-full lg:w-[350px] shrink-0">
+              <div className="sticky top-30 bg-[#1a1a1a]/80 backdrop-blur-xl border border-white/10 rounded-2xl p-6 shadow-2xl">
+                <h3 className="text-xl font-bold text-white mb-4">Order Summary</h3>
+                
+                <div className="space-y-3 mb-6 max-h-[40vh] overflow-y-auto pr-2 custom-scrollbar">
+                  {unpaidBookings.map(b => (
+                    <div key={b._id} className="flex justify-between items-center text-sm">
+                      <span className="text-gray-300 truncate pr-4">{b.show?.movie?.title || 'Unknown'} (x{b.bookedSeats?.length || 1})</span>
+                      <span className="text-white font-medium whitespace-nowrap">{currency}{b.amount}</span>
+                    </div>
+                  ))}
+                </div>
+                
+                <div className="border-t border-white/10 pt-4 mb-6">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-gray-400">Subtotal</span>
+                    <span className="text-white font-semibold">{currency}{totalAmount}</span>
+                  </div>
+                  <div className="flex justify-between items-center mb-4">
+                    <span className="text-gray-400">Fees & Taxes</span>
+                    <span className="text-green-400 font-medium">Included</span>
+                  </div>
+                  <div className="flex justify-between items-end">
+                    <span className="text-lg font-bold text-white">Total</span>
+                    <span className="text-2xl font-bold text-primary">{currency}{totalAmount}</span>
+                  </div>
+                </div>
+
+                <button
+                  onClick={handlePayAll}
+                  className="w-full py-3.5 bg-gradient-to-r from-primary to-purple-600 
+                    hover:from-purple-600 hover:to-primary text-white font-bold rounded-xl
+                    shadow-lg shadow-primary/25 hover:shadow-primary/40 
+                    transition-all duration-300 hover:-translate-y-1 active:translate-y-0"
+                >
+                  Pay All Now ({unpaidBookings.length})
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className='relative z-10 mt-20 text-center'>
@@ -267,7 +310,7 @@ const MyBookings = () => {
         </div>
       )}
 
-      {/* You May Also Like Section */}
+      {/* Suggestions */}
       {suggestions.length > 0 && (
         <div className="relative z-10 mt-20">
           <p className='text-2xl md:text-3xl font-bold text-white mb-6'>You May Also Like</p>

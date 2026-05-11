@@ -1,13 +1,19 @@
 import React from 'react';
+import { useEffect } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 
-/**
- * Loading — Reusable loading spinner with optional message.
- *
- * FIX: Removed unused `useNavigate()` import — this was importing the entire
- * react-router-dom module just for a spinner, increasing this component's
- * bundle cost for no reason.
- */
 const Loading = ({ message = 'Loading movies...' }) => {
+  const {nextUrl } = useParams()
+  const navigate = useNavigate()
+
+  useEffect(()=>{
+    if(nextUrl){
+      setTimeout(()=>{
+        navigate('/'+nextUrl)
+      },8000)
+    }
+  },[])
+
   return (
     <div className='flex flex-col justify-center px-6 md:px-6 lg:px-40 mt-25'>
       <div className='flex flex-col justify-center items-center'>
