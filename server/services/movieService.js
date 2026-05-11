@@ -40,32 +40,6 @@ export const importTrendingMoviesLogic = async () => {
                     original_language: details.data.original_language
                 });
             }
-
-            // Create default shows for next 3 days
-            const today = new Date();
-            const showsToCreate = [];
-            for (let i = 0; i < 3; i++) {
-                const d = new Date(today);
-                d.setDate(d.getDate() + i);
-                const dStr = d.toISOString().split('T')[0];
-                const times = ["10:00", "14:00", "19:00"];
-
-                for (const t of times) {
-                    const dt = new Date(`${dStr}T${t}:00.000Z`);
-                    const existing = await Show.findOne({ movie: movieId, showDateTime: dt });
-                    if (!existing) {
-                        showsToCreate.push({
-                            movie: movieId,
-                            showDateTime: dt,
-                            showPrice: 50,
-                            occupiedSeats: {}
-                        });
-                    }
-                }
-            }
-            if (showsToCreate.length > 0) {
-                await Show.insertMany(showsToCreate);
-            }
             importedCount++;
         }
         return { success: true, count: importedCount };

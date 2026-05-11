@@ -61,3 +61,14 @@ body {
 .animate-float-blob {
   animation: float-blob 8s infinite ease-in-out alternate;
 }
+
+/* Slow pulse animation — used by glow bands on Movies and MovieDetails pages.
+   Moved here from inline <style> tags to avoid re-parsing on every render. */
+@keyframes slowPulseBand {
+  0%, 100% { opacity: 0.25; transform: scaleX(1) translateY(0); }
+  50%      { opacity: 0.65; transform: scaleX(1.05) translateY(-5px); }
+}
+
+.animate-slow-pulse {
+  animation: slowPulseBand 6s ease-in-out infinite;
+}

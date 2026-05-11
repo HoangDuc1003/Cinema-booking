@@ -336,7 +336,7 @@ const HeroSection = () => {
             </p>
 
             <div className="hero-actions hero-fade-up d4 flex items-center gap-3 md:gap-4 flex-wrap">
-              <button onClick={() => navigate(`/movies/${movie.id}`)}
+              <button onClick={() => navigate(`/movies/${movie._id || movie.id}`)}
                 className="group flex items-center gap-2 md:gap-3 px-6 py-3 md:px-10 md:py-5  bg-linear-to-r from-primary to-primary-dull
                  hover:from-primary-dull hover:to-primary text-white font-semibold rounded-full shadow-lg shadow-primary/30 
                  hover:shadow-xl hover:shadow-primary/60 hover:scale-105 active:scale-95 transition-all duration-300 border

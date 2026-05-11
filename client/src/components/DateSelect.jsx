@@ -1,25 +1,36 @@
 import React, { useState, useEffect } from 'react'
 import BlurCircle from './BlurCircle'
-import { ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
+import { ChevronLeftIcon, ChevronRightIcon, Sparkles } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useNavigate } from 'react-router-dom'
 
-const DateSelect = ({ id, availableDates }) => {
-    
+/**
+ * DateSelect — Date picker for movie showtimes.
+ *
+ * CHANGES:
+ * 1. Added isMockData prop — shows a subtle "Demo Showtimes" indicator
+ *    so users understand these are generated, not real showtimes.
+ * 2. Added scroll pagination for dates using chevron buttons.
+ */
+const DateSelect = ({ id, availableDates, isMockData = false }) => {
     const navigate = useNavigate();
     const [selected, setSelected] = useState(null);
 
     // Group dates by day for the UI
     const dates = Object.keys(availableDates || {}).sort();
 
-    const onBookHandler = () =>{
-        if(!selected){
+    const onBookHandler = () => {
+        if (!id || id === 'undefined') {
+            return toast.error('Error: Movie ID not found. Please go back to the home page.');
+        }
+        if (!selected) {
             return toast.error('Please select a date');
         }
-        else {
-            navigate(`/movies/${id}/${selected}`);
-            window.scrollTo(0,0);
-        }
+        // Pass mock flag via URL state so SeatLayout knows
+        navigate(`/movies/${id}/${selected}`, {
+            state: { isMockData }
+        });
+        window.scrollTo(0, 0);
     }
 
     // Auto-select first date if available
@@ -27,7 +38,7 @@ const DateSelect = ({ id, availableDates }) => {
         if (dates.length > 0 && !selected) {
             setSelected(dates[0]);
         }
-    }, [dates]);
+    }, [dates, selected]);
 
     return (
         <div id='dateSelect' className='pt-30'>
@@ -37,15 +48,24 @@ const DateSelect = ({ id, availableDates }) => {
                 <BlurCircle top='100px' right='0' />
 
                 <div>
-                    <p className='relative text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-5'>
-                        Choose Date
-                    </p>
+                    <div className="flex items-center gap-3 mb-5">
+                        <p className='relative text-3xl md:text-4xl lg:text-5xl font-bold text-white'>
+                            Choose Date
+                        </p>
+                        {isMockData && (
+                            <span className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/15 border border-amber-500/30 
+                                rounded-full text-amber-400 text-xs font-semibold whitespace-nowrap">
+                                <Sparkles className="w-3.5 h-3.5" />
+                                Demo Showtimes
+                            </span>
+                        )}
+                    </div>
                     <div className='flex items-center gap-6 text-sm mt-5'>
                         <ChevronLeftIcon width={28} className="cursor-pointer hover:text-primary transition-colors" />
 
                         <span className='grid grid-cols-3 md:flex flex-wrap md:max-w-lg gap-4'>
                             {dates.length > 0 ? dates.map((dateStr, index) => {
-                                const date = new Date(dateStr);
+                                const date = new Date(dateStr + 'T00:00:00');
                                 return (
                                     <button
                                         onClick={() => setSelected(dateStr)}
@@ -71,10 +91,10 @@ const DateSelect = ({ id, availableDates }) => {
                     </div>
                 </div>
 
-                <button onClick={onBookHandler} className="group flex items-center gap-3 px-10 py-6 bg-linear-to-r from-primary
-                 to-primary-dull hover:from-primary-dull hover:to-primary text-white font-semibold rounded-full shadow-lg shadow-primary/30 
-                 hover:shadow-xl hover:shadow-primary/60 hover:scale-105 active:scale-95 transition-all duration-300 border border-primary/30
-                  hover:border-primary/60 relative overflow-hidden">
+                <button onClick={onBookHandler} className="group flex items-center gap-3 px-10 py-6 bg-gradient-to-r from-[#F84565]
+                 to-[#D63854] hover:from-[#D63854] hover:to-[#F84565] text-white font-semibold rounded-full shadow-lg shadow-[#F84565]/30 
+                 hover:shadow-xl hover:shadow-[#F84565]/60 hover:scale-105 active:scale-95 transition-all duration-300 border border-[#F84565]/30
+                  hover:border-[#F84565]/60 relative overflow-hidden">
                     Book Now
                 </button>
             </div>

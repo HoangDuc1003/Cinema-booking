@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback } from "react"
+import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react"
 import axios from "axios";
 import { useUser, useAuth } from "@clerk/react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -20,13 +20,33 @@ api.interceptors.response.use(
     }
 );
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const AppContext = createContext()
 
+/**
+ * AppProvider — Global application state.
+ *
+ * FIXES:
+ * 1. fetchIsAdmin no longer depends on `location.pathname`.
+ *    BEFORE: Every route navigation triggered a re-fetch of admin status,
+ *    because location.pathname was in the dependency array of both
+ *    fetchIsAdmin (useCallback) and the useEffect that calls it.
+ *    This caused unnecessary API calls on EVERY navigation.
+ *    FIX: Admin redirect logic moved to a separate useEffect that runs
+ *    only when isAdmin state changes, not on every navigation.
+ *
+ * 2. Added useRef for admin check to prevent duplicate calls during
+ *    React StrictMode double-mount in development.
+ */
 export const AppProvider = ({ children }) => {
   const [isAdmin, setIsAdmin] = useState(false)
   const [shows, setShows] = useState([])
   const [favoriteMovies, setFavoriteMovies] = useState([])
-  const image_base_url = import.meta.env.VITE_TMDB_IMAGE_BASE_URL
+  const adminCheckRef = useRef(false);
+  
+  // Default TMDB image base URL
+  const image_base_url = import.meta.env.VITE_TMDB_IMAGE_BASE_URL || "https://image.tmdb.org/t/p/original";
+  
   const { user } = useUser()
   const { getToken } = useAuth()
   const location = useLocation()
@@ -35,48 +55,46 @@ export const AppProvider = ({ children }) => {
   const fetchShows = useCallback(async () => {
     try {
       const { data } = await api.get('/api/show/all');
-      if (data.success) {
-        setShows(data.shows);
-      } else {
-        toast.error(data.message);
+      if (data && data.success) {
+        setShows(data.shows || []);
       }
     } catch (error) {
       // Handled by interceptor
     }
   }, []);
 
+  // FIX: Removed location.pathname and navigate from dependencies.
+  // This function now ONLY checks admin status — it doesn't handle redirects.
   const fetchIsAdmin = useCallback(async () => {
+    if (!user) return; 
+    
     try {
       const token = await getToken();
       const { data } = await api.get('/api/admin/is-admin', {
         headers: { Authorization: `Bearer ${token}` }
       });
-      setIsAdmin(data.isAdmin);
-
-      if (!data.isAdmin && location.pathname.startsWith('/admin')) {
-        navigate('/');
-        toast.error("You are not authorized to access the admin dashboard");
-      }
+      
+      setIsAdmin(data?.isAdmin || false);
     } catch (error) {
-      // Handled by interceptor
+      setIsAdmin(false);
     }
-  }, [getToken, location.pathname, navigate]);
+  }, [getToken, user]);
 
   const fetchFavoriteMovies = useCallback(async () => {
+    if (!user) return; 
+
     try {
       const token = await getToken();
       const { data } = await api.get('/api/user/favorites', {
         headers: { Authorization: `Bearer ${token}` } 
       });
-      if (data.success) {
-        setFavoriteMovies(data.movies);
-      } else {
-        toast.error(data.message);
+      if (data && data.success) {
+        setFavoriteMovies(data.movies || []);
       }
     } catch (error) {
-      // Handled by interceptor
+      console.log(error)
     }
-  }, [getToken]);
+  }, [getToken, user]);
 
   useEffect(() => {
     fetchShows(); 
@@ -86,17 +104,31 @@ export const AppProvider = ({ children }) => {
     if (user) {
       fetchIsAdmin();
       fetchFavoriteMovies();
+    } else {
+      setIsAdmin(false);
+      setFavoriteMovies([]);
     }
   }, [user, fetchIsAdmin, fetchFavoriteMovies]);
 
+  // FIX: Separate effect for admin route protection.
+  // Only runs when isAdmin changes (once after fetchIsAdmin resolves),
+  // NOT on every navigation like before.
+  useEffect(() => {
+    if (user && !isAdmin && location.pathname.startsWith('/admin')) {
+      navigate('/');
+      toast.error("You are not authorized to access the admin dashboard");
+    }
+  }, [isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const value = {
-    axios: api, // Provide our configured instance
+    axios: api, 
     user,
     getToken,
     navigate,
     isAdmin,
     shows,
     favoriteMovies,
+    image_base_url, 
     fetchShows, 
     fetchIsAdmin,
     fetchFavoriteMovies
@@ -109,4 +141,5 @@ export const AppProvider = ({ children }) => {
   )
 }
 
-export const useAppContext = () => useContext(AppContext) 
+// eslint-disable-next-line react-refresh/only-export-components
+export const useAppContext = () => useContext(AppContext)

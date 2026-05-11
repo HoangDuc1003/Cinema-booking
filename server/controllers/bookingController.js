@@ -1,9 +1,16 @@
+import axios from "axios"
+import Movie from "../models/Movie.js"
 import Show from "../models/Show.js"
 import Booking from "../models/Booking.js"
 
 //function to check availability of selected seats for a movie
 const checkSeatsAvailability = async (showId, selectedSeats) => {
     try {
+        // If it's a virtual ID, it's not in DB yet, so all seats are available
+        if (showId.startsWith('virtual_')) {
+            return true;
+        }
+
         const showData = await Show.findById(showId)
         if (!showData) return false;
         const occupiedSeats = showData.occupiedSeats;
@@ -27,12 +34,70 @@ export const createBooking = async (req,res) =>{
         if (!isAvailable) {
             return res.json({success:false,message:"Selected seats are not available"});
         }
-        //detail show
-        const showData = await Show.findById(showId).populate('movie');
+
+        let actualShowId = showId;
+        let showData;
+
+        // If it's a virtual ID, we need to create the Show in DB first
+        if (showId.startsWith('virtual_')) {
+            const parts = showId.split('_');
+            const movieId = parts[1];
+            const timestamp = parseInt(parts[2]);
+            const showDateTime = new Date(timestamp);
+
+            // Double check if it was created in the meantime
+            showData = await Show.findOne({ movie: movieId, showDateTime });
+            
+            if (!showData) {
+                // Also ensure movie exists
+                let movie = await Movie.findById(movieId);
+                if (!movie) {
+                    // Fetch and create movie if missing
+                    const [details, credits] = await Promise.all([
+                        axios.get(`https://api.themoviedb.org/3/movie/${movieId}`, {
+                            headers: { Authorization: `Bearer ${process.env.TMDB_API_KEY}` }
+                        }),
+                        axios.get(`https://api.themoviedb.org/3/movie/${movieId}/credits`, {
+                            headers: { Authorization: `Bearer ${process.env.TMDB_API_KEY}` }
+                        })
+                    ]);
+                    movie = await Movie.create({
+                        _id: movieId,
+                        title: details.data.title,
+                        overview: details.data.overview,
+                        poster_path: details.data.poster_path,
+                        backdrop_path: details.data.backdrop_path,
+                        genres: details.data.genres,
+                        casts: credits.data.cast,
+                        release_date: details.data.release_date,
+                        vote_average: details.data.vote_average,
+                        runtime: details.data.runtime,
+                        tagline: details.data.tagline || "",
+                        original_language: details.data.original_language
+                    });
+                }
+
+                showData = await Show.create({
+                    movie: movieId,
+                    showDateTime,
+                    showPrice: 50,
+                    occupiedSeats: {}
+                });
+            }
+            actualShowId = showData._id;
+        } else {
+            //detail show
+            showData = await Show.findById(showId).populate('movie');
+        }
+
+        if (!showData) {
+            return res.json({success:false, message: "Show not found"});
+        }
+
         //create new booking 
         const booking = await Booking.create({
             user:userId,
-            show:showId,
+            show:actualShowId,
             amount:showData.showPrice*selectedSeats.length,
             bookedSeats:selectedSeats
         })
@@ -53,7 +118,16 @@ export const createBooking = async (req,res) =>{
 export const getOccupiedSeats = async (req,res) => {
     try {
         const {showId} = req.params;
+        
+        // If it's a virtual ID, no seats are occupied yet
+        if (showId.startsWith('virtual_')) {
+            return res.json({success:true, occupiedSeats: []});
+        }
+
         const showData = await Show.findById(showId)
+        if (!showData) {
+             return res.json({success:true, occupiedSeats: []});
+        }
 
         const occupiedSeats = Object.keys(showData.occupiedSeats)
 

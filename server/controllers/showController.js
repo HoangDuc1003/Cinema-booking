@@ -92,6 +92,7 @@ export const importTrendingMovies = async (req, res) => {
 //api to get all shows from database
 export const getShows = async (req,res) =>{
     try {
+        // First try to get movies that have actual shows in our DB
         const shows = await Show.find({showDateTime:{$gte:new Date()}}).populate('movie').sort({showDateTime:1});
         const uniqueMovies = [];
         const seenIds = new Set();
@@ -102,6 +103,29 @@ export const getShows = async (req,res) =>{
                 seenIds.add(show.movie._id);
             }
         });
+
+        // If we have few or no shows, fetch some "Trending" movies from TMDB to show as "virtual" options
+        if (uniqueMovies.length < 10) {
+            const { data } = await axios.get('https://api.themoviedb.org/3/movie/now_playing', {
+                headers: { Authorization: `Bearer ${process.env.TMDB_API_KEY}` },
+            });
+            
+            data.results.forEach(m => {
+                const movieId = m.id.toString();
+                if (!seenIds.has(movieId)) {
+                    uniqueMovies.push({
+                        _id: movieId,
+                        title: m.title,
+                        poster_path: m.poster_path,
+                        backdrop_path: m.backdrop_path,
+                        vote_average: m.vote_average,
+                        release_date: m.release_date,
+                        isVirtual: true // Mark as virtual for the frontend if needed
+                    });
+                    seenIds.add(movieId);
+                }
+            });
+        }
         
         res.json({success:true, shows: uniqueMovies})
     } catch (error) {
@@ -110,14 +134,18 @@ export const getShows = async (req,res) =>{
     }
 } 
 
-//api to a single show from database
 export const getShow = async (req,res) => {
     try {
         const {movieId} = req.params;
+
+        if (!movieId || movieId === 'undefined') {
+            return res.json({ success: false, message: "Invalid Movie ID" });
+        }
+
         let shows = await Show.find({movie:movieId, showDateTime:{$gte:new Date()}}) 
         let movie = await Movie.findById(movieId); 
 
-        // If movie not found, fetch from TMDB and save
+        // If movie not found, fetch from TMDB
         if (!movie) {
             const [movieDetailsResponse, movieCreditsResponse] = await Promise.all([
                 axios.get(`https://api.themoviedb.org/3/movie/${movieId}`, {
@@ -130,7 +158,7 @@ export const getShow = async (req,res) => {
             const movieApiData = movieDetailsResponse.data;
             const movieCreditsData = movieCreditsResponse.data;
 
-            const movieDetails = {
+            movie = {
                 _id: movieId,
                 title: movieApiData.title,
                 overview: movieApiData.overview,
@@ -144,47 +172,57 @@ export const getShow = async (req,res) => {
                 vote_average: movieApiData.vote_average,
                 runtime: movieApiData.runtime,
             };
-
-            movie = await Movie.create(movieDetails);
         }
 
-        // Auto-generate shows if there are none
-        if (shows.length === 0) {
-            const showsToCreate = [];
-            const today = new Date();
-            for (let i = 0; i < 3; i++) {
-                const date = new Date(today);
-                date.setDate(date.getDate() + i);
-                const dateString = date.toISOString().split('T')[0];
-                
-                // Create 3 showtimes per day
-                const times = ["10:00", "15:00", "20:00"];
-                times.forEach(time => {
-                    const dateTimeString = `${dateString}T${time}:00.000Z`;
-                    showsToCreate.push({
-                        movie: movieId,
-                        showDateTime: new Date(dateTimeString),
-                        showPrice: 50, // Default price
-                        occupiedSeats: {}
-                    });
-                });
-            }
-            shows = await Show.insertMany(showsToCreate);
-        }
-
+        // Virtual show generation logic (instead of auto-inserting)
         const dateTime = {};
-        shows.forEach((show)=>{
-            const date = show.showDateTime.toISOString().split('T')[0]; 
-            if (!dateTime[date]){
-                dateTime[date] = [];
+        const today = new Date();
+        
+        // Generate showtimes for the next 7 days
+        for (let i = 0; i < 7; i++) {
+            const date = new Date(today);
+            date.setDate(date.getDate() + i);
+            const dateString = date.toISOString().split('T')[0];
+            
+            // Standard times for every movie
+            const standardTimes = ["10:00", "13:30", "17:00", "20:30"];
+            
+            if (!dateTime[dateString]) {
+                dateTime[dateString] = [];
             }
-            dateTime[date].push({
-                time: show.showDateTime, 
-                showId: show._id,
-                price: show.showPrice,
-                hall: "Standard Hall"
-            })
-        })
+
+            standardTimes.forEach(time => {
+                const dateTimeString = `${dateString}T${time}:00.000Z`;
+                const showDT = new Date(dateTimeString);
+                
+                // Only show future showtimes
+                if (showDT < today) return;
+
+                // Check if this show already exists in DB
+                const existingShow = shows.find(s => s.showDateTime.getTime() === showDT.getTime());
+                
+                if (existingShow) {
+                    dateTime[dateString].push({
+                        time: existingShow.showDateTime, 
+                        showId: existingShow._id,
+                        price: existingShow.showPrice,
+                        hall: "Standard Hall",
+                        isVirtual: false
+                    });
+                } else {
+                    // Generate a "virtual" show ID that can be used for booking
+                    // Format: virtual_<movieId>_<timestamp>
+                    const virtualId = `virtual_${movieId}_${showDT.getTime()}`;
+                    dateTime[dateString].push({
+                        time: showDT, 
+                        showId: virtualId,
+                        price: 50, // Default virtual price
+                        hall: "Standard Hall",
+                        isVirtual: true
+                    });
+                }
+            });
+        }
         
         res.json({success:true, movie, dateTime})
     } catch (error) {
