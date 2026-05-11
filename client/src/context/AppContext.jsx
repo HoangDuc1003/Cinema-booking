@@ -6,19 +6,9 @@ import toast from 'react-hot-toast'
 
 // Use base URL from env if available, otherwise fallback to empty string 
 const baseURL = import.meta.env.VITE_BASE_URL || "";
-const api = axios.create({
+export const api = axios.create({
     baseURL: baseURL
 });
-
-// Global interceptor for debugging
-api.interceptors.response.use(
-    response => response,
-    error => {
-        const message = error.response?.data?.message || error.message || "Network Error";
-        console.error(`[API Error] ${error.config?.url}:`, message);
-        return Promise.reject(error);
-    }
-);
 
 // eslint-disable-next-line react-refresh/only-export-components
 export const AppContext = createContext()
@@ -37,6 +27,42 @@ export const AppProvider = ({ children }) => {
   const location = useLocation()
   const navigate = useNavigate()
 
+  // Setup Axios Interceptors
+  useEffect(() => {
+    const requestInterceptor = api.interceptors.request.use(
+      async (config) => {
+        try {
+          const token = await getToken();
+          if (token) {
+            config.headers['Authorization'] = `Bearer ${token}`;
+          }
+        } catch (err) {
+          console.warn("[Auth Interceptor] Failed to fetch token", err);
+        }
+        return config;
+      },
+      (error) => Promise.reject(error)
+    );
+
+    const responseInterceptor = api.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        if (error.response?.status === 401 || error.response?.status === 403) {
+          console.error("[API Error] 401/403 Unauthorized - Hết hạn token hoặc chưa login");
+        } else {
+          const message = error.response?.data?.message || error.message || "Network Error";
+          console.error(`[API Error] ${error.config?.url}:`, message);
+        }
+        return Promise.reject(error);
+      }
+    );
+
+    return () => {
+      api.interceptors.request.eject(requestInterceptor);
+      api.interceptors.response.eject(responseInterceptor);
+    };
+  }, [getToken]);
+
   const fetchShows = useCallback(async () => {
     try {
       const { data } = await api.get('/api/show/all');
@@ -54,10 +80,7 @@ export const AppProvider = ({ children }) => {
     if (!user) return; 
     
     try {
-      const token = await getToken();
-      const { data } = await api.get('/api/admin/is-admin', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const { data } = await api.get('/api/admin/is-admin');
       
       setIsAdmin(data?.isAdmin || false);
     } catch (error) {
@@ -69,10 +92,7 @@ export const AppProvider = ({ children }) => {
     if (!user) return; 
 
     try {
-      const token = await getToken();
-      const { data } = await api.get('/api/user/favorites', {
-        headers: { Authorization: `Bearer ${token}` } 
-      });
+      const { data } = await api.get('/api/user/favorites');
       if (data && data.success) {
         setFavoriteMovies(data.movies || []);
       }

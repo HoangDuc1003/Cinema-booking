@@ -249,9 +249,7 @@ const SeatLayout = () => {
       };
 
       // Create booking and redirect to My Bookings
-      const { data } = await axios.post('/api/booking/create', payload, {
-        headers: { Authorization: `Bearer ${await getToken()}` }
-      });
+      const { data } = await axios.post('/api/booking/create', payload);
       if (data.success) {
         toast.success("Booking confirmed!");
         navigate('/my-bookings');

@@ -15,7 +15,7 @@ const MyBookings = () => {
   const [bookings, setBookings] = useState([])
   const [suggestions, setSuggestions] = useState([])
   const [isLoading, setIsLoading] = useState(true)
-  const { getToken, user, axios } = useAppContext();
+  const { user, axios } = useAppContext();
 
   const getImageUrl = (path) => {
     if (!path) return '';
@@ -33,9 +33,7 @@ const MyBookings = () => {
     const loadBookings = async () => {
       if (!user) { setIsLoading(false); return; }
       try {
-        const { data } = await axios.get('/api/booking/my-bookings', {
-          headers: { Authorization: `Bearer ${await getToken()}` }
-        });
+        const { data } = await axios.get('/api/booking/my-bookings');
         if (mounted && data.success) setBookings(data.bookings || []);
       } catch { /* backend unavailable */ }
       finally { if (mounted) setIsLoading(false); }
@@ -59,9 +57,7 @@ const MyBookings = () => {
       style: { background: '#1a1a1a', color: '#fff', border: '1px solid #333' }
     });
     try {
-      const { data } = await axios.post('/api/booking/pay-now', { bookingId: item._id }, {
-        headers: { Authorization: `Bearer ${await getToken()}` }
-      });
+      const { data } = await axios.post('/api/booking/pay-now', { bookingId: item._id });
       if (data.success) {
         toast.dismiss(toastId);
         window.location.href = data.url;
@@ -71,7 +67,7 @@ const MyBookings = () => {
     } catch (error) {
       toast.error(error.message || 'Payment error', { id: toastId });
     }
-  }, [axios, getToken]);
+  }, [axios]);
 
   // Delete unpaid booking
   const handleDelete = useCallback(async (id) => {
@@ -79,9 +75,7 @@ const MyBookings = () => {
       style: { background: '#1a1a1a', color: '#fff', border: '1px solid #333' }
     });
     try {
-      const { data } = await axios.delete(`/api/booking/${id}`, {
-        headers: { Authorization: `Bearer ${await getToken()}` }
-      });
+      const { data } = await axios.delete(`/api/booking/${id}`);
       if (data.success) {
         toast.success('Booking deleted', { id: toastId });
         setBookings(prev => prev.filter(b => b._id !== id));
@@ -91,7 +85,7 @@ const MyBookings = () => {
     } catch (error) {
       toast.error(error.message || 'Error deleting booking', { id: toastId });
     }
-  }, [axios, getToken]);
+  }, [axios]);
 
   // Pay All
   const handlePayAll = useCallback(async () => {
@@ -100,9 +94,7 @@ const MyBookings = () => {
       style: { background: '#1a1a1a', color: '#fff', border: '1px solid #333' }
     });
     try {
-      const { data } = await axios.post('/api/booking/pay-all', {}, {
-        headers: { Authorization: `Bearer ${await getToken()}` }
-      });
+      const { data } = await axios.post('/api/booking/pay-all', {});
       if (data.success) {
         toast.dismiss(toastId);
         window.location.href = data.url;
@@ -112,7 +104,7 @@ const MyBookings = () => {
     } catch (error) {
       toast.error(error.message || 'Payment error', { id: toastId });
     }
-  }, [axios, getToken, unpaidBookings]);
+  }, [axios, unpaidBookings]);
 
   if (isLoading && !sortedBookings.length) return <Loading message="Loading your bookings..." />;
 

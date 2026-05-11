@@ -1,4 +1,5 @@
 import axios from "axios"
+import mongoose from "mongoose"
 import Movie from "../models/Movie.js"
 import Show from "../models/Show.js"
 import Booking from "../models/Booking.js"
@@ -88,15 +89,13 @@ const createStripeSession = async (booking, movieTitle, origin) => {
 
 // POST /api/booking/create - Create booking and redirect to Stripe
 export const createBooking = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
     try {
         const { userId } = req.auth();
         const { showId, selectedSeats, totalAmount } = req.body;
         const origin = getOrigin(req);
-
-        const isAvailable = await checkSeatsAvailability(showId, selectedSeats)
-        if (!isAvailable) {
-            return res.json({ success: false, message: "Selected seats are not available" });
-        }
 
         let actualShowId = showId;
         let showData;
@@ -119,49 +118,82 @@ export const createBooking = async (req, res) => {
             }
 
             // Check if show already exists
-            showData = await Show.findOne({ movie: movieId, showDateTime: parsedDate, hall: hallName });
+            showData = await Show.findOne({ movie: movieId, showDateTime: parsedDate, hall: hallName }).session(session);
 
             if (!showData) {
                 await ensureMovieExists(movieId);
-                showData = await Show.create({
+                const [newShow] = await Show.create([{
                     movie: movieId,
                     showDateTime: parsedDate,
                     hall: hallName,
                     showPrice: showPrice,
                     occupiedSeats: {}
-                });
+                }], { session });
+                showData = newShow;
             }
             actualShowId = showData._id;
-            // Populate movie for Stripe product name
-            showData = await Show.findById(actualShowId).populate('movie');
         } else {
-            showData = await Show.findById(showId).populate('movie');
+            showData = await Show.findById(showId).session(session);
         }
 
         if (!showData) {
+            await session.abortTransaction();
+            session.endSession();
             return res.json({ success: false, message: "Show not found" });
         }
 
         // Use frontend-calculated total (includes seat-type multipliers), fallback to flat price
         const bookingAmount = totalAmount || showData.showPrice * selectedSeats.length;
 
-        // Create booking record
-        const booking = await Booking.create({
+        // 1. Optimistic Concurrency Control & Atomic $set
+        const updateQuery = { $set: {} };
+        selectedSeats.forEach(seat => {
+            updateQuery.$set[`occupiedSeats.${seat}`] = userId;
+        });
+
+        // Condition: Ensure these specific seats do not exist in the occupiedSeats object yet
+        const seatConditions = selectedSeats.map(seat => ({
+            [`occupiedSeats.${seat}`]: { $exists: false }
+        }));
+
+        const updatedShow = await Show.findOneAndUpdate(
+            { _id: actualShowId, $and: seatConditions.length > 0 ? seatConditions : [{}] },
+            updateQuery,
+            { new: true, session }
+        ).populate('movie');
+
+        if (!updatedShow) {
+            // Document wasn't found or condition failed (race condition - seat already taken)
+            await session.abortTransaction();
+            session.endSession();
+            return res.json({ 
+                success: false, 
+                message: "Race condition detected! Một hoặc nhiều ghế vừa bị người khác đặt. Vui lòng chọn lại." 
+            });
+        }
+
+        // Create booking record within transaction
+        const [booking] = await Booking.create([{
             user: userId,
             show: actualShowId,
             amount: bookingAmount,
             bookedSeats: selectedSeats
-        })
+        }], { session });
 
-        // Mark seats as occupied
-        selectedSeats.forEach(seat => { showData.occupiedSeats[seat] = userId; });
-        showData.markModified('occupiedSeats');
-        await showData.save();
+        // Commit Transaction
+        await session.commitTransaction();
+        session.endSession();
 
-        res.json({ success: true, message: "Booking created successfully" });
+        // Create Stripe checkout session (outside transaction for speed/safety)
+        // If Stripe fails, the booking remains 'unpaid' and we can release seats later if needed
+        const url = await createStripeSession(booking, updatedShow.movie.title, origin);
+        
+        res.json({ success: true, url, message: "Booking created successfully" });
     } catch (error) {
-        console.log(error);
-        res.json({ success: false, message: error.message });
+        await session.abortTransaction();
+        session.endSession();
+        console.log("[Booking Transaction Error]:", error);
+        res.json({ success: false, message: "Internal server error during checkout" });
     }
 }
 
@@ -185,12 +217,21 @@ export const getOccupiedSeats = async (req, res) => {
 export const getUserBookings = async (req, res) => {
     try {
         const { userId } = req.auth();
-        const bookings = await Booking.find({ user: userId })
-            .populate({ path: 'show', populate: { path: 'movie' } })
-            .sort({ createdAt: -1 });
+        let bookings = await Booking.find({ user: userId })
+            .populate({ 
+                path: 'show', 
+                populate: { path: 'movie', select: 'title poster_path runtime genres release_date' },
+                select: 'showDateTime hall showPrice occupiedSeats'
+            })
+            .sort({ createdAt: -1 })
+            .lean(); // Faster JSON parsing
+            
+        // Defensive filtering to prevent frontend crash if a show/movie was deleted
+        bookings = bookings.filter(b => b.show && b.show.movie);
+        
         res.json({ success: true, bookings });
     } catch (error) {
-        console.log(error);
+        console.log("[MyBookings Query Error]:", error);
         res.json({ success: false, message: error.message });
     }
 }
