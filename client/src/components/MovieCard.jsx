@@ -72,7 +72,8 @@ const MovieCard = ({ movie }) => {
 
     return (
     <div 
-      onClick={handleNavigate}
+      onClick={() => {handleNavigate(); window.scrollTo({top: 0,behavior:'smooth'})}}
+      
       className="relative w-full aspect-2/3 rounded-2xl overflow-hidden group cursor-pointer bg-gray-900 border border-gray-800
        hover:border-pink-500/50 transition-colors duration-500 shadow-lg"
     >

@@ -177,10 +177,10 @@ const SeatLayout = () => {
         return buildTmdbResult(tmdbData);
       }
 
-      // Step 2: Try backend with 2s timeout — non-blocking upgrade
+      // Step 2: Try backend with 10s timeout — Vercel cold starts need more time
       try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 2000);
+        const timeout = setTimeout(() => controller.abort(), 10000);
 
         const { data } = await axios.get(`/api/show/${id}`, {
           signal: controller.signal,
@@ -511,7 +511,7 @@ const SeatLayout = () => {
   }, [selectedSeats, seatRows, showPrice])
 
   return show ? (
-    <div className="min-h-screen max-w-[100vw] bg-black relative overflow-x-hidden">
+    <div className="min-h-screen bg-black relative">
       <style>{customStyles}</style>
 
       {/* Enhanced Background Effects */}
@@ -527,7 +527,7 @@ const SeatLayout = () => {
       <div className="relative z-10 flex flex-col lg:flex-row gap-4 sm:gap-6 lg:gap-8 p-3 sm:p-6 md:p-8 lg:p-12 xl:p-16">
 
         {/* Enhanced Left Sidebar */}
-        <div className={`lg:w-80 xl:lg:w-96 transition-all duration-1000 ${isVisible ? 'translate-x-0 opacity-100' : '-translate-x-10 opacity-0 '}`}>
+        <div className={`lg:w-80 xl:lg:w-96 transition-all duration-1000 mt-5 ${isVisible ? 'translate-x-0 opacity-100' : '-translate-x-10 opacity-0 '}`}>
           <div className="bg-white/5 mt-10 backdrop-blur-xl rounded-2xl sm:rounded-3xl border border-white/10 p-4 sm:p-6 lg:p-8 lg:sticky lg:top-20 shadow-2xl">
 
             <div className="flex items-center gap-3 sm:gap-4 mb-5 sm:mb-8">
@@ -592,7 +592,7 @@ const SeatLayout = () => {
               )}
             </div>
 
-            <div className="mb-5 sm:mb-8">
+            <div className="mb-5 sm:mb-8 ">
               <h4 className="text-white font-semibold mb-4 flex items-center gap-2">
                 <ClockIcon className="w-5 h-5 text-primary" />
                 Step 2: Select Show Time
@@ -729,7 +729,7 @@ const SeatLayout = () => {
         </div>
 
         {/* Enhanced Right Section */}
-        <div className={`flex-1 transition-all duration-1000 delay-300 ${isVisible ? 'translate-y-0 opacity-100 mt-10' : 'translate-y-10 opacity-0'}`}>
+        <div className={`flex-1 transition-all duration-1000 delay-300 mt-15 ${isVisible ? 'translate-y-0 opacity-100 ' : 'translate-y-10 opacity-0'}`}>
           <div className="text-center mb-12">
            <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-3 bg-linear-to-r from-white via-primary to-white bg-clip-text text-transparent">
               Select Your Seat

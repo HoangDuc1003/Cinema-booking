@@ -92,9 +92,9 @@ const MovieDetails = () => {
       })
       .catch(() => {});
 
-    // Check backend for real showtimes (2s timeout — don't block UI)
+    // Check backend for real showtimes (10s timeout — Vercel cold starts can take 5-8s)
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2000);
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
 
     axios.get(`/api/show/${id}`, { signal: controller.signal })
       .then(({ data }) => {
@@ -218,7 +218,7 @@ const MovieDetails = () => {
 
       <div className='flex justify-center mt-10'>
         <button
-          onClick={() => { navigate('/movies'); scrollTo(0, 0) }}
+          onClick={() => { navigate('/movies'), window.scrollTo({top: 0,behavior:'smooth'}) }}
           className="group flex items-center gap-3 px-12 py-6 bg-gradient-to-r from-[#F84565] to-[#D63854]
             hover:from-[#D63854] hover:to-[#F84565] text-white font-semibold rounded-full shadow-lg shadow-[#F84565]/30 
             hover:shadow-xl hover:shadow-[#F84565]/60 hover:scale-105 active:scale-95 transition-all duration-300 border

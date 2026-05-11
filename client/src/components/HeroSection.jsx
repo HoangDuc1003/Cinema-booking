@@ -100,6 +100,7 @@ const STYLES = `
     .hero-title { font-size: clamp(24px, 6.5vw, 32px) !important; }
     .hero-overview { display: none !important; }
     .hero-meta { font-size: 12px !important; gap: 0.75rem !important; margin-bottom: 0.75rem !important; }
+    .hero-actions { flex-wrap: nowrap !important; gap: 0.5rem !important; }
     .thumb-bar { gap: 0.5rem !important; padding: 0.5rem !important; }
     .thumb-bar img { height: 44px !important; }
   }
@@ -332,12 +333,12 @@ const HeroSection = () => {
               <span className="flex items-center gap-1.5"><Star className="w-4 h-4 text-yellow-400 fill-yellow-400" />{rating||"8.9"}</span>
             </div>
 
-            <p className="hero-overview hero-fade-up text-gray-200 d3 text-sm sm:text-base leading-relaxed mb-4 sm:mb-8 line-clamp-2 sm:line-clamp-3 font-medium max-w-[400px]">
+            <p className="hero-overview hero-fade-up text-gray-200 d3 text-sm sm:text-base leading-relaxed mb-4 sm:mb-8 line-clamp-3 sm:line-clamp-3 font-medium max-w-[400px]">
               {movie.overview}
             </p>
 
-            <div className="hero-actions hero-fade-up d4 flex items-center gap-2 sm:gap-3 md:gap-4">
-              <button onClick={() => navigate(`/movies/${movie._id || movie.id}`)}
+            <div className="hero-actions hero-fade-up d4 flex flex-nowrap items-center gap-2 sm:gap-3 md:gap-4">
+              <button onClick={() => { navigate(`/movies/${movie._id || movie.id}`), window.scrollTo({top: 0,behavior:'smooth'})}}  //smooth scrolling to top
                 className="group flex items-center gap-1.5 sm:gap-2 md:gap-3 px-4 py-2.5 sm:px-6 sm:py-3 md:px-10 md:py-5 bg-linear-to-r from-primary to-primary-dull
                  hover:from-primary-dull hover:to-primary text-white font-semibold rounded-full shadow-lg shadow-primary/30 
                  hover:shadow-xl hover:shadow-primary/60 hover:scale-105 active:scale-95 transition-all duration-300 border

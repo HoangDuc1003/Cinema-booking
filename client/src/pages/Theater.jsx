@@ -26,7 +26,7 @@ const Theater = () => {
   if (isLoading) return <Loading />;
 
   return (
-    <div className='relative pt-30 mb-60 px-6 md:px-16 lg:px-40 xl:px-44 overflow-hidden min-h-[80vh]'>
+    <div className='relative pt-30 pb-10 px-6 md:px-16 lg:px-40 xl:px-44 overflow-hidden min-h-[100vh]'>
       {/* Blue glow band */}
       <div
         className="absolute left-1/2 -translate-x-1/2 w-[150%] h-45 rounded-[100%] blur-[120px] animate-slow-pulse pointer-events-none"
@@ -35,7 +35,7 @@ const Theater = () => {
       <BlurCircle top='150px' left='0'/>
       <BlurCircle bottom='50px' right='50px'/>
       <h1 className='relative text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-20'>Now in Theaters</h1>
-      <MovieGrid movies={movies} animated={true} staggerDelay={80} />
+      <MovieGrid movies={movies} animated={true} staggerDelay={20} />
     </div>
   );
 }

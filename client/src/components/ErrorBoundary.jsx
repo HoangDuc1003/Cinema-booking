@@ -26,7 +26,7 @@ class ErrorBoundary extends React.Component {
       }
 
       return (
-        <div className="min-h-[60vh] flex flex-col px-6 text-center align-center justify-center mt-30">
+        <div className="min-h-[100vh] flex flex-col px-6 text-center align-center justify-center mt-30">
           <div className="relative mb-8 ">
             {/* Decorative error icon with glow */}
             <div className="w-20 h-20 rounded-full bg-red-500/10 flex items-center justify-center border border-red-500/20">

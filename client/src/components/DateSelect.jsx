@@ -84,7 +84,7 @@ const DateSelect = ({ id, availableDates, isMockData = false }) => {
                     </div>
                 </div>
 
-                <button onClick={onBookHandler} className="group flex items-center gap-3 px-10 py-6 bg-gradient-to-r from-[#F84565]
+                <button onClick={() => {onBookHandler(); window.scrollTo({top: 0,behavior:'smooth'})}} className="group flex items-center gap-3 px-10 py-6 bg-gradient-to-r from-[#F84565]
                  to-[#D63854] hover:from-[#D63854] hover:to-[#F84565] text-white font-semibold rounded-full shadow-lg shadow-[#F84565]/30 
                  hover:shadow-xl hover:shadow-[#F84565]/60 hover:scale-105 active:scale-95 transition-all duration-300 border border-[#F84565]/30
                   hover:border-[#F84565]/60 relative overflow-hidden">
