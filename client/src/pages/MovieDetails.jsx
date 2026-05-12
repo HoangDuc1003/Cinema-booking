@@ -144,7 +144,7 @@ const MovieDetails = () => {
   return show ? (
     <div className='px-6 md:px-6 lg:px-40 pt-30'>
       <div
-        className="absolute left-1/2 -translate-x-1/2 w-[150%] h-45 rounded-[100%] blur-[120px] 
+        className="absolute left-1/2 -translate-x-1/2 w-[90%] h-45 rounded-[100%] blur-[120px] 
           animate-slow-pulse pointer-events-none"
         style={{ top: '-20px', zIndex: 0, background: 'rgba(0, 123, 255, 0.5)' }}
       />
