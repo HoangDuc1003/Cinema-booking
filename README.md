@@ -13,7 +13,7 @@
 
 **A complete MERN Stack application for booking movie tickets online with real-time seat locking and secure payments.**
 
-[![Live Demo](https://img.shields.io/badge/🚀_Visit_Website-Click_Here-success?style=for-the-badge&logo=vercel&logoColor=white)](https://booking-movie-ticket-client-eight.vercel.app/)
+[![Live Demo](https://img.shields.io/badge/🚀_Visit_Website-Click_Here-success?style=for-the-badge&logo=vercel&logoColor=white)](https://nitrocine.vercel.app/)
 
 </div>
 
