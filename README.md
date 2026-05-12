@@ -43,35 +43,37 @@
 
 ### 🎭 User Interface
 
-| **Home Page** | **Trailer Player** |
-|:---:|:---:|
-| <img src="./images/client/home_client.png" width="400"/> | <img src="./images/client/trailer_client.png" width="400"/> |
-| Hero banner with auto-sliding movies. | Watch trailers with mute & pause controls. |
+### 🎭 Client Interface
 
-| **Now Showing** | **Upcoming Releases** |
+| **Home Page** | **Now Showing** |
 |:---:|:---:|
-| <img src="./images/client/feature_client.png" width="400"/> | <img src="./images/client/release_client.png" width="400"/> |
-| Grid of popular movies ready to book. | Browse movies coming soon to theaters. |
+| <img src="./images/client/home_client.png" width="400"/> | <img src="./images/client/feature_client.png" width="400"/> |
+| *Hero banner with auto-sliding movies.* | *Grid of popular movies ready to book.* |
+
+| **Trailer Player** | **Upcoming Releases** |
+|:---:|:---:|
+| <img src="./images/client/trailer_client.png" width="400"/> | <img src="./images/client/release_client.png" width="400"/> |
+| *Watch trailers with mute & pause controls.* | *Browse movies coming soon to theaters.* |
 
 | **Search Bar** | **Search Results** |
 |:---:|:---:|
 | <img src="./images/client/search_client.png" width="400"/> | <img src="./images/client/search_demo_client.png" width="400"/> |
-| Live search powered by TMDB API. | Results filtered as you type (debounced). |
+| *Live search powered by TMDB API.* | *Results filtered as you type (debounced).* |
 
-| **Movie Details** | **Seat Selection** |
+| **Favorites** | **Movie Details** |
 |:---:|:---:|
-| <img src="./images/client/movie_detail.png" width="400"/> | <img src="./images/client/seatlayout.png" width="400"/> |
-| Rating, runtime, genres and showtimes. | Interactive seat map with live updates. |
+| <img src="./images/client/my_favor.png" width="400"/> | <img src="./images/client/movie_detail.png" width="400"/> |
+| *Movies you saved to your watchlist.* | *Rating, runtime, genres and showtimes.* |
 
-| **My Bookings** | **Favorites** |
+| **Seat Selection** | **My Bookings** |
 |:---:|:---:|
-| <img src="./images/client/my_booking.png" width="400"/> | <img src="./images/client/my_favor.png" width="400"/> |
-| View tickets and pay with Stripe. | Movies you saved to your watchlist. |
+| <img src="./images/client/seatlayout.png" width="400"/> | <img src="./images/client/my_booking.png" width="400"/> |
+| *Interactive seat map with live updates.* | *View tickets and pay with Stripe.* |
 
 | **Account Settings** |
 |:---:|
 | <img src="./images/client/setting_account_client.png" width="830"/> |
-| Manage your profile via Clerk. |
+| *Manage your profile via Clerk.* |
 
 ---
 
