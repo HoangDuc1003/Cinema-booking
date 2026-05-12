@@ -15,11 +15,11 @@ process.on('unhandledRejection', (reason) => {
 });
 process.on('uncaughtException', (error) => {
     console.error('\x1b[31m[Uncaught Exception]\x1b[0m', error);
-    process.exit(1);
+    // Don't exit on Vercel — let the function complete
+    if (!process.env.VERCEL) process.exit(1);
 });
 
 const app = express();
-const port = process.env.PORT || 3000;
 
 // Stripe webhook must use raw body (before express.json)
 app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), stripeWebhooks);
@@ -36,6 +36,17 @@ app.use(clerkMiddleware({
     secretKey: process.env.CLERK_SECRET_KEY,
     publishableKey: process.env.CLERK_PUBLISHABLE_KEY,
 }))
+
+// Ensure DB is connected before handling any API route
+app.use(async (req, res, next) => {
+    try {
+        await connectDB();
+        next();
+    } catch (error) {
+        console.error('[DB Middleware] Connection failed:', error.message);
+        res.status(503).json({ success: false, message: 'Database temporarily unavailable. Please retry.' });
+    }
+});
 
 // Routes
 app.get('/', (req, res) => res.send('Server is live!'))
@@ -62,20 +73,13 @@ app.use('/api/booking', bookingRouter)
 app.use('/api/admin', adminRouter)
 app.use('/api/user', userRouter)
 
-// Start server
-const startServer = async () => {
-    try {
-        await connectDB();
-    } catch (error) {
-        console.error('\x1b[31m[Critical] DB connection failed:\x1b[0m', error.message);
-        console.error('\x1b[33m[Tip] Server still starts, but DB calls will fail.\x1b[0m');
-    }
+// Only call listen() locally — Vercel handles ports automatically
+if (!process.env.VERCEL) {
+    const port = process.env.PORT || 3000;
     app.listen(port, () => {
         console.log(`\x1b[32m✔ Server running on port ${port}\x1b[0m`);
         console.log(`\x1b[36m➜ Local: http://127.0.0.1:${port}\x1b[0m`);
     });
-};
-
-startServer();
+}
 
 export default app;

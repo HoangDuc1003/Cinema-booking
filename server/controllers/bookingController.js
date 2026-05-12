@@ -191,7 +191,8 @@ export const createBooking = async (req, res) => {
         session.endSession();
         session = null;
         try {
-            const url = await createStripeSession(booking, booking.show?.movie?.title || 'Phim chua cap nhat', origin);
+            const movieTitle = updatedShow?.movie?.title || 'NitroCine Ticket';
+            const url = await createStripeSession(booking, movieTitle, origin);
             res.json({ success: true, url, message: "Booking created successfully" });
         } catch (stripeError) {
             console.log("[Stripe Error]:", stripeError);

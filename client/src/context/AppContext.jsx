@@ -47,11 +47,21 @@ export const AppProvider = ({ children }) => {
     const responseInterceptor = api.interceptors.response.use(
       (response) => response,
       (error) => {
-        if (error.response?.status === 401 || error.response?.status === 403) {
-          console.error("[API Error] 401/403 Unauthorized - Hết hạn token hoặc chưa login");
-        } else {
+        const status = error.response?.status;
+        const url = error.config?.url || '';
+
+        // Silently handle auth errors — user just isn't logged in
+        if (status === 401 || status === 403) {
+          // Only log for non-admin, non-favorites routes (those are expected when logged out)
+          if (!url.includes('/is-admin') && !url.includes('/favorites')) {
+            console.warn(`[Auth] ${status} on ${url}`);
+          }
+        } else if (status === 503) {
+          console.warn('[API] Database temporarily unavailable');
+        } else if (error.code !== 'ERR_CANCELED') {
+          // Don't log aborted requests (e.g., from AbortController timeouts)
           const message = error.response?.data?.message || error.message || "Network Error";
-          console.error(`[API Error] ${error.config?.url}:`, message);
+          console.error(`[API Error] ${url}:`, message);
         }
         return Promise.reject(error);
       }
