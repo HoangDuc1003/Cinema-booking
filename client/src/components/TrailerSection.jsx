@@ -147,7 +147,7 @@ const TrailerSection = () => {
       .ts-player {
         position: relative;
         width: 100%;
-        padding-top: 56.25%; /* 16:9 */
+        padding-top: 60%; /* 16:9 */
         border-radius: 20px;
         overflow: hidden;
         background: #0a0c14;

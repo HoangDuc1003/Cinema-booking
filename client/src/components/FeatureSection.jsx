@@ -44,21 +44,21 @@ const FeatureSection = () => {
   };
 
   return (
-    <div className='px-6 md:px-16 lg:px-24 xl:px-40 overflow-hidden'>
-      <div className='relative flex items-center justify-between pt-20 pb-10'>
+    <div className='px-4 sm:px-6 md:px-16 lg:px-24 xl:px-40 overflow-hidden'>
+      <div className='relative flex items-center justify-between pt-10 sm:pt-20 pb-6 sm:pb-10'>
         <BlurCircle top='80px' right='-60px' />
         <BlurCircle top='600px' left='-65px' />
         <BlurCircle top='800px' right='-100px' />
         <BlurCircle top='0px' left='0' />
-        <p className='relative text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-2 mt-20'>Now Showing</p>
+        <p className='relative text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-2 mt-8 sm:mt-20'>Now Showing</p>
         <button
           onClick={handleNavigate}
-          className="group flex items-center gap-2 px-6 py-3 text-sm text-gray-300 
+          className="group flex items-center gap-2 px-4 py-2 sm:px-6 sm:py-3 text-[10px] sm:text-sm text-gray-300 
             hover:text-white bg-white/5 hover:bg-white/10 border border-white/20 hover:border-primary/40 
-            rounded-full backdrop-blur-sm transition-all duration-300 hover:scale-105 relative overflow-hidden mt-20"
+            rounded-full backdrop-blur-sm transition-all duration-300 hover:scale-105 relative overflow-hidden mt-8 sm:mt-20"
         >
           View All
-          <ArrowRightIcon className='group-hover:translate-x-0.5 transition w-4.5 h-4.5' />
+          <ArrowRightIcon className='group-hover:translate-x-0.5 transition w-4 h-4 sm:w-4.5 sm:h-4.5' />
         </button>
       </div>
 

@@ -55,7 +55,7 @@ const Movies = () => {
   if (hasError) return <Loading message="Failed to load movies. Retrying..." />;
 
   return (
-    <div className='relative pt-30 pb-5 px-6 md:px-16 lg:px-40 xl:px-44 overflow-hidden min-h-[100vh]'>
+    <div className='relative pt-30 pb-5 px-6 md:px-16 lg:px-40 xl:px-44 min-h-[100vh]'>
       {/* Animated glow band — moved animation to index.css */}
       <div
         className="absolute left-1/2 -translate-x-1/2 w-[150%] h-45 rounded-[100%] blur-[120px] 

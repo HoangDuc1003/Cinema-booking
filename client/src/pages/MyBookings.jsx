@@ -109,7 +109,7 @@ const MyBookings = () => {
   if (isLoading && !sortedBookings.length) return <Loading message="Loading your bookings..." />;
 
   return (
-    <div className='relative px-4 sm:px-6 md:px-16 lg:px-40 pt-24 sm:pt-30 min-h-[80vh] mb-10 max-w-[100vw] overflow-x-hidden'>
+    <div className='relative px-4 sm:px-6 md:px-16 lg:px-40 pt-24 sm:pt-30 min-h-[80vh] mb-10'>
       {/* Background effects */}
       <div
         className="absolute left-1/2 -translate-x-1/2 w-[120%] sm:w-[150%] h-45 rounded-[100%] blur-[120px] animate-slow-pulse pointer-events-none"
