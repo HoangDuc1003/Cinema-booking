@@ -483,12 +483,12 @@ const SeatLayout = () => {
     }
 
     return (
-      <div key={row} className="flex items-center justify-center gap-1 sm:gap-2 mb-2 sm:mb-3 group">
-        <span className="w-6 sm:w-8 text-center text-gray-400 text-xs sm:text-sm font-bold">{row}</span>
-        <div className="flex items-center gap-1 sm:gap-2">
+      <div key={row} className="flex items-center justify-center gap-1.5 sm:gap-2 mb-2 sm:mb-3 group">
+        <span className="w-6 sm:w-8 text-center text-gray-500 text-[10px] sm:text-xs font-bold shrink-0">{row}</span>
+        <div className="flex items-center gap-1.5 sm:gap-2">
           {seats}
         </div>
-        <span className="w-6 sm:w-8 text-center text-gray-400 text-xs sm:text-sm font-bold">{row}</span>
+        <span className="w-6 sm:w-8 text-center text-gray-500 text-[10px] sm:text-xs font-bold shrink-0">{row}</span>
       </div>
     )
   }
@@ -790,8 +790,8 @@ const SeatLayout = () => {
           </div>
 
           {/* Enhanced Seat Map */}
-          <div className="max-w-full mx-auto overflow-x-auto pb-2">
-            <div className="px-2 sm:px-4">
+          <div className="w-full overflow-x-auto pb-6 custom-scrollbar">
+            <div className="w-fit mx-auto px-8 sm:px-12 min-w-max">
               {/* Front Section */}
               <div className="mb-4 sm:mb-6 mt-1 sm:mt-2">
                 <div className="text-center mb-3 sm:mb-4">

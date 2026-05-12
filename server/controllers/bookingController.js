@@ -187,19 +187,15 @@ export const createBooking = async (req, res) => {
             bookedSeats: selectedSeats
         }], { session });
 
-        // Commit Transaction
         await session.commitTransaction();
         session.endSession();
-        session = null; // Prevent catch block from using it
-
-        // Create Stripe checkout session (outside transaction for speed/safety)
-        // If Stripe fails, the booking remains 'unpaid' and we can release seats later if needed
+        session = null;
         try {
-            const url = await createStripeSession(booking, updatedShow.movie.title, origin);
+            const url = await createStripeSession(booking, booking.show.movie?.title || 'NitroCine Ticket', origin);
             res.json({ success: true, url, message: "Booking created successfully" });
         } catch (stripeError) {
             console.log("[Stripe Error]:", stripeError);
-            res.status(500).json({ success: false, message: "Booking created but failed to generate payment link." });
+            res.json({ success: false, message: "Booking created but failed to generate payment link." });
         }
 
     } catch (error) {
