@@ -12,7 +12,7 @@ export const getNowPlayingMovies = async (req, res) => {
         res.json({success: true, movies: movies});
     } catch (error) {
         console.error(error);
-        res.json({success: false, error: error.message});
+        return res.status(500).json({ success: false, message: error.message });
     }
 }
 
@@ -75,7 +75,7 @@ export const addShow = async (req, res) => {
 
     } catch (error) {
         console.error(error);
-        res.json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: error.message });
     }
 }
 
@@ -85,7 +85,7 @@ export const importTrendingMovies = async (req, res) => {
         res.json({ success: true, message: `Successfully imported ${result.count} movies with auto-generated shows!` });
     } catch (error) {
         console.error(error);
-        res.json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: error.message });
     }
 }
 
@@ -130,7 +130,7 @@ export const getShows = async (req,res) =>{
         res.json({success:true, shows: uniqueMovies})
     } catch (error) {
         console.log(error);
-        res.json({success:false, message:error.message});
+        return res.status(500).json({ success: false, message: error.message });
     }
 } 
 
@@ -227,7 +227,7 @@ export const getShow = async (req,res) => {
         res.json({success:true, movie, dateTime})
     } catch (error) {
         console.log(error);
-        res.json({success:false, message:error.message});
+        return res.status(500).json({ success: false, message: error.message });
     }
 }
 export default { getNowPlayingMovies, addShow, importTrendingMovies, getShows, getShow }

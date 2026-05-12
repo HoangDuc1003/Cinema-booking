@@ -21,7 +21,7 @@ export const getDashboardData = async (req,res)=>{
         res.json({success:true,dashboardData});
     } catch (error) {
         console.log(error);
-        res.json({success:false,message:error.message});
+        return res.status(500).json({ success: false, message: error.message });
     }
 }
 
@@ -32,7 +32,7 @@ export const getAllShows = async (req,res) =>{
         res.json({success:true,shows});
     } catch (error) {
         console.log(error);
-        res.json({success:false,message:error.message});
+        return res.status(500).json({ success: false, message: error.message });
     }
 }
 
@@ -46,6 +46,6 @@ export const getAllBookings = async (req,res) =>{
         res.json({success:true,bookings});
     } catch (error) {
         console.log(error);
-        res.json({success:false,message:error.message});
+        return res.status(500).json({ success: false, message: error.message });
     }
 }

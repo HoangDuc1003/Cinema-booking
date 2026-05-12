@@ -13,7 +13,7 @@ export const getUserBookings = async (req, res) => {
         res.json({ success: true, bookings });
     } catch (error) {
         console.log(error);
-        res.json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: error.message });
     }
 }
 
@@ -39,7 +39,7 @@ export const updateFavorite = async (req, res) => {
         res.json({ success: true, message: "Favorite movies updated." });
     } catch (error) {
         console.log(error);
-        res.json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: error.message });
     }
 }
 
@@ -53,6 +53,6 @@ export const getFavorites = async (req,res) =>{
         res.json({success:true,movies})
     } catch (error) {
         console.log(error);
-        res.json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: error.message });
     }
 }

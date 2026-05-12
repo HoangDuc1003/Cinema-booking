@@ -1,4 +1,6 @@
-import mongoose from 'mongoose'
+import mongoose from 'mongoose';
+import dns from 'dns';
+dns.setServers(['8.8.8.8', '8.8.4.4']);
 
 let cached = global._mongooseConnection;
 
@@ -18,8 +20,8 @@ const connectDB = async () => {
         });
         
         global._mongooseConnection = cached;
-        console.log(mongoose.connection.name);
-        
+        console.log("MongoDB Connected");
+
         return cached;
     } catch (error) {
         console.error(error.message);

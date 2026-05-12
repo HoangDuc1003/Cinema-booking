@@ -191,7 +191,7 @@ export const createBooking = async (req, res) => {
         session.endSession();
         session = null;
         try {
-            const url = await createStripeSession(booking, booking.show.movie?.title || 'NitroCine Ticket', origin);
+            const url = await createStripeSession(booking, booking.show?.movie?.title || 'Phim chua cap nhat', origin);
             res.json({ success: true, url, message: "Booking created successfully" });
         } catch (stripeError) {
             console.log("[Stripe Error]:", stripeError);
@@ -204,7 +204,7 @@ export const createBooking = async (req, res) => {
             session.endSession();
         }
         console.log("[Booking Transaction Error]:", error);
-        res.status(500).json({ success: false, message: "Internal server error during checkout: " + error.message });
+        return res.status(500).json({ success: false, message: error.message });
     }
 }
 
@@ -220,7 +220,7 @@ export const getOccupiedSeats = async (req, res) => {
         res.json({ success: true, occupiedSeats: Object.keys(showData.occupiedSeats) });
     } catch (error) {
         console.log(error);
-        res.json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: error.message });
     }
 }
 
@@ -243,7 +243,7 @@ export const getUserBookings = async (req, res) => {
         res.json({ success: true, bookings });
     } catch (error) {
         console.log("[MyBookings Query Error]:", error);
-        res.json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: error.message });
     }
 }
 
@@ -262,11 +262,11 @@ export const payNowBooking = async (req, res) => {
         if (booking.isPaid) return res.json({ success: false, message: "Already paid" });
 
         // Create new Stripe session and redirect
-        const url = await createStripeSession(booking, booking.show.movie.title, origin);
+        const url = await createStripeSession(booking, booking.show?.movie?.title || 'Phim chua cap nhat', origin);
         res.json({ success: true, url });
     } catch (error) {
         console.log(error);
-        res.json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: error.message });
     }
 }
 
@@ -308,7 +308,7 @@ export const deleteBooking = async (req, res) => {
         res.json({ success: true, message: "Booking deleted successfully" });
     } catch (error) {
         console.log(error);
-        res.json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: error.message });
     }
 }
 
@@ -373,6 +373,6 @@ export const payAllBookings = async (req, res) => {
         res.json({ success: true, url: session.url });
     } catch (error) {
         console.log(error);
-        res.json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: error.message });
     }
 }
