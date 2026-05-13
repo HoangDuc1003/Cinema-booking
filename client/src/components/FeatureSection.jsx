@@ -50,7 +50,7 @@ const FeatureSection = () => {
         <BlurCircle top='600px' left='-65px' />
         <BlurCircle top='800px' right='-100px' />
         <BlurCircle top='0px' left='0' />
-        <p className='relative text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-2 mt-8 sm:mt-5'>Now Showing</p>
+        <p className='relative text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-2 mt-8 sm:mt-20'>Now Showing</p>
         <button
           onClick={handleNavigate}
           className="group flex items-center gap-2 px-4 py-2 sm:px-6 sm:py-3 text-[10px] sm:text-sm text-gray-300 

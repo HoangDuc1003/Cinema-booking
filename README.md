@@ -43,8 +43,6 @@
 
 ### 🎭 User Interface
 
-### 🎭 Client Interface
-
 | **Home Page** | **Now Showing** |
 |:---:|:---:|
 | <img src="./images/client/home_client.png" width="400"/> | <img src="./images/client/feature_client.png" width="400"/> |
