@@ -45,12 +45,12 @@ const FeatureSection = () => {
 
   return (
     <div className='px-4 sm:px-6 md:px-16 lg:px-24 xl:px-40 overflow-hidden'>
-      <div className='relative flex items-center justify-between pt-10 sm:pt-20 pb-6 sm:pb-10'>
+      <div className='relative flex items-center justify-between pt-10 sm:pt-5 pb-6 sm:pb-10'>
         <BlurCircle top='80px' right='-60px' />
         <BlurCircle top='600px' left='-65px' />
         <BlurCircle top='800px' right='-100px' />
         <BlurCircle top='0px' left='0' />
-        <p className='relative text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-2 mt-8 sm:mt-20'>Now Showing</p>
+        <p className='relative text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-2 mt-8 sm:mt-5'>Now Showing</p>
         <button
           onClick={handleNavigate}
           className="group flex items-center gap-2 px-4 py-2 sm:px-6 sm:py-3 text-[10px] sm:text-sm text-gray-300 
