@@ -137,6 +137,7 @@ const SeatLayout = () => {
   const [showPrice, setShowPrice] = useState(0)
   const [priceLoading, setPriceLoading] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [isBooking, setIsBooking] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false) // Tracking real-time sync
   const imageBaseUrl = "https://image.tmdb.org/t/p/original"
 
@@ -254,6 +255,7 @@ const SeatLayout = () => {
   }, [axios, selectedTime])
 
   const bookTickets = async () => {
+    if (isBooking) return
     try {
       if (!user) return toast.error('Please login to book tickets')
       const showId = selectedTime?.showId ?? selectedTime?._id ?? selectedTime?.id
@@ -272,17 +274,30 @@ const SeatLayout = () => {
         })
       };
 
-      // Create booking and redirect to My Bookings
+      setIsBooking(true)
       const { data } = await axios.post('/api/booking/create', payload);
-      if (data.success) {
-        toast.success("Booking confirmed!");
-        navigate('/my-bookings');
-        scrollTo(0,0)
+      if (data.success && data.url) {
+        toast.success('Seats held. Redirecting to payment...')
+        window.location.assign(data.url)
+      } else if (data.success) {
+        navigate('/my-bookings')
+        scrollTo(0, 0)
       } else {
         toast.error(data.message);
       }
     } catch (error) {
-      toast.error(error.message || 'Failed to book tickets')
+      const paymentState = error.response?.data
+      if (paymentState?.retryPayment || paymentState?.existingBookingId) {
+        toast.error(paymentState.message || 'Seats are held. Retry payment from My Bookings.')
+        navigate('/my-bookings', {
+          state: { retryBookingId: paymentState.bookingId || paymentState.existingBookingId },
+        })
+        scrollTo(0, 0)
+      } else {
+        toast.error(paymentState?.message || error.message || 'Failed to book tickets')
+      }
+    } finally {
+      setIsBooking(false)
     }
   }
 
@@ -864,11 +879,11 @@ const SeatLayout = () => {
               </div>
 
               <button
-                disabled={!selectedTime || selectedSeats.length === 0}
+                disabled={!selectedTime || selectedSeats.length === 0 || isBooking}
                 onClick={bookTickets}
                 className="w-full bg-linear-to-r from-primary to-primary-dull hover:from-primary-dull hover:to-primary disabled:from-gray-600 disabled:to-gray-700 disabled:cursor-not-allowed text-white font-bold py-4 sm:py-5 rounded-xl sm:rounded-2xl transition-all duration-300 hover:scale-105 disabled:hover:scale-100 shadow-lg shadow-primary/30 hover:shadow-2xl hover:shadow-primary/50 disabled:shadow-none flex items-center justify-center gap-3 text-base sm:text-lg relative overflow-hidden group"
               >
-                <span className="relative z-10">Proceed to Checkout</span>
+                <span className="relative z-10">{isBooking ? 'Holding seats...' : 'Proceed to Checkout'}</span>
                 <ArrowRight className="w-6 h-6 relative z-10 group-hover:translate-x-1 transition-transform duration-300" />
                 <div className="absolute inset-0 bg-white/10 -translate-x-full group-hover:translate-x-0 transition-transform duration-500"></div>
               </button>

@@ -34,7 +34,9 @@ export const redisTtl = Object.freeze({
     cinemas: parsePositiveInteger(process.env.CACHE_CINEMAS_TTL_SECONDS, 600),
     showtimes: parsePositiveInteger(process.env.CACHE_SHOWTIMES_TTL_SECONDS, 120),
     seatMap: parsePositiveInteger(process.env.CACHE_SEAT_MAP_TTL_SECONDS, 5),
-    seatHold: Math.min(Math.max(parsePositiveInteger(process.env.SEAT_HOLD_TTL_SECONDS, 1800), 1800), 86400),
+    // Stripe Checkout requires expires_at to be at least 30 minutes in the future.
+    // Keep a one-minute network/clock buffer and use the same TTL for DB + Redis holds.
+    seatHold: Math.min(Math.max(parsePositiveInteger(process.env.SEAT_HOLD_TTL_SECONDS, 1860), 1860), 86400),
     bookingLockMs: parsePositiveInteger(process.env.BOOKING_LOCK_TTL_MS, 10000),
     paymentLockMs: parsePositiveInteger(process.env.PAYMENT_LOCK_TTL_MS, 30000),
     paymentIdempotency: parsePositiveInteger(process.env.PAYMENT_IDEMPOTENCY_TTL_SECONDS, 604800),

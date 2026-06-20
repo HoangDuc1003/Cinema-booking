@@ -9,6 +9,7 @@ import bookingRouter from '../routes/bookingRoutes.js';
 import adminRouter from '../routes/adminRoutes.js';
 import userRouter from '../routes/userRoutes.js';
 import { stripeWebhooks } from '../controllers/stripeWebhooks.js';
+import { getPaymentConfigStatus } from '../configs/runtimeConfig.js';
 
 process.on('unhandledRejection', (reason) => {
     console.error('[Unhandled rejection]', reason);
@@ -41,11 +42,17 @@ app.get('/api/health', async (req, res) => {
     }
 
     const redis = await getRedisHealth();
+    const paymentConfig = getPaymentConfigStatus();
     const healthy = database.connected;
     return res.status(healthy ? 200 : 503).json({
         success: healthy,
         status: healthy && redis.connected ? 'ok' : (healthy ? 'degraded' : 'unavailable'),
-        dependencies: { database, redis },
+        dependencies: {
+            database,
+            redis,
+            stripe: paymentConfig.stripe,
+            clientUrl: paymentConfig.clientUrl,
+        },
     });
 });
 
