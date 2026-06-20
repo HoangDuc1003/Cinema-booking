@@ -249,7 +249,7 @@ configuration and must not contain server secrets.
 ```env
 VITE_CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
 VITE_BASE_URL=http://localhost:3000
-VITE_TMDB_API_KEY=your_restricted_tmdb_browser_key
+# TMDB requests are proxied through the backend; no browser TMDB key is needed.
 ```
 
 Start the frontend app:

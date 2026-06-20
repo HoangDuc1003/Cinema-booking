@@ -11,6 +11,7 @@ import { withDistributedLock, LockBusyError } from '../services/lockService.js';
 import { createSeatHolds, releaseSeatHolds } from '../services/seatHoldService.js';
 import { calculateBookingAmount, isMongoDuplicateKey, normalizeSeats } from '../services/seatService.js';
 import { redisKeys, redisTtl } from '../services/redisKeys.js';
+import ensureCriticalIndexes from '../configs/indexes.js';
 
 const getOrigin = (req) => {
     if (process.env.CLIENT_URL) return process.env.CLIENT_URL.replace(/\/$/, '');
@@ -190,6 +191,7 @@ const extendActiveHold = async (booking) => {
 
 export const createBooking = async (req, res) => {
     try {
+        await ensureCriticalIndexes();
         const { userId } = req.auth();
         const showId = String(req.body.showId || '');
         const seats = normalizeSeats(req.body.selectedSeats);

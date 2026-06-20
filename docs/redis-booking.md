@@ -5,7 +5,7 @@
 MongoDB là source of truth cho booking. Unique index `SeatReservation(show, seat)` bảo đảm chỉ có một reservation hoạt động cho mỗi ghế của một suất chiếu. Redis giảm tải read, cung cấp seat-hold TTL, giảm tranh chấp bằng distributed lock và chống xử lý đồng thời cùng một Stripe event; hệ thống vẫn dựa vào MongoDB invariant nếu Redis tạm mất.
 
 MongoDB phải chạy dưới dạng replica set (MongoDB Atlas đáp ứng yêu cầu này) vì create, payment và cancel sử dụng transaction.
-Readiness chờ `Booking.init()`, `Show.init()` và `SeatReservation.init()` hoàn tất; API sẽ không nhận traffic booking khi critical unique index chưa sẵn sàng.
+Booking creation và payment callback chờ `Booking.init()` cùng `SeatReservation.init()` hoàn tất. Movie/read APIs chỉ phụ thuộc kết nối MongoDB, nên lỗi migration booking index không làm toàn bộ catalog trả 503.
 
 ## Redis keys
 
@@ -87,11 +87,10 @@ Kỳ vọng đúng một response có `bookingId`; các request còn lại trả
 
 ## Deploy index
 
-Trước khi deploy vào database đã có dữ liệu, kiểm tra và xử lý show trùng `(movie, showDateTime, hall)`. Mongoose sẽ tạo unique indexes từ schema khi auto-index được bật. Với production tắt auto-index, tạo thủ công:
+Mongoose sẽ tạo critical unique index từ schema khi auto-index được bật. Với production tắt auto-index, tạo thủ công:
 
 ```javascript
-db.shows.createIndex({ movie: 1, showDateTime: 1, hall: 1 }, { unique: true })
 db.seatreservations.createIndex({ show: 1, seat: 1 }, { unique: true })
 ```
 
-Không tạo index trước khi dọn duplicate hiện hữu; MongoDB sẽ từ chối build index thay vì tự chọn bản ghi để xóa.
+Không tạo index trước khi dọn duplicate seat reservation hiện hữu; MongoDB sẽ từ chối build index thay vì tự chọn bản ghi để xóa. Show catalog chỉ dùng compound index không unique để tương thích dữ liệu cũ.

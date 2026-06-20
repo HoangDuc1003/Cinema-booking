@@ -4,7 +4,6 @@ import 'dotenv/config';
 import { clerkMiddleware } from '@clerk/express';
 import connectDB from '../configs/db.js';
 import { connectRedis, getRedisHealth } from '../configs/redis.js';
-import ensureCriticalIndexes from '../configs/indexes.js';
 import showRouter from '../routes/showRoutes.js';
 import bookingRouter from '../routes/bookingRoutes.js';
 import adminRouter from '../routes/adminRoutes.js';
@@ -36,7 +35,6 @@ app.get('/api/health', async (req, res) => {
     let database = { connected: false, status: 'unavailable' };
     try {
         await connectDB();
-        await ensureCriticalIndexes();
         database = { connected: true, status: 'ready' };
     } catch (error) {
         database = { connected: false, status: 'unavailable' };
@@ -59,7 +57,6 @@ app.use(clerkMiddleware({
 app.use(async (req, res, next) => {
     try {
         await connectDB();
-        await ensureCriticalIndexes();
         next();
     } catch (error) {
         console.error('[DB middleware] Connection failed:', error.message);

@@ -1,5 +1,4 @@
 import Booking from '../models/Booking.js';
-import Show from '../models/Show.js';
 import SeatReservation from '../models/SeatReservation.js';
 
 const state = globalThis.__nitroCineIndexState || { promise: null, ready: false };
@@ -10,7 +9,6 @@ export const ensureCriticalIndexes = async () => {
     if (!state.promise) {
         state.promise = Promise.all([
             Booking.init(),
-            Show.init(),
             SeatReservation.init(),
         ]).then(() => {
             state.ready = true;

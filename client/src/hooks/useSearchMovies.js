@@ -1,9 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import useDebounce from './useDebounce';
-
-const API_KEY = import.meta.env.VITE_TMDB_API_KEY;
-const BASE_URL = 'https://api.themoviedb.org/3';
-const IMAGE_BASE = 'https://image.tmdb.org/t/p';
+import { searchMovies as fetchSearchMovies } from '../services/tmdb';
 
 // In-memory cache for search results — survives re-renders but not page reload.
 // WHY in-memory vs sessionStorage: Search results change frequently and are
@@ -68,27 +65,7 @@ const useSearchMovies = (query, debounceDelay = 300) => {
       setSearchError(null);
 
       try {
-        const response = await fetch(
-          `${BASE_URL}/search/movie?api_key=${API_KEY}&language=en-US&query=${encodeURIComponent(debouncedQuery)}&page=1&include_adult=false`,
-          { signal: controller.signal }
-        );
-
-        if (!response.ok) throw new Error('Search request failed');
-
-        const data = await response.json();
-
-        const mapped = (data.results || []).map((movie) => ({
-          _id: movie.id.toString(),
-          id: movie.id,
-          title: movie.title,
-          overview: movie.overview,
-          poster_path: movie.poster_path ? `${IMAGE_BASE}/w500${movie.poster_path}` : null,
-          backdrop_path: movie.backdrop_path ? `${IMAGE_BASE}/w780${movie.backdrop_path}` : null,
-          release_date: movie.release_date,
-          vote_average: movie.vote_average,
-          vote_count: movie.vote_count,
-          runtime: movie.runtime,
-        }));
+        const mapped = await fetchSearchMovies(debouncedQuery, { signal: controller.signal });
 
         // Only update state if this request wasn't aborted
         if (!controller.signal.aborted) {

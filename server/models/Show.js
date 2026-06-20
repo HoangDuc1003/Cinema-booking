@@ -10,7 +10,9 @@ const showSchema = new mongoose.Schema(
     }, { minimize: false }
 )
 
-showSchema.index({ movie: 1, showDateTime: 1, hall: 1 }, { unique: true });
+// Existing deployments may already contain duplicate show rows. Keep this index
+// non-unique; seat inventory uniqueness is enforced by SeatReservation instead.
+showSchema.index({ movie: 1, showDateTime: 1, hall: 1 });
 showSchema.index({ showDateTime: 1 });
 
 const Show = mongoose.model("Show", showSchema);
