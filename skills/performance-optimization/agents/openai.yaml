@@ -1,0 +1,4 @@
+interface:
+  display_name: "Performance Optimization"
+  short_description: "Find and remove application bottlenecks"
+  default_prompt: "Use $performance-optimization to optimize a measured NitroCine hot path."

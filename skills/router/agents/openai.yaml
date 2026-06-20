@@ -1,0 +1,4 @@
+interface:
+  display_name: "Repo Skill Router"
+  short_description: "Route work to the right repo skill"
+  default_prompt: "Use $router to choose the smallest relevant NitroCine repo skill workflow."

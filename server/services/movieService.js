@@ -1,6 +1,6 @@
 import axios from "axios"
 import Movie from "../models/Movie.js"
-import Show from "../models/Show.js"
+import { invalidateMovieCatalog } from "./cacheInvalidationService.js"
 
 export const importTrendingMoviesLogic = async () => {
     try {
@@ -42,6 +42,7 @@ export const importTrendingMoviesLogic = async () => {
             }
             importedCount++;
         }
+        await invalidateMovieCatalog();
         return { success: true, count: importedCount };
     } catch (error) {
         console.error('Import error:', error);

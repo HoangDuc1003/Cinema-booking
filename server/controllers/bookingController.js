@@ -1,379 +1,457 @@
-import axios from "axios"
-import mongoose from "mongoose"
-import Movie from "../models/Movie.js"
-import Show from "../models/Show.js"
-import Booking from "../models/Booking.js"
-import Stripe from 'stripe'
+import axios from 'axios';
+import mongoose from 'mongoose';
+import Stripe from 'stripe';
+import Movie from '../models/Movie.js';
+import Show from '../models/Show.js';
+import Booking from '../models/Booking.js';
+import SeatReservation from '../models/SeatReservation.js';
+import { rememberJson } from '../services/cacheService.js';
+import { invalidateSeatAvailability } from '../services/cacheInvalidationService.js';
+import { withDistributedLock, LockBusyError } from '../services/lockService.js';
+import { createSeatHolds, releaseSeatHolds } from '../services/seatHoldService.js';
+import { calculateBookingAmount, isMongoDuplicateKey, normalizeSeats } from '../services/seatService.js';
+import { redisKeys, redisTtl } from '../services/redisKeys.js';
 
-// Check if selected seats are still available
-const checkSeatsAvailability = async (showId, selectedSeats) => {
-    try {
-        if (showId.startsWith('virtual_') || showId.startsWith('mock_')) return true;
-        const showData = await Show.findById(showId)
-        if (!showData) return false;
-        return !selectedSeats.some(seat => showData.occupiedSeats[seat]);
-    } catch (error) {
-        console.log(error.message);
-        return false;
-    }
-}
-
-// Extract client origin from request headers (fallback-safe)
 const getOrigin = (req) => {
-    if (req.headers.origin) return req.headers.origin;
-    if (req.headers.referer) {
-        const url = new URL(req.headers.referer);
-        return url.origin;
+    if (process.env.CLIENT_URL) return process.env.CLIENT_URL.replace(/\/$/, '');
+    if (process.env.NODE_ENV === 'production') {
+        throw new Error('CLIENT_URL must be configured in production.');
     }
+    if (req.headers.origin) return req.headers.origin;
+    if (req.headers.referer) return new URL(req.headers.referer).origin;
     return `${req.protocol}://${req.headers.host}`;
-}
+};
 
-// Fetch movie from TMDB and save to DB
 const ensureMovieExists = async (movieId) => {
     const id = String(movieId);
-    let movie = await Movie.findById(id);
-    if (movie) return movie;
+    const existing = await Movie.findById(id);
+    if (existing) return existing;
+
     const [details, credits] = await Promise.all([
         axios.get(`https://api.themoviedb.org/3/movie/${id}`, {
-            headers: { Authorization: `Bearer ${process.env.TMDB_API_KEY}` }
+            headers: { Authorization: `Bearer ${process.env.TMDB_API_KEY}` },
         }),
         axios.get(`https://api.themoviedb.org/3/movie/${id}/credits`, {
-            headers: { Authorization: `Bearer ${process.env.TMDB_API_KEY}` }
-        })
+            headers: { Authorization: `Bearer ${process.env.TMDB_API_KEY}` },
+        }),
     ]);
-    return await Movie.create({
-        _id: id,
-        title: details.data.title,
-        overview: details.data.overview,
-        poster_path: details.data.poster_path,
-        backdrop_path: details.data.backdrop_path,
-        genres: details.data.genres,
-        casts: credits.data.cast,
-        release_date: details.data.release_date,
-        vote_average: details.data.vote_average,
-        runtime: details.data.runtime,
-        tagline: details.data.tagline || "",
-        original_language: details.data.original_language
-    });
-}
 
-// Create Stripe checkout session for a booking
+    return Movie.findOneAndUpdate({ _id: id }, {
+        $setOnInsert: {
+            _id: id,
+            title: details.data.title,
+            overview: details.data.overview,
+            poster_path: details.data.poster_path,
+            backdrop_path: details.data.backdrop_path,
+            genres: details.data.genres,
+            casts: credits.data.cast,
+            release_date: details.data.release_date,
+            vote_average: details.data.vote_average,
+            runtime: details.data.runtime,
+            tagline: details.data.tagline || '',
+            original_language: details.data.original_language,
+        },
+    }, { new: true, upsert: true });
+};
+
+const parseVirtualShow = (payload) => {
+    const { showId } = payload;
+    if (showId.startsWith('virtual_')) {
+        const parts = showId.split('_');
+        return {
+            movieId: String(parts[1]),
+            showDateTime: new Date(Number(parts[2])),
+            hall: 'Virtual Hall',
+            showPrice: 50,
+        };
+    }
+    if (showId.startsWith('mock_')) {
+        return {
+            movieId: String(payload.movieId),
+            showDateTime: new Date(payload.showDateTime),
+            hall: String(payload.hall || 'NitroCine Premium'),
+            showPrice: Number(payload.price) || 50,
+        };
+    }
+    return null;
+};
+
+const resolveShow = async (payload) => {
+    const virtual = parseVirtualShow(payload);
+    if (!virtual) {
+        if (!mongoose.isValidObjectId(payload.showId)) return null;
+        return Show.findById(payload.showId);
+    }
+    if (!virtual.movieId || Number.isNaN(virtual.showDateTime.getTime())) return null;
+
+    await ensureMovieExists(virtual.movieId);
+    try {
+        return await Show.findOneAndUpdate({
+            movie: virtual.movieId,
+            showDateTime: virtual.showDateTime,
+            hall: virtual.hall,
+        }, {
+            $setOnInsert: { showPrice: virtual.showPrice, occupiedSeats: {} },
+        }, { new: true, upsert: true, setDefaultsOnInsert: true });
+    } catch (error) {
+        if (!isMongoDuplicateKey(error)) throw error;
+        return Show.findOne({
+            movie: virtual.movieId,
+            showDateTime: virtual.showDateTime,
+            hall: virtual.hall,
+        });
+    }
+};
+
+const findShowForSeatMap = async (showId) => {
+    if (showId.startsWith('virtual_')) {
+        const parsed = parseVirtualShow({ showId });
+        if (!parsed || Number.isNaN(parsed.showDateTime.getTime())) return null;
+        return Show.findOne({
+            movie: parsed.movieId,
+            showDateTime: parsed.showDateTime,
+            hall: parsed.hall,
+        }).lean();
+    }
+    if (showId.startsWith('mock_') || !mongoose.isValidObjectId(showId)) return null;
+    return Show.findById(showId).lean();
+};
+
 const createStripeSession = async (booking, movieTitle, origin) => {
     if (!process.env.STRIPE_SECRET_KEY) {
-        throw new Error('Stripe is not configured. Please set STRIPE_SECRET_KEY in environment variables.');
+        throw new Error('Stripe is not configured.');
     }
-    const stripeInstance = new Stripe(process.env.STRIPE_SECRET_KEY);
+
     const amount = Number(booking.amount);
-    if (!amount || amount <= 0) {
-        throw new Error(`Invalid booking amount: ${booking.amount}`);
-    }
-    const session = await stripeInstance.checkout.sessions.create({
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error('Invalid booking amount.');
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+    const session = await stripe.checkout.sessions.create({
         success_url: `${origin}/loading/my-bookings`,
         cancel_url: `${origin}/my-bookings`,
         line_items: [{
             price_data: {
                 currency: 'usd',
-                product_data: { name: movieTitle || 'Movie Ticket' },
-                unit_amount: Math.round(amount * 100)
+                product_data: { name: movieTitle || 'NitroCine Ticket' },
+                unit_amount: Math.round(amount * 100),
             },
-            quantity: 1
+            quantity: 1,
         }],
         mode: 'payment',
         metadata: { bookingId: booking._id.toString() },
-        expires_at: Math.floor(Date.now() / 1000) + 30 * 60
+        expires_at: Math.floor(Date.now() / 1000) + redisTtl.seatHold,
     });
-    booking.paymentLink = session.url;
-    await booking.save();
+
+    await Booking.updateOne({ _id: booking._id, isPaid: false }, { paymentLink: session.url });
     return session.url;
-}
+};
 
-// POST /api/booking/create - Create booking and redirect to Stripe
+const invalidateBookingCaches = async (show, alias = null) => invalidateSeatAvailability({
+    showId: String(show._id),
+    movieId: String(show.movie?._id || show.movie),
+    aliases: alias ? [alias] : [],
+});
+
+const extendActiveHold = async (booking) => {
+    // Legacy bookings created before SeatReservation rollout have no hold expiry.
+    if (!booking.holdExpiresAt) return booking;
+    const showId = booking.show?._id || booking.show;
+    const nextExpiry = new Date(Date.now() + (redisTtl.seatHold * 1000));
+
+    await withDistributedLock(
+        redisKeys.bookingLock(showId),
+        { ttlMs: redisTtl.bookingLockMs, waitMs: 1000, retryMs: 75 },
+        async () => {
+            const session = await mongoose.startSession();
+            try {
+                await session.withTransaction(async () => {
+                    const reservations = await SeatReservation.updateMany({
+                        booking: booking._id,
+                        status: 'held',
+                        expiresAt: { $gt: new Date() },
+                    }, { $set: { expiresAt: nextExpiry } }, { session });
+                    if (reservations.matchedCount !== booking.bookedSeats.length) {
+                        throw Object.assign(new Error('The seat hold expired. Please book again.'), { statusCode: 410 });
+                    }
+                    await Booking.updateOne({ _id: booking._id, isPaid: false }, {
+                        $set: { holdExpiresAt: nextExpiry, status: 'pending' },
+                    }, { session });
+                });
+            } finally {
+                await session.endSession();
+            }
+        },
+    );
+
+    booking.holdExpiresAt = nextExpiry;
+    await createSeatHolds({ showId, seats: booking.bookedSeats, bookingId: booking._id });
+    if (booking.show?._id) await invalidateBookingCaches(booking.show);
+    return booking;
+};
+
 export const createBooking = async (req, res) => {
-    let session;
     try {
-        session = await mongoose.startSession();
-        session.startTransaction();
         const { userId } = req.auth();
-        const { showId, selectedSeats, totalAmount } = req.body;
-        const origin = getOrigin(req);
+        const showId = String(req.body.showId || '');
+        const seats = normalizeSeats(req.body.selectedSeats);
+        const show = await resolveShow({ ...req.body, showId });
+        if (!show) return res.status(404).json({ success: false, message: 'Show not found.' });
 
-        let actualShowId = showId;
-        let showData;
+        const result = await withDistributedLock(
+            redisKeys.bookingLock(show._id),
+            { ttlMs: redisTtl.bookingLockMs, waitMs: 1500, retryMs: 75 },
+            async () => {
+                const session = await mongoose.startSession();
+                let booking;
+                try {
+                    await session.withTransaction(async () => {
+                        const currentShow = await Show.findById(show._id).session(session);
+                        if (!currentShow) throw Object.assign(new Error('Show not found.'), { statusCode: 404 });
 
-        // Handle virtual/mock IDs — create Show in DB on-the-fly
-        if (showId.startsWith('virtual_') || showId.startsWith('mock_')) {
-            let movieId, parsedDate, hallName, showPrice;
+                        const legacyOccupied = new Set(Object.keys(currentShow.occupiedSeats || {}));
+                        if (seats.some((seat) => legacyOccupied.has(seat))) {
+                            throw Object.assign(new Error('One or more seats are no longer available.'), { statusCode: 409 });
+                        }
 
-            if (showId.startsWith('virtual_')) {
-                const parts = showId.split('_');
-                movieId = String(parts[1]);
-                parsedDate = new Date(parseInt(parts[2]));
-                hallName = 'Virtual Hall';
-                showPrice = 50;
-            } else {
-                movieId = String(req.body.movieId);
-                parsedDate = new Date(req.body.showDateTime);
-                hallName = req.body.hall || 'NitroCine Premium';
-                showPrice = Number(req.body.price) || 50;
-            }
+                        const now = new Date();
+                        const expired = await SeatReservation.find({
+                            show: currentShow._id,
+                            seat: { $in: seats },
+                            status: 'held',
+                            expiresAt: { $lte: now },
+                        }).select('booking').session(session).lean();
+                        if (expired.length) {
+                            const expiredBookingIds = [...new Set(expired.map((item) => String(item.booking)))];
+                            await SeatReservation.deleteMany({
+                                show: currentShow._id,
+                                seat: { $in: seats },
+                                status: 'held',
+                                expiresAt: { $lte: now },
+                            }).session(session);
+                            await Booking.updateMany(
+                                { _id: { $in: expiredBookingIds }, isPaid: false },
+                                { $set: { status: 'expired', paymentLink: '' } },
+                            ).session(session);
+                        }
 
-            // Check if show already exists
-            showData = await Show.findOne({ movie: movieId, showDateTime: parsedDate, hall: hallName }).session(session);
+                        const holdExpiresAt = new Date(Date.now() + (redisTtl.seatHold * 1000));
+                        const amount = calculateBookingAmount(currentShow.showPrice, seats);
+                        [booking] = await Booking.create([{
+                            user: userId,
+                            show: currentShow._id,
+                            amount,
+                            bookedSeats: seats,
+                            holdExpiresAt,
+                        }], { session });
 
-            if (!showData) {
-                await ensureMovieExists(movieId);
-                const [newShow] = await Show.create([{
-                    movie: movieId,
-                    showDateTime: parsedDate,
-                    hall: hallName,
-                    showPrice: showPrice,
-                    occupiedSeats: {}
-                }], { session });
-                showData = newShow;
-            }
-            actualShowId = showData._id;
-        } else {
-            showData = await Show.findById(showId).session(session);
-        }
+                        await SeatReservation.insertMany(seats.map((seat) => ({
+                            show: currentShow._id,
+                            seat,
+                            booking: booking._id,
+                            user: userId,
+                            status: 'held',
+                            expiresAt: holdExpiresAt,
+                        })), { session, ordered: true });
+                    });
+                } finally {
+                    await session.endSession();
+                }
 
-        if (!showData) {
-            await session.abortTransaction();
-            session.endSession();
-            return res.status(404).json({ success: false, message: "Show not found" });
-        }
+                await createSeatHolds({ showId: show._id, seats, bookingId: booking._id });
+                await invalidateBookingCaches(show, showId);
+                return booking;
+            },
+        );
 
-        // 1. Validate Seats Array
-        if (!selectedSeats || selectedSeats.length === 0) {
-            await session.abortTransaction();
-            session.endSession();
-            return res.status(400).json({ success: false, message: "No seats selected" });
-        }
-
-        // Use frontend-calculated total (includes seat-type multipliers), fallback to flat price
-        const bookingAmount = totalAmount || showData.showPrice * selectedSeats.length;
-
-        // 1. Optimistic Concurrency Control & Atomic $set
-        const updateQuery = { $set: {} };
-        selectedSeats.forEach(seat => {
-            updateQuery.$set[`occupiedSeats.${seat}`] = userId;
-        });
-
-        // Condition: Ensure these specific seats do not exist in the occupiedSeats object yet
-        const seatConditions = selectedSeats.map(seat => ({
-            [`occupiedSeats.${seat}`]: { $exists: false }
-        }));
-
-        const updatedShow = await Show.findOneAndUpdate(
-            { _id: actualShowId, $and: seatConditions.length > 0 ? seatConditions : [{}] },
-            updateQuery,
-            { new: true, session }
-        ).populate('movie');
-
-        if (!updatedShow) {
-            // Document wasn't found or condition failed (race condition - seat already taken)
-            await session.abortTransaction();
-            session.endSession();
-            return res.status(409).json({ 
-                success: false, 
-                message: "Race condition detected! Một hoặc nhiều ghế vừa bị người khác đặt. Vui lòng chọn lại." 
+        try {
+            const movie = await Movie.findById(show.movie).select('title').lean();
+            const url = await createStripeSession(result, movie?.title, getOrigin(req));
+            return res.status(201).json({
+                success: true,
+                bookingId: result._id,
+                holdExpiresAt: result.holdExpiresAt,
+                url,
+                message: 'Seats held. Complete payment before the hold expires.',
+            });
+        } catch (stripeError) {
+            console.error('[Stripe session]', stripeError.message);
+            return res.status(502).json({
+                success: false,
+                bookingId: result._id,
+                message: 'Seats are held, but the payment link could not be created. Retry from My Bookings.',
             });
         }
-
-        // Create booking record within transaction
-        const [booking] = await Booking.create([{
-            user: userId,
-            show: actualShowId,
-            amount: bookingAmount,
-            bookedSeats: selectedSeats
-        }], { session });
-
-        await session.commitTransaction();
-        session.endSession();
-        session = null;
-        try {
-            const movieTitle = updatedShow?.movie?.title || 'NitroCine Ticket';
-            const url = await createStripeSession(booking, movieTitle, origin);
-            res.json({ success: true, url, message: "Booking created successfully" });
-        } catch (stripeError) {
-            console.log("[Stripe Error]:", stripeError);
-            res.json({ success: false, message: "Booking created but failed to generate payment link." });
-        }
-
     } catch (error) {
-        if (session) {
-            await session.abortTransaction();
-            session.endSession();
-        }
-        console.log("[Booking Transaction Error]:", error);
-        return res.status(500).json({ success: false, message: error.message });
+        const conflict = error instanceof LockBusyError || isMongoDuplicateKey(error) || error.statusCode === 409;
+        const status = conflict ? 409 : (error.statusCode || (error instanceof TypeError || error instanceof RangeError ? 400 : 500));
+        console.error('[createBooking]', error.message);
+        return res.status(status).json({
+            success: false,
+            message: conflict
+                ? 'One or more seats were just held by another customer. Please choose again.'
+                : (status < 500 ? error.message : 'Unable to create the booking.'),
+        });
     }
-}
+};
 
-// GET /api/booking/seat/:showId - Get occupied seats for a show
 export const getOccupiedSeats = async (req, res) => {
     try {
-        const { showId } = req.params;
-        if (showId.startsWith('virtual_') || showId.startsWith('mock_')) {
-            return res.json({ success: true, occupiedSeats: [] });
-        }
-        const showData = await Show.findById(showId)
-        if (!showData) return res.json({ success: true, occupiedSeats: [] });
-        res.json({ success: true, occupiedSeats: Object.keys(showData.occupiedSeats) });
-    } catch (error) {
-        console.log(error);
-        return res.status(500).json({ success: false, message: error.message });
-    }
-}
+        const requestedShowId = String(req.params.showId || '');
+        if (!requestedShowId) return res.status(400).json({ success: false, message: 'Show ID is required.' });
 
-// GET /api/booking/my-bookings - Get all bookings for current user
+        const result = await rememberJson(redisKeys.seatMap(requestedShowId), redisTtl.seatMap, async () => {
+            const show = await findShowForSeatMap(requestedShowId);
+            if (!show) return [];
+
+            const reservations = await SeatReservation.find({
+                show: show._id,
+                $or: [
+                    { status: 'confirmed' },
+                    { status: 'held', expiresAt: { $gt: new Date() } },
+                ],
+            }).select('seat').lean();
+
+            const seats = new Set(Object.keys(show.occupiedSeats || {}));
+            for (const reservation of reservations) seats.add(reservation.seat);
+            return [...seats].sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
+        });
+
+        res.set('X-Cache', result.cache).json({ success: true, occupiedSeats: result.value });
+    } catch (error) {
+        console.error('[getOccupiedSeats]', error.message);
+        return res.status(500).json({ success: false, message: 'Unable to load the seat map.' });
+    }
+};
+
 export const getUserBookings = async (req, res) => {
     try {
         const { userId } = req.auth();
-        let bookings = await Booking.find({ user: userId })
-            .populate({ 
-                path: 'show', 
+        const bookings = await Booking.find({ user: userId })
+            .populate({
+                path: 'show',
                 populate: { path: 'movie', select: 'title poster_path runtime genres release_date' },
-                select: 'showDateTime hall showPrice occupiedSeats'
+                select: 'showDateTime hall showPrice occupiedSeats',
             })
             .sort({ createdAt: -1 })
-            .lean(); // Faster JSON parsing
-            
-        // Defensive filtering to prevent frontend crash if a show/movie was deleted
-        bookings = bookings.filter(b => b.show && b.show.movie);
-        
-        res.json({ success: true, bookings });
+            .lean();
+        return res.json({ success: true, bookings: bookings.filter((booking) => booking.show?.movie) });
     } catch (error) {
-        console.log("[MyBookings Query Error]:", error);
-        return res.status(500).json({ success: false, message: error.message });
+        console.error('[getUserBookings]', error.message);
+        return res.status(500).json({ success: false, message: 'Unable to load bookings.' });
     }
-}
+};
 
-// POST /api/booking/pay-now - Generate new Stripe session for unpaid booking
 export const payNowBooking = async (req, res) => {
     try {
-        const { bookingId } = req.body;
-        const origin = getOrigin(req);
-
-        const booking = await Booking.findById(bookingId).populate({
+        const { userId } = req.auth();
+        const booking = await Booking.findOne({ _id: req.body.bookingId, user: userId }).populate({
             path: 'show',
-            populate: { path: 'movie' }
+            populate: { path: 'movie' },
         });
+        if (!booking) return res.status(404).json({ success: false, message: 'Booking not found.' });
+        if (booking.isPaid) return res.status(409).json({ success: false, message: 'Booking is already paid.' });
+        if (booking.status === 'expired' || booking.holdExpiresAt <= new Date()) {
+            return res.status(410).json({ success: false, message: 'The seat hold expired. Please book again.' });
+        }
 
-        if (!booking) return res.json({ success: false, message: "Booking not found" });
-        if (booking.isPaid) return res.json({ success: false, message: "Already paid" });
-
-        // Create new Stripe session and redirect
-        const url = await createStripeSession(booking, booking.show?.movie?.title || 'Phim chua cap nhat', origin);
-        res.json({ success: true, url });
+        await extendActiveHold(booking);
+        const url = await createStripeSession(booking, booking.show?.movie?.title, getOrigin(req));
+        return res.json({ success: true, url });
     } catch (error) {
-        console.log(error);
-        return res.status(500).json({ success: false, message: error.message });
+        console.error('[payNowBooking]', error.message);
+        return res.status(500).json({ success: false, message: 'Unable to create a payment link.' });
     }
-}
+};
 
-// DELETE /api/booking/:id - Delete an unpaid booking
 export const deleteBooking = async (req, res) => {
     try {
         const { userId } = req.auth();
-        const { id } = req.params;
+        const booking = await Booking.findOne({ _id: req.params.id, user: userId }).lean();
+        if (!booking) return res.status(404).json({ success: false, message: 'Booking not found.' });
+        if (booking.isPaid) return res.status(409).json({ success: false, message: 'Cannot delete a paid booking.' });
 
-        const booking = await Booking.findOne({ _id: id, user: userId }).populate('show');
-        if (!booking) {
-            return res.json({ success: false, message: "Booking not found" });
-        }
+        const show = await Show.findById(booking.show).lean();
+        if (!show) return res.status(404).json({ success: false, message: 'Show not found.' });
 
-        if (booking.isPaid) {
-            return res.json({ success: false, message: "Cannot delete a paid booking" });
-        }
+        await withDistributedLock(
+            redisKeys.bookingLock(show._id),
+            { ttlMs: redisTtl.bookingLockMs, waitMs: 1000, retryMs: 75 },
+            async () => {
+                const session = await mongoose.startSession();
+                try {
+                    await session.withTransaction(async () => {
+                        await SeatReservation.deleteMany({ booking: booking._id, status: 'held' }).session(session);
 
-        // Free up the occupied seats in the show
-        if (booking.show) {
-            const showData = booking.show;
-            const updatedSeats = { ...showData.occupiedSeats };
-            
-            booking.bookedSeats.forEach(seat => {
-                // Only free the seat if it belongs to this user (extra safety)
-                if (updatedSeats[seat] === userId) {
-                    delete updatedSeats[seat];
+                        const unset = {};
+                        for (const seat of booking.bookedSeats) {
+                            if (show.occupiedSeats?.[seat] === userId) unset[`occupiedSeats.${seat}`] = '';
+                        }
+                        if (Object.keys(unset).length) {
+                            await Show.updateOne({ _id: show._id }, { $unset: unset }, { session });
+                        }
+                        await Booking.deleteOne({ _id: booking._id, user: userId, isPaid: false }, { session });
+                    });
+                } finally {
+                    await session.endSession();
                 }
-            });
-            
-            showData.occupiedSeats = updatedSeats;
-            showData.markModified('occupiedSeats');
-            await showData.save();
-        }
+            },
+        );
 
-        // Delete the booking record
-        await Booking.findByIdAndDelete(id);
-
-        res.json({ success: true, message: "Booking deleted successfully" });
+        await releaseSeatHolds({ showId: show._id, seats: booking.bookedSeats, bookingId: booking._id });
+        await invalidateBookingCaches(show);
+        return res.json({ success: true, message: 'Booking cancelled and seats released.' });
     } catch (error) {
-        console.log(error);
-        return res.status(500).json({ success: false, message: error.message });
+        const status = error instanceof LockBusyError ? 409 : 500;
+        console.error('[deleteBooking]', error.message);
+        return res.status(status).json({
+            success: false,
+            message: status === 409 ? error.message : 'Unable to cancel the booking.',
+        });
     }
-}
+};
 
-// POST /api/booking/pay-all - Generate Stripe session for multiple unpaid bookings
 export const payAllBookings = async (req, res) => {
     try {
         const { userId } = req.auth();
-        const origin = getOrigin(req);
+        const bookings = await Booking.find({
+            user: userId,
+            isPaid: false,
+            $or: [
+                { status: 'pending', holdExpiresAt: { $gt: new Date() } },
+                { holdExpiresAt: { $exists: false } },
+            ],
+        }).populate({ path: 'show', populate: { path: 'movie' } });
+        if (!bookings.length) return res.status(404).json({ success: false, message: 'No active unpaid bookings found.' });
+        if (!process.env.STRIPE_SECRET_KEY) return res.status(503).json({ success: false, message: 'Stripe is not configured.' });
 
-        // Find all unpaid bookings for this user
-        const unpaidBookings = await Booking.find({ user: userId, isPaid: false }).populate({
-            path: 'show',
-            populate: { path: 'movie' }
-        });
-
-        if (!unpaidBookings.length) {
-            return res.json({ success: false, message: "No unpaid bookings found" });
-        }
-
-        if (!process.env.STRIPE_SECRET_KEY) {
-            return res.json({ success: false, message: 'Stripe is not configured. Please set STRIPE_SECRET_KEY in environment variables.' });
-        }
-        const stripeInstance = new Stripe(process.env.STRIPE_SECRET_KEY);
-        
-        // Calculate total amount
-        const totalAmount = unpaidBookings.reduce((sum, booking) => sum + Number(booking.amount), 0);
-        
-        // Get all IDs
-        const bookingIds = unpaidBookings.map(b => b._id.toString()).join(',');
-
-        if (!totalAmount || totalAmount <= 0) {
-            throw new Error(`Invalid total amount: ${totalAmount}`);
-        }
-
-        // We combine them into a single line item for simplicity, 
-        // or we could map them to multiple line items. Let's use a single combined ticket.
-        const session = await stripeInstance.checkout.sessions.create({
-            success_url: `${origin}/loading/my-bookings`,
-            cancel_url: `${origin}/my-bookings`,
+        for (const booking of bookings) await extendActiveHold(booking);
+        const totalAmount = bookings.reduce((sum, booking) => sum + Number(booking.amount), 0);
+        const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+        const checkout = await stripe.checkout.sessions.create({
+            success_url: `${getOrigin(req)}/loading/my-bookings`,
+            cancel_url: `${getOrigin(req)}/my-bookings`,
             line_items: [{
                 price_data: {
                     currency: 'usd',
-                    product_data: { 
+                    product_data: {
                         name: 'NitroCine Multiple Tickets',
-                        description: `Payment for ${unpaidBookings.length} movie bookings.`
+                        description: `Payment for ${bookings.length} movie bookings.`,
                     },
-                    unit_amount: Math.round(totalAmount * 100)
+                    unit_amount: Math.round(totalAmount * 100),
                 },
-                quantity: 1
+                quantity: 1,
             }],
             mode: 'payment',
-            metadata: { bookingIds }, // Store the comma-separated list of IDs
-            expires_at: Math.floor(Date.now() / 1000) + 30 * 60
+            metadata: { bookingIds: bookings.map((booking) => booking._id).join(',') },
+            expires_at: Math.floor(Date.now() / 1000) + redisTtl.seatHold,
         });
 
-        // Update all bookings with this payment link
-        for (const booking of unpaidBookings) {
-            booking.paymentLink = session.url;
-            await booking.save();
-        }
-
-        res.json({ success: true, url: session.url });
+        await Booking.updateMany(
+            { _id: { $in: bookings.map((booking) => booking._id) }, user: userId, isPaid: false },
+            { paymentLink: checkout.url },
+        );
+        return res.json({ success: true, url: checkout.url });
     } catch (error) {
-        console.log(error);
-        return res.status(500).json({ success: false, message: error.message });
+        console.error('[payAllBookings]', error.message);
+        return res.status(500).json({ success: false, message: 'Unable to create a payment link.' });
     }
-}
+};

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Booking Concurrency"
+  short_description: "Prevent booking races and duplicate seats"
+  default_prompt: "Use $booking-concurrency to harden a NitroCine booking flow against concurrency."

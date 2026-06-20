@@ -1,0 +1,4 @@
+interface:
+  display_name: "Repository Map"
+  short_description: "Map code ownership and dependencies"
+  default_prompt: "Use $repo-map to map the NitroCine repository before making cross-cutting changes."

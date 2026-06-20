@@ -1,0 +1,4 @@
+interface:
+  display_name: "Architecture Review"
+  short_description: "Review boundaries, data flow, and tradeoffs"
+  default_prompt: "Use $architecture-review to review a NitroCine design and identify architectural risks."

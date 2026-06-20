@@ -1,84 +1,102 @@
 import express from 'express';
 import cors from 'cors';
 import 'dotenv/config';
+import { clerkMiddleware } from '@clerk/express';
 import connectDB from '../configs/db.js';
-import { clerkMiddleware } from '@clerk/express'
+import { connectRedis, getRedisHealth } from '../configs/redis.js';
+import ensureCriticalIndexes from '../configs/indexes.js';
 import showRouter from '../routes/showRoutes.js';
 import bookingRouter from '../routes/bookingRoutes.js';
 import adminRouter from '../routes/adminRoutes.js';
 import userRouter from '../routes/userRoutes.js';
 import { stripeWebhooks } from '../controllers/stripeWebhooks.js';
 
-// Error handlers
 process.on('unhandledRejection', (reason) => {
-    console.error('\x1b[31m[Unhandled Rejection]\x1b[0m', reason);
+    console.error('[Unhandled rejection]', reason);
 });
+
 process.on('uncaughtException', (error) => {
-    console.error('\x1b[31m[Uncaught Exception]\x1b[0m', error);
-    // Don't exit on Vercel — let the function complete
+    console.error('[Uncaught exception]', error);
     if (!process.env.VERCEL) process.exit(1);
 });
 
 const app = express();
 
-// Stripe webhook must use raw body (before express.json)
+// Stripe signature verification requires the untouched request bytes.
 app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), stripeWebhooks);
 
-// Middleware
-app.use(express.json())
+app.use(express.json({ limit: '1mb' }));
 app.use(cors({
-    origin: true,
-    credentials: true
-}))
+    origin: process.env.CLIENT_URL || true,
+    credentials: true,
+}));
 
-// Clerk middleware — pass secretKey explicitly for Vercel compatibility
+app.get('/', (req, res) => res.send('Server is live!'));
+app.get('/api/health', async (req, res) => {
+    let database = { connected: false, status: 'unavailable' };
+    try {
+        await connectDB();
+        await ensureCriticalIndexes();
+        database = { connected: true, status: 'ready' };
+    } catch (error) {
+        database = { connected: false, status: 'unavailable' };
+    }
+
+    const redis = await getRedisHealth();
+    const healthy = database.connected;
+    return res.status(healthy ? 200 : 503).json({
+        success: healthy,
+        status: healthy && redis.connected ? 'ok' : (healthy ? 'degraded' : 'unavailable'),
+        dependencies: { database, redis },
+    });
+});
+
 app.use(clerkMiddleware({
     secretKey: process.env.CLERK_SECRET_KEY,
     publishableKey: process.env.CLERK_PUBLISHABLE_KEY,
-}))
+}));
 
-// Ensure DB is connected before handling any API route
 app.use(async (req, res, next) => {
     try {
         await connectDB();
+        await ensureCriticalIndexes();
         next();
     } catch (error) {
-        console.error('[DB Middleware] Connection failed:', error.message);
-        res.status(503).json({ success: false, message: 'Database temporarily unavailable. Please retry.' });
+        console.error('[DB middleware] Connection failed:', error.message);
+        return res.status(503).json({
+            success: false,
+            message: 'Database temporarily unavailable. Please retry.',
+        });
     }
 });
 
-// Routes
-app.get('/', (req, res) => res.send('Server is live!'))
-
-// Inngest route — only mount if Inngest is properly initialized
 const mountInngest = async () => {
     try {
         const { inngest, functions } = await import('../inngest/index.js');
-        if (functions && functions.length > 0) {
+        if (functions?.length) {
             const { serve } = await import('inngest/express');
             app.use('/api/inngest', serve({ client: inngest, functions }));
-            console.log('\x1b[32m✔ Inngest functions mounted\x1b[0m');
-        } else {
-            console.warn('\x1b[33m⚠ Inngest skipped — no functions available\x1b[0m');
+            console.log('[Inngest] Functions mounted');
         }
     } catch (error) {
-        console.warn('\x1b[33m⚠ Inngest skipped —\x1b[0m', error.message);
+        console.warn('[Inngest] Skipped:', error.message);
     }
 };
+
 mountInngest();
+connectRedis().catch((error) => {
+    console.warn('[Redis] Startup connection deferred:', error.message);
+});
 
-app.use('/api/show', showRouter)
-app.use('/api/booking', bookingRouter)
-app.use('/api/admin', adminRouter)
-app.use('/api/user', userRouter)
+app.use('/api/show', showRouter);
+app.use('/api/booking', bookingRouter);
+app.use('/api/admin', adminRouter);
+app.use('/api/user', userRouter);
 
-// Only call listen() locally — Vercel handles ports automatically
 if (!process.env.VERCEL) {
     const port = process.env.PORT || 3000;
     app.listen(port, () => {
-        console.log(`\x1b[32m✔ Server running on port ${port}\x1b[0m`);
-        console.log(`\x1b[36m➜ Local: http://127.0.0.1:${port}\x1b[0m`);
+        console.log(`[Server] http://127.0.0.1:${port}`);
     });
 }
 

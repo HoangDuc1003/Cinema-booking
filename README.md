@@ -132,7 +132,11 @@ cinema-booking/
 │   ├── models/                 # Database schemas (User, Show, Booking, Movie)
 │   ├── inngest/                # Background tasks (e.g., handling timeouts)
 │   ├── routes/                 # API endpoint connections
-│   └── server.js               # Main entry point for the backend
+│   ├── services/                # Redis cache, locks, holds, invalidation
+│   ├── tests/                   # Unit and opt-in integration tests
+│   └── api/index.js             # Main entry point for the backend
+├── skills/                      # Repo-local Codex workflows
+├── docs/                        # Redis and booking operations
 ├── deploy/aws/                 # Scripts to deploy the project to AWS
 └── docker-compose.yml          # Docker config to run the app easily
 ```
@@ -148,13 +152,17 @@ cinema-booking/
 | `POST` | `/api/booking/create` | Locks the selected seats and creates a pending ticket. |
 | `POST` | `/api/booking/pay-now` | Generates a secure Stripe checkout link. |
 | `GET`  | `/api/booking/my-bookings` | Gets the ticket history for the logged-in user. |
-| `POST` | `/api/stripe/webhook` | Listens to Stripe to know when a user has paid. |
+| `DELETE` | `/api/booking/:id` | Cancels an unpaid booking and releases its seats. |
+| `POST` | `/api/webhooks/stripe` | Idempotently processes verified Stripe events. |
 
 ### Shows & Admin
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET`  | `/api/show` | Gets the list of available movie showtimes. |
+| `GET`  | `/api/show/all` | Gets the cached movie list. |
+| `GET`  | `/api/show/:movieId` | Gets cached movie details and showtimes. |
+| `GET`  | `/api/show/cinemas` | Gets the cached cinema/hall list. |
+| `GET`  | `/api/health` | Reports MongoDB and Redis health without secrets. |
 | `POST` | `/api/admin/dashboard` | Gets data for the admin revenue charts. |
 | `POST` | `/api/admin/movies` | Adds new movies to the database. |
 
@@ -167,6 +175,7 @@ cinema-booking/
 | **Frontend** | React 19, Vite, Tailwind CSS, Axios |
 | **Backend** | Node.js, Express.js |
 | **Database** | MongoDB Atlas, Mongoose |
+| **Cache & Coordination** | Redis cache, seat holds, locks, idempotency |
 | **Authentication** | Clerk |
 | **Payment Gateway** | Stripe |
 | **Background Jobs** | Inngest |
@@ -177,6 +186,12 @@ cinema-booking/
 ## 🚀 How to Run Locally
 
 ### 1. Clone the repository
+
+Booking correctness is enforced by MongoDB transactions plus the unique
+`SeatReservation(show, seat)` index. Redis accelerates reads and coordinates
+seat holds, but it is not the only double-booking guard. See
+[`docs/redis-booking.md`](./docs/redis-booking.md) for keys, TTLs, invalidation,
+index rollout, health behavior, and concurrency testing.
 
 ```bash
 git clone https://github.com/hoangduc1003/cinema-booking.git
@@ -192,11 +207,19 @@ cd server
 npm install
 ```
 
-Create a `.env` file in the `server` folder and add your secret keys:
+Copy `server/.env.example` to `.env`, then add real values only to this ignored
+local file:
+
+```bash
+cp .env.example .env
+```
 
 ```env
 PORT=3000
 MONGODB_URI=your_mongodb_connection_string
+REDIS_URL=your_redis_connection_url
+REDIS_KEY_PREFIX=nitrocine
+CLIENT_URL=http://localhost:5173
 CLERK_SECRET_KEY=your_clerk_secret_key
 STRIPE_SECRET_KEY=your_stripe_secret_key
 STRIPE_WEBHOOK_SECRET=your_stripe_webhook_secret
@@ -208,6 +231,9 @@ Start the backend server:
 npm run server
 ```
 
+Run server checks with `npm test`. MongoDB must be Atlas/a replica set for
+transactions. Never commit a real Redis URL or provider secret.
+
 ### 3. Setup the Frontend
 
 Open a new terminal and go to the client folder:
@@ -217,11 +243,13 @@ cd client
 npm install
 ```
 
-Create a `.env.local` file in the `client` folder:
+Copy `client/.env.example` to `.env.local`. `VITE_*` values are public browser
+configuration and must not contain server secrets.
 
 ```env
 VITE_CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
-VITE_API_URL=http://localhost:3000/api
+VITE_BASE_URL=http://localhost:3000
+VITE_TMDB_API_KEY=your_restricted_tmdb_browser_key
 ```
 
 Start the frontend app:
