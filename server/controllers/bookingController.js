@@ -1,6 +1,5 @@
 import axios from 'axios';
 import mongoose from 'mongoose';
-import Stripe from 'stripe';
 import Movie from '../models/Movie.js';
 import Show from '../models/Show.js';
 import Booking from '../models/Booking.js';
@@ -12,16 +11,19 @@ import { createSeatHolds, releaseSeatHolds } from '../services/seatHoldService.j
 import { calculateBookingAmount, isMongoDuplicateKey, normalizeSeats } from '../services/seatService.js';
 import { redisKeys, redisTtl } from '../services/redisKeys.js';
 import ensureCriticalIndexes from '../configs/indexes.js';
-
-const getOrigin = (req) => {
-    if (process.env.CLIENT_URL) return process.env.CLIENT_URL.replace(/\/$/, '');
-    if (process.env.NODE_ENV === 'production') {
-        throw new Error('CLIENT_URL must be configured in production.');
-    }
-    if (req.headers.origin) return req.headers.origin;
-    if (req.headers.referer) return new URL(req.headers.referer).origin;
-    return `${req.protocol}://${req.headers.host}`;
-};
+import { getClientOrigin } from '../configs/runtimeConfig.js';
+import {
+    buildPaymentRetryPayload,
+    createBatchCheckoutSession,
+    createBookingCheckoutSession,
+    getPaymentErrorCode,
+    getPaymentErrorStatus,
+    getSafeStripeError,
+} from '../services/stripeService.js';
+import {
+    BookingConflictError,
+    classifyReservationConflict,
+} from '../services/bookingConflictService.js';
 
 const ensureMovieExists = async (movieId) => {
     const id = String(movieId);
@@ -118,32 +120,38 @@ const findShowForSeatMap = async (showId) => {
     return Show.findById(showId).lean();
 };
 
-const createStripeSession = async (booking, movieTitle, origin) => {
-    if (!process.env.STRIPE_SECRET_KEY) {
-        throw new Error('Stripe is not configured.');
-    }
-
-    const amount = Number(booking.amount);
-    if (!Number.isFinite(amount) || amount <= 0) throw new Error('Invalid booking amount.');
-    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-    const session = await stripe.checkout.sessions.create({
-        success_url: `${origin}/loading/my-bookings`,
-        cancel_url: `${origin}/my-bookings`,
-        line_items: [{
-            price_data: {
-                currency: 'usd',
-                product_data: { name: movieTitle || 'NitroCine Ticket' },
-                unit_amount: Math.round(amount * 100),
-            },
-            quantity: 1,
-        }],
-        mode: 'payment',
-        metadata: { bookingId: booking._id.toString() },
-        expires_at: Math.floor(Date.now() / 1000) + redisTtl.seatHold,
+const logStripeSessionFailure = ({ label, error, booking, bookings, amount, origin }) => {
+    console.error(label, {
+        bookingId: booking?._id && String(booking._id),
+        bookingIds: bookings?.map((item) => String(item._id)),
+        amount: amount ?? booking?.amount,
+        hasStripeSecret: Boolean(process.env.STRIPE_SECRET_KEY),
+        hasClientUrl: Boolean(process.env.CLIENT_URL),
+        origin,
+        stripeError: getSafeStripeError(error),
     });
+};
 
-    await Booking.updateOne({ _id: booking._id, isPaid: false }, { paymentLink: session.url });
-    return session.url;
+const formatHoldExpiry = (value) => {
+    const date = value && new Date(value);
+    return date && !Number.isNaN(date.getTime()) ? date.toISOString() : 'the current hold expires';
+};
+
+const getPaymentFailureMessage = ({ error, holdExpiresAt, create = false }) => {
+    const status = getPaymentErrorStatus(error);
+    if (status === 503) {
+        return create
+            ? 'Seats are held, but payment is not configured on the server. Retry payment from My Bookings before the hold expires.'
+            : `Payment is temporarily unavailable because the server configuration is incomplete. Your seats are still held until ${formatHoldExpiry(holdExpiresAt)}.`;
+    }
+    if (status === 400) {
+        return create
+            ? 'Seats are held, but the booking amount is invalid. Please retry from My Bookings or contact support.'
+            : `The booking amount is invalid. Your seats are still held until ${formatHoldExpiry(holdExpiresAt)}.`;
+    }
+    return create
+        ? 'Seats are held, but the payment link could not be created. Retry payment from My Bookings before the hold expires.'
+        : `Payment provider is temporarily unavailable. Your seats are still held until ${formatHoldExpiry(holdExpiresAt)}.`;
 };
 
 const invalidateBookingCaches = async (show, alias = null) => invalidateSeatAvailability({
@@ -151,6 +159,50 @@ const invalidateBookingCaches = async (show, alias = null) => invalidateSeatAvai
     movieId: String(show.movie?._id || show.movie),
     aliases: alias ? [alias] : [],
 });
+
+const findActiveBookingConflict = async ({ showId, seats, userId, session = null }) => {
+    const now = new Date();
+    let reservationQuery = SeatReservation.find({
+        show: showId,
+        seat: { $in: seats },
+        $or: [
+            { status: 'confirmed' },
+            { status: 'held', expiresAt: { $gt: now } },
+        ],
+    });
+    if (session) reservationQuery = reservationQuery.session(session);
+    const reservations = await reservationQuery.lean();
+    if (!reservations.length) return null;
+
+    const bookingIds = [...new Set(reservations.map((item) => String(item.booking)))];
+    let pendingBooking = null;
+    if (bookingIds.length === 1) {
+        let bookingQuery = Booking.findOne({
+            _id: bookingIds[0],
+            user: userId,
+            isPaid: false,
+            status: 'pending',
+            holdExpiresAt: { $gt: now },
+        });
+        if (session) bookingQuery = bookingQuery.session(session);
+        pendingBooking = await bookingQuery.lean();
+    }
+
+    return classifyReservationConflict({ reservations, requestedSeats: seats, userId, pendingBooking });
+};
+
+const sendBookingConflict = (res, error) => {
+    const existing = error.code === 'EXISTING_PENDING_BOOKING';
+    return res.status(409).json({
+        success: false,
+        code: error.code,
+        message: error.message,
+        existingBookingId: error.bookingId || undefined,
+        holdExpiresAt: error.holdExpiresAt || undefined,
+        retryPayment: existing,
+        retryEndpoint: existing ? '/api/booking/pay-now' : undefined,
+    });
+};
 
 const extendActiveHold = async (booking) => {
     // Legacy bookings created before SeatReservation rollout have no hold expiry.
@@ -190,13 +242,18 @@ const extendActiveHold = async (booking) => {
 };
 
 export const createBooking = async (req, res) => {
+    let userId;
+    let showId = '';
+    let seats = [];
+    let resolvedShow = null;
     try {
         await ensureCriticalIndexes();
-        const { userId } = req.auth();
-        const showId = String(req.body.showId || '');
-        const seats = normalizeSeats(req.body.selectedSeats);
+        ({ userId } = req.auth());
+        showId = String(req.body.showId || '');
+        seats = normalizeSeats(req.body.selectedSeats);
         const show = await resolveShow({ ...req.body, showId });
         if (!show) return res.status(404).json({ success: false, message: 'Show not found.' });
+        resolvedShow = show;
 
         const result = await withDistributedLock(
             redisKeys.bookingLock(show._id),
@@ -235,6 +292,14 @@ export const createBooking = async (req, res) => {
                             ).session(session);
                         }
 
+                        const conflict = await findActiveBookingConflict({
+                            showId: currentShow._id,
+                            seats,
+                            userId,
+                            session,
+                        });
+                        if (conflict) throw new BookingConflictError(conflict);
+
                         const holdExpiresAt = new Date(Date.now() + (redisTtl.seatHold * 1000));
                         const amount = calculateBookingAmount(currentShow.showPrice, seats);
                         [booking] = await Booking.create([{
@@ -264,31 +329,72 @@ export const createBooking = async (req, res) => {
             },
         );
 
+        let origin;
         try {
             const movie = await Movie.findById(show.movie).select('title').lean();
-            const url = await createStripeSession(result, movie?.title, getOrigin(req));
+            origin = getClientOrigin(req);
+            const checkout = await createBookingCheckoutSession({
+                booking: result,
+                movieTitle: movie?.title,
+                origin,
+                userId,
+            });
+            await Booking.updateOne({ _id: result._id, isPaid: false }, { paymentLink: checkout.url });
             return res.status(201).json({
                 success: true,
                 bookingId: result._id,
                 holdExpiresAt: result.holdExpiresAt,
-                url,
+                url: checkout.url,
                 message: 'Seats held. Complete payment before the hold expires.',
             });
         } catch (stripeError) {
-            console.error('[Stripe session]', stripeError.message);
-            return res.status(502).json({
-                success: false,
-                bookingId: result._id,
-                message: 'Seats are held, but the payment link could not be created. Retry from My Bookings.',
+            logStripeSessionFailure({
+                label: '[Stripe session failed]',
+                error: stripeError,
+                booking: result,
+                origin,
             });
+            const status = getPaymentErrorStatus(stripeError);
+            return res.status(status).json(buildPaymentRetryPayload({
+                booking: result,
+                error: stripeError,
+                message: getPaymentFailureMessage({
+                    error: stripeError,
+                    holdExpiresAt: result.holdExpiresAt,
+                    create: true,
+                }),
+            }));
         }
     } catch (error) {
-        const conflict = error instanceof LockBusyError || isMongoDuplicateKey(error) || error.statusCode === 409;
-        const status = conflict ? 409 : (error.statusCode || (error instanceof TypeError || error instanceof RangeError ? 400 : 500));
+        if (error instanceof BookingConflictError) {
+            return sendBookingConflict(res, error);
+        }
+        if (error instanceof LockBusyError) {
+            return res.status(409).json({
+                success: false,
+                code: 'BOOKING_BUSY',
+                message: 'This show is processing another booking. Please retry shortly.',
+            });
+        }
+        const duplicate = isMongoDuplicateKey(error);
+        if (duplicate && resolvedShow?._id && userId && seats.length) {
+            try {
+                const conflict = await findActiveBookingConflict({
+                    showId: resolvedShow._id,
+                    seats,
+                    userId,
+                });
+                if (conflict) return sendBookingConflict(res, new BookingConflictError(conflict));
+            } catch (lookupError) {
+                console.error('[createBooking conflict lookup]', lookupError.message);
+            }
+        }
+        const status = duplicate ? 409 : (error.statusCode || (error instanceof TypeError || error instanceof RangeError ? 400 : 500));
         console.error('[createBooking]', error.message);
         return res.status(status).json({
             success: false,
-            message: conflict
+            code: duplicate ? 'SEATS_HELD_BY_ANOTHER_CUSTOMER' : error.code,
+            message: duplicate
                 ? 'One or more seats were just held by another customer. Please choose again.'
                 : (status < 500 ? error.message : 'Unable to create the booking.'),
         });
@@ -343,9 +449,13 @@ export const getUserBookings = async (req, res) => {
 };
 
 export const payNowBooking = async (req, res) => {
+    let booking;
     try {
         const { userId } = req.auth();
-        const booking = await Booking.findOne({ _id: req.body.bookingId, user: userId }).populate({
+        if (!mongoose.isValidObjectId(req.body.bookingId)) {
+            return res.status(400).json({ success: false, message: 'Invalid booking ID.' });
+        }
+        booking = await Booking.findOne({ _id: req.body.bookingId, user: userId }).populate({
             path: 'show',
             populate: { path: 'movie' },
         });
@@ -356,11 +466,48 @@ export const payNowBooking = async (req, res) => {
         }
 
         await extendActiveHold(booking);
-        const url = await createStripeSession(booking, booking.show?.movie?.title, getOrigin(req));
-        return res.json({ success: true, url });
+        let origin;
+        try {
+            origin = getClientOrigin(req);
+            const checkout = await createBookingCheckoutSession({
+                booking,
+                movieTitle: booking.show?.movie?.title,
+                origin,
+                userId,
+            });
+            await Booking.updateOne({ _id: booking._id, user: userId, isPaid: false }, {
+                paymentLink: checkout.url,
+            });
+            return res.json({
+                success: true,
+                bookingId: booking._id,
+                holdExpiresAt: booking.holdExpiresAt,
+                url: checkout.url,
+            });
+        } catch (paymentError) {
+            logStripeSessionFailure({
+                label: '[Pay-now Stripe session failed]',
+                error: paymentError,
+                booking,
+                origin,
+            });
+            const status = getPaymentErrorStatus(paymentError);
+            return res.status(status).json(buildPaymentRetryPayload({
+                booking,
+                error: paymentError,
+                message: getPaymentFailureMessage({ error: paymentError, holdExpiresAt: booking.holdExpiresAt }),
+            }));
+        }
     } catch (error) {
+        const status = error.statusCode || 500;
         console.error('[payNowBooking]', error.message);
-        return res.status(500).json({ success: false, message: 'Unable to create a payment link.' });
+        return res.status(status).json({
+            success: false,
+            code: error.code,
+            bookingId: booking?._id,
+            holdExpiresAt: booking?.holdExpiresAt,
+            message: status === 410 ? error.message : 'Unable to prepare this booking for payment.',
+        });
     }
 };
 
@@ -412,48 +559,92 @@ export const deleteBooking = async (req, res) => {
 };
 
 export const payAllBookings = async (req, res) => {
+    let validBookings = [];
     try {
         const { userId } = req.auth();
-        const bookings = await Booking.find({
-            user: userId,
-            isPaid: false,
-            $or: [
-                { status: 'pending', holdExpiresAt: { $gt: new Date() } },
-                { holdExpiresAt: { $exists: false } },
-            ],
-        }).populate({ path: 'show', populate: { path: 'movie' } });
-        if (!bookings.length) return res.status(404).json({ success: false, message: 'No active unpaid bookings found.' });
-        if (!process.env.STRIPE_SECRET_KEY) return res.status(503).json({ success: false, message: 'Stripe is not configured.' });
+        const unpaidBookings = await Booking.find({ user: userId, isPaid: false })
+            .populate({ path: 'show', populate: { path: 'movie' } });
+        if (!unpaidBookings.length) {
+            return res.status(404).json({ success: false, message: 'No unpaid bookings found.' });
+        }
 
-        for (const booking of bookings) await extendActiveHold(booking);
-        const totalAmount = bookings.reduce((sum, booking) => sum + Number(booking.amount), 0);
-        const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-        const checkout = await stripe.checkout.sessions.create({
-            success_url: `${getOrigin(req)}/loading/my-bookings`,
-            cancel_url: `${getOrigin(req)}/my-bookings`,
-            line_items: [{
-                price_data: {
-                    currency: 'usd',
-                    product_data: {
-                        name: 'NitroCine Multiple Tickets',
-                        description: `Payment for ${bookings.length} movie bookings.`,
-                    },
-                    unit_amount: Math.round(totalAmount * 100),
-                },
-                quantity: 1,
-            }],
-            mode: 'payment',
-            metadata: { bookingIds: bookings.map((booking) => booking._id).join(',') },
-            expires_at: Math.floor(Date.now() / 1000) + redisTtl.seatHold,
-        });
+        const now = new Date();
+        const expiredIds = unpaidBookings
+            .filter((booking) => booking.status === 'expired' || (booking.holdExpiresAt && booking.holdExpiresAt <= now))
+            .map((booking) => booking._id);
+        if (expiredIds.length) {
+            await Booking.updateMany(
+                { _id: { $in: expiredIds }, user: userId, isPaid: false },
+                { $set: { status: 'expired', paymentLink: '' } },
+            );
+        }
 
-        await Booking.updateMany(
-            { _id: { $in: bookings.map((booking) => booking._id) }, user: userId, isPaid: false },
-            { paymentLink: checkout.url },
-        );
-        return res.json({ success: true, url: checkout.url });
+        const expiredIdSet = new Set(expiredIds.map(String));
+        const candidates = unpaidBookings.filter((booking) => !expiredIdSet.has(String(booking._id)));
+        for (const booking of candidates) {
+            try {
+                await extendActiveHold(booking);
+                validBookings.push(booking);
+            } catch (error) {
+                if (error.statusCode !== 410) throw error;
+            }
+        }
+        if (!validBookings.length) {
+            return res.status(410).json({
+                success: false,
+                message: 'All unpaid booking holds have expired. Please choose seats again.',
+            });
+        }
+
+        const totalAmount = validBookings.reduce((sum, booking) => sum + Number(booking.amount), 0);
+        let origin;
+        try {
+            origin = getClientOrigin(req);
+            const checkout = await createBatchCheckoutSession({
+                bookings: validBookings,
+                origin,
+                userId,
+            });
+            await Booking.updateMany(
+                { _id: { $in: validBookings.map((booking) => booking._id) }, user: userId, isPaid: false },
+                { paymentLink: checkout.url },
+            );
+            return res.json({
+                success: true,
+                bookingIds: validBookings.map((booking) => booking._id),
+                holdExpiresAt: validBookings.reduce((earliest, booking) => (
+                    !earliest || booking.holdExpiresAt < earliest ? booking.holdExpiresAt : earliest
+                ), null),
+                url: checkout.url,
+            });
+        } catch (paymentError) {
+            logStripeSessionFailure({
+                label: '[Pay-all Stripe session failed]',
+                error: paymentError,
+                bookings: validBookings,
+                amount: totalAmount,
+                origin,
+            });
+            const holdExpiresAt = validBookings.reduce((earliest, booking) => (
+                !earliest || booking.holdExpiresAt < earliest ? booking.holdExpiresAt : earliest
+            ), null);
+            return res.status(getPaymentErrorStatus(paymentError)).json({
+                success: false,
+                code: getPaymentErrorCode(paymentError),
+                bookingIds: validBookings.map((booking) => booking._id),
+                holdExpiresAt,
+                retryPayment: true,
+                retryEndpoint: '/api/booking/pay-all',
+                message: getPaymentFailureMessage({ error: paymentError, holdExpiresAt }),
+            });
+        }
     } catch (error) {
         console.error('[payAllBookings]', error.message);
-        return res.status(500).json({ success: false, message: 'Unable to create a payment link.' });
+        return res.status(error.statusCode || 500).json({
+            success: false,
+            code: error.code,
+            bookingIds: validBookings.map((booking) => booking._id),
+            message: error.statusCode === 410 ? error.message : 'Unable to prepare bookings for payment.',
+        });
     }
 };

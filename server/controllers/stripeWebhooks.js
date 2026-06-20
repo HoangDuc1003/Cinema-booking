@@ -1,5 +1,4 @@
 import mongoose from 'mongoose';
-import Stripe from 'stripe';
 import Booking from '../models/Booking.js';
 import Show from '../models/Show.js';
 import SeatReservation from '../models/SeatReservation.js';
@@ -10,6 +9,11 @@ import { releaseSeatHolds } from '../services/seatHoldService.js';
 import { redisKeys, redisTtl } from '../services/redisKeys.js';
 import connectDB from '../configs/db.js';
 import ensureCriticalIndexes from '../configs/indexes.js';
+import {
+    getSafeStripeError,
+    getStripeClient,
+    getStripeWebhookSecret,
+} from '../services/stripeService.js';
 
 const getCheckoutSession = async (stripe, event) => {
     if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
@@ -82,21 +86,26 @@ const confirmBookings = async (bookingIds) => {
 };
 
 export const stripeWebhooks = async (req, res) => {
-    if (!process.env.STRIPE_SECRET_KEY || !process.env.STRIPE_WEBHOOK_SECRET) {
-        console.error('[Stripe webhook] Stripe secrets are not configured');
+    let stripe;
+    let webhookSecret;
+    try {
+        stripe = getStripeClient();
+        webhookSecret = getStripeWebhookSecret();
+    } catch (error) {
+        console.error('[Stripe webhook config]', getSafeStripeError(error));
         return res.status(503).json({ error: 'Stripe webhook is not configured.' });
     }
 
-    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
     let event;
     try {
         event = stripe.webhooks.constructEvent(
             req.body,
             req.headers['stripe-signature'],
-            process.env.STRIPE_WEBHOOK_SECRET,
+            webhookSecret,
         );
     } catch (error) {
-        return res.status(400).send(`Webhook error: ${error.message}`);
+        console.error('[Stripe webhook signature]', getSafeStripeError(error));
+        return res.status(400).json({ error: 'Webhook signature verification failed.' });
     }
 
     try {

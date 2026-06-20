@@ -40,7 +40,7 @@ const MyBookings = () => {
     };
     loadBookings();
     return () => { mounted = false; };
-  }, [user]);
+  }, [user, axios]);
 
   // Sort newest first
   const sortedBookings = useMemo(() => {
@@ -48,7 +48,10 @@ const MyBookings = () => {
   }, [bookings]);
 
   // Calculate unpaid totals
-  const unpaidBookings = useMemo(() => sortedBookings.filter(b => !b.isPaid), [sortedBookings]);
+  const unpaidBookings = useMemo(() => sortedBookings.filter((booking) => {
+    if (booking.isPaid || booking.status === 'expired') return false
+    return !booking.holdExpiresAt || new Date(booking.holdExpiresAt) > new Date()
+  }), [sortedBookings]);
   const totalAmount = useMemo(() => unpaidBookings.reduce((sum, b) => sum + Number(b.amount || 0), 0), [unpaidBookings]);
 
   // Pay Now → create Stripe session and redirect to checkout
@@ -65,7 +68,15 @@ const MyBookings = () => {
         toast.error(data.message || 'Payment failed', { id: toastId });
       }
     } catch (error) {
-      toast.error(error.message || 'Payment error', { id: toastId });
+      const paymentState = error.response?.data
+      if (paymentState?.bookingId && paymentState?.holdExpiresAt) {
+        setBookings((current) => current.map((booking) => (
+          booking._id === paymentState.bookingId
+            ? { ...booking, holdExpiresAt: paymentState.holdExpiresAt }
+            : booking
+        )))
+      }
+      toast.error(paymentState?.message || error.message || 'Payment error', { id: toastId });
     }
   }, [axios]);
 
@@ -102,7 +113,16 @@ const MyBookings = () => {
         toast.error(data.message || 'Payment failed', { id: toastId });
       }
     } catch (error) {
-      toast.error(error.message || 'Payment error', { id: toastId });
+      const paymentState = error.response?.data
+      if (paymentState?.bookingIds?.length && paymentState?.holdExpiresAt) {
+        const affected = new Set(paymentState.bookingIds.map(String))
+        setBookings((current) => current.map((booking) => (
+          affected.has(String(booking._id))
+            ? { ...booking, holdExpiresAt: paymentState.holdExpiresAt }
+            : booking
+        )))
+      }
+      toast.error(paymentState?.message || error.message || 'Payment error', { id: toastId });
     }
   }, [axios, unpaidBookings]);
 
@@ -126,6 +146,10 @@ const MyBookings = () => {
             {sortedBookings.map((item, index) => {
             const posterUrl = getImageUrl(item.show?.movie?.poster_path);
             const isPaid = item.isPaid;
+            const isExpired = !isPaid && (
+              item.status === 'expired'
+              || (item.holdExpiresAt && new Date(item.holdExpiresAt) <= new Date())
+            );
 
             return (
               <AnimatedCard key={item._id || index} index={index} staggerDelay={60} duration={500}>
@@ -164,6 +188,11 @@ const MyBookings = () => {
                           <span className="px-1.5 py-0.5 bg-black/60 border border-green-500/50
                             rounded-md text-green-400 text-[9px] font-bold uppercase backdrop-blur-sm">
                             ✓ Paid
+                          </span>
+                        ) : isExpired ? (
+                          <span className="px-1.5 py-0.5 bg-black/60 border border-gray-500/50
+                            rounded-md text-gray-400 text-[9px] font-bold uppercase backdrop-blur-sm">
+                            Expired
                           </span>
                         ) : (
                           <span className="px-1.5 py-0.5 bg-black/60 border border-orange-500/50
@@ -219,15 +248,17 @@ const MyBookings = () => {
                       <div className="flex items-center gap-1.5 sm:gap-2">
                         {!isPaid && (
                           <>
-                            <button
-                              onClick={() => handlePayNow(item)}
-                              className="px-2 sm:px-3 py-1 sm:py-1.5 bg-gradient-to-r from-[#F84565] to-[#D63854]
-                                hover:from-[#D63854] hover:to-[#F84565] text-white font-semibold rounded-lg
-                                shadow-md shadow-[#F84565]/25 hover:shadow-[#F84565]/50
-                                hover:scale-105 active:scale-95 transition-all duration-300 text-[10px] sm:text-[11px] whitespace-nowrap"
-                            >
-                              Pay Now
-                            </button>
+                            {!isExpired && (
+                              <button
+                                onClick={() => handlePayNow(item)}
+                                className="px-2 sm:px-3 py-1 sm:py-1.5 bg-gradient-to-r from-[#F84565] to-[#D63854]
+                                  hover:from-[#D63854] hover:to-[#F84565] text-white font-semibold rounded-lg
+                                  shadow-md shadow-[#F84565]/25 hover:shadow-[#F84565]/50
+                                  hover:scale-105 active:scale-95 transition-all duration-300 text-[10px] sm:text-[11px] whitespace-nowrap"
+                              >
+                                Pay Now
+                              </button>
+                            )}
                             <button
                               onClick={() => handleDelete(item._id)}
                               className="p-1 sm:p-1.5 bg-black/40 hover:bg-red-500/20 text-gray-400 hover:text-red-500 rounded-lg border border-white/5 hover:border-red-500/30 transition-all duration-300"

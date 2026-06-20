@@ -192,6 +192,8 @@ Booking correctness is enforced by MongoDB transactions plus the unique
 seat holds, but it is not the only double-booking guard. See
 [`docs/redis-booking.md`](./docs/redis-booking.md) for keys, TTLs, invalidation,
 index rollout, health behavior, and concurrency testing.
+See [`docs/payment-booking-debug.md`](./docs/payment-booking-debug.md) for Stripe
+configuration, pending-hold recovery, safe logs, and pay-now/pay-all retries.
 
 ```bash
 git clone https://github.com/hoangduc1003/cinema-booking.git
