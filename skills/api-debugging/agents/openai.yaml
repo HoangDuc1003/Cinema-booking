@@ -1,0 +1,4 @@
+interface:
+  display_name: "API Debugging"
+  short_description: "Trace and diagnose API failures"
+  default_prompt: "Use $api-debugging to diagnose a NitroCine API failure end to end."

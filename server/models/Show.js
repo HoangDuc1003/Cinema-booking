@@ -10,5 +10,8 @@ const showSchema = new mongoose.Schema(
     }, { minimize: false }
 )
 
+showSchema.index({ movie: 1, showDateTime: 1, hall: 1 }, { unique: true });
+showSchema.index({ showDateTime: 1 });
+
 const Show = mongoose.model("Show", showSchema);
 export default Show;

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Security Hardening"
+  short_description: "Harden secrets, inputs, auth, and payments"
+  default_prompt: "Use $security-hardening to audit and harden a NitroCine server change."

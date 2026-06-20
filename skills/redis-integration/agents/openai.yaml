@@ -1,0 +1,4 @@
+interface:
+  display_name: "Redis Integration"
+  short_description: "Build safe Redis caching and coordination"
+  default_prompt: "Use $redis-integration to add or review Redis integration in NitroCine."

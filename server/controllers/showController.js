@@ -1,233 +1,223 @@
-import axios from "axios"
-import Movie from "../models/Movie.js"
-import Show from "../models/Show.js"
-import { importTrendingMoviesLogic } from "../services/movieService.js"
+import axios from 'axios';
+import Movie from '../models/Movie.js';
+import Show from '../models/Show.js';
+import { importTrendingMoviesLogic } from '../services/movieService.js';
+import { getJson, rememberJson, setJson } from '../services/cacheService.js';
+import { invalidateMovieCatalog } from '../services/cacheInvalidationService.js';
+import { redisKeys, redisTtl } from '../services/redisKeys.js';
+
+const tmdbHeaders = () => ({ Authorization: `Bearer ${process.env.TMDB_API_KEY}` });
+const setCacheHeader = (res, cache) => res.set('X-Cache', cache);
+
+const fetchMovieFromTmdb = async (movieId) => {
+    const [details, credits] = await Promise.all([
+        axios.get(`https://api.themoviedb.org/3/movie/${movieId}`, { headers: tmdbHeaders() }),
+        axios.get(`https://api.themoviedb.org/3/movie/${movieId}/credits`, { headers: tmdbHeaders() }),
+    ]);
+
+    return {
+        _id: String(movieId),
+        title: details.data.title,
+        overview: details.data.overview,
+        poster_path: details.data.poster_path,
+        backdrop_path: details.data.backdrop_path,
+        genres: details.data.genres,
+        casts: credits.data.cast,
+        release_date: details.data.release_date,
+        original_language: details.data.original_language,
+        tagline: details.data.tagline || '',
+        vote_average: details.data.vote_average,
+        runtime: details.data.runtime,
+    };
+};
 
 export const getNowPlayingMovies = async (req, res) => {
     try {
-        const {data} = await axios.get('https://api.themoviedb.org/3/movie/now_playing', {
-            headers:{Authorization: `Bearer ${process.env.TMDB_API_KEY}`},
-        })
-        const movies = data.results;
-        res.json({success: true, movies: movies});
+        const result = await rememberJson(redisKeys.nowPlayingMovies(), redisTtl.movies, async () => {
+            const { data } = await axios.get('https://api.themoviedb.org/3/movie/now_playing', {
+                headers: tmdbHeaders(),
+            });
+            return data.results;
+        });
+        setCacheHeader(res, result.cache).json({ success: true, movies: result.value });
     } catch (error) {
-        console.error(error);
-        return res.status(500).json({ success: false, message: error.message });
+        console.error('[getNowPlayingMovies]', error.message);
+        return res.status(500).json({ success: false, message: 'Unable to load movies.' });
     }
-}
+};
 
-//api to add a new show to the database
 export const addShow = async (req, res) => {
     try {
-        const { movieId, showInput, showPrice } = req.body
-        let movie = await Movie.findById(movieId)
+        const { movieId, showInput, showPrice } = req.body;
+        if (!movieId || !Array.isArray(showInput) || !Number.isFinite(Number(showPrice))) {
+            return res.status(400).json({ success: false, message: 'Invalid show input.' });
+        }
+
+        let movie = await Movie.findById(String(movieId));
         if (!movie) {
-            const [movieDetailsResponse, movieCreditsResponse] = await Promise.all([
-                axios.get(`https://api.themoviedb.org/3/movie/${movieId}`, {
-                    headers: { Authorization: `Bearer ${process.env.TMDB_API_KEY}` }
-                }),
-                axios.get(`https://api.themoviedb.org/3/movie/${movieId}/credits`, {
-                    headers: { Authorization: `Bearer ${process.env.TMDB_API_KEY}` }
-                }),
-            ]);
-
-            const movieApiData = movieDetailsResponse.data;
-            const movieCreditsData = movieCreditsResponse.data;
-
-            const movieDetails = {
-                _id: movieId,
-                title: movieApiData.title,
-                overview: movieApiData.overview,
-                poster_path: movieApiData.poster_path,
-                backdrop_path: movieApiData.backdrop_path,
-                genres: movieApiData.genres,
-                casts: movieCreditsData.cast,
-                release_date: movieApiData.release_date,
-                original_language: movieApiData.original_language, 
-                tagline: movieApiData.tagline || "",
-                vote_average: movieApiData.vote_average,
-                runtime: movieApiData.runtime,
-            };
-
-            movie = await Movie.create(movieDetails);
+            const movieDetails = await fetchMovieFromTmdb(movieId);
+            movie = await Movie.findOneAndUpdate(
+                { _id: String(movieId) },
+                { $setOnInsert: movieDetails },
+                { new: true, upsert: true },
+            );
         }
 
         const showsToCreate = [];
-
-        showInput.forEach(show => {
-            const showDate = show.date;
-            show.times.forEach((time) => {
-                const dateTimeString = `${showDate}T${time}`;
+        for (const show of showInput) {
+            for (const time of show.times || []) {
                 showsToCreate.push({
-                    movie: movieId,
-                    showDateTime: new Date(dateTimeString),
-                    showPrice,
-                    occupiedSeats: {}
+                    movie: String(movieId),
+                    showDateTime: new Date(`${show.date}T${time}`),
+                    showPrice: Number(showPrice),
+                    hall: show.hall || '',
+                    occupiedSeats: {},
                 });
-            });
-        });
-
-        if (showsToCreate.length > 0) {
-            await Show.insertMany(showsToCreate);
+            }
         }
 
-        res.json({ success: true, message: 'Show Added successfully.' });
-
+        if (showsToCreate.length) await Show.insertMany(showsToCreate, { ordered: false });
+        await invalidateMovieCatalog(String(movieId));
+        return res.json({ success: true, message: 'Show added successfully.' });
     } catch (error) {
-        console.error(error);
-        return res.status(500).json({ success: false, message: error.message });
+        console.error('[addShow]', error.message);
+        const status = error?.code === 11000 ? 409 : 500;
+        return res.status(status).json({
+            success: false,
+            message: status === 409 ? 'One or more showtimes already exist.' : 'Unable to add shows.',
+        });
     }
-}
+};
 
 export const importTrendingMovies = async (req, res) => {
     try {
         const result = await importTrendingMoviesLogic();
-        res.json({ success: true, message: `Successfully imported ${result.count} movies with auto-generated shows!` });
+        return res.json({ success: true, message: `Successfully imported ${result.count} movies with auto-generated shows!` });
     } catch (error) {
-        console.error(error);
-        return res.status(500).json({ success: false, message: error.message });
+        console.error('[importTrendingMovies]', error.message);
+        return res.status(500).json({ success: false, message: 'Unable to import movies.' });
     }
-}
+};
 
-//api to get all shows from database
-export const getShows = async (req,res) =>{
+export const getShows = async (req, res) => {
     try {
-        // First try to get movies that have actual shows in our DB
-        const shows = await Show.find({showDateTime:{$gte:new Date()}}).populate('movie').sort({showDateTime:1});
-        const uniqueMovies = [];
-        const seenIds = new Set();
-        
-        shows.forEach(show => {
-            if (show.movie && !seenIds.has(show.movie._id)) {
-                uniqueMovies.push(show.movie);
-                seenIds.add(show.movie._id);
-            }
-        });
+        const result = await rememberJson(redisKeys.movies(), redisTtl.movies, async () => {
+            const shows = await Show.find({ showDateTime: { $gte: new Date() } })
+                .populate('movie')
+                .sort({ showDateTime: 1 })
+                .lean();
+            const uniqueMovies = [];
+            const seenIds = new Set();
 
-        // If we have few or no shows, fetch some "Trending" movies from TMDB to show as "virtual" options
-        if (uniqueMovies.length < 10) {
-            const { data } = await axios.get('https://api.themoviedb.org/3/movie/now_playing', {
-                headers: { Authorization: `Bearer ${process.env.TMDB_API_KEY}` },
-            });
-            
-            data.results.forEach(m => {
-                const movieId = m.id.toString();
-                if (!seenIds.has(movieId)) {
+            for (const show of shows) {
+                const movieId = show.movie?._id && String(show.movie._id);
+                if (movieId && !seenIds.has(movieId)) {
+                    uniqueMovies.push(show.movie);
+                    seenIds.add(movieId);
+                }
+            }
+
+            if (uniqueMovies.length < 10) {
+                const { data } = await axios.get('https://api.themoviedb.org/3/movie/now_playing', {
+                    headers: tmdbHeaders(),
+                });
+                for (const movie of data.results) {
+                    const movieId = String(movie.id);
+                    if (seenIds.has(movieId)) continue;
                     uniqueMovies.push({
                         _id: movieId,
-                        title: m.title,
-                        poster_path: m.poster_path,
-                        backdrop_path: m.backdrop_path,
-                        vote_average: m.vote_average,
-                        release_date: m.release_date,
-                        isVirtual: true // Mark as virtual for the frontend if needed
+                        title: movie.title,
+                        poster_path: movie.poster_path,
+                        backdrop_path: movie.backdrop_path,
+                        vote_average: movie.vote_average,
+                        release_date: movie.release_date,
+                        isVirtual: true,
                     });
                     seenIds.add(movieId);
                 }
-            });
-        }
-        
-        res.json({success:true, shows: uniqueMovies})
+            }
+            return uniqueMovies;
+        });
+
+        setCacheHeader(res, result.cache).json({ success: true, shows: result.value });
     } catch (error) {
-        console.log(error);
-        return res.status(500).json({ success: false, message: error.message });
+        console.error('[getShows]', error.message);
+        return res.status(500).json({ success: false, message: 'Unable to load shows.' });
     }
-} 
+};
 
-export const getShow = async (req,res) => {
+export const getCinemas = async (req, res) => {
     try {
-        const {movieId} = req.params;
+        const result = await rememberJson(redisKeys.cinemas(), redisTtl.cinemas, async () => {
+            const halls = await Show.distinct('hall', { showDateTime: { $gte: new Date() } });
+            return [...new Set(halls.map((hall) => hall || 'Standard Hall'))].sort();
+        });
+        setCacheHeader(res, result.cache).json({ success: true, cinemas: result.value });
+    } catch (error) {
+        console.error('[getCinemas]', error.message);
+        return res.status(500).json({ success: false, message: 'Unable to load cinemas.' });
+    }
+};
 
+export const getShow = async (req, res) => {
+    try {
+        const movieId = String(req.params.movieId || '');
         if (!movieId || movieId === 'undefined') {
-            return res.json({ success: false, message: "Invalid Movie ID" });
+            return res.status(400).json({ success: false, message: 'Invalid movie ID.' });
         }
 
-        let shows = await Show.find({movie:movieId, showDateTime:{$gte:new Date()}}) 
-        let movie = await Movie.findById(movieId); 
-
-        // If movie not found, fetch from TMDB
-        if (!movie) {
-            const [movieDetailsResponse, movieCreditsResponse] = await Promise.all([
-                axios.get(`https://api.themoviedb.org/3/movie/${movieId}`, {
-                    headers: { Authorization: `Bearer ${process.env.TMDB_API_KEY}` }
-                }),
-                axios.get(`https://api.themoviedb.org/3/movie/${movieId}/credits`, {
-                    headers: { Authorization: `Bearer ${process.env.TMDB_API_KEY}` }
-                }),
+        const result = await rememberJson(redisKeys.showtimes(movieId), redisTtl.showtimes, async () => {
+            const [shows, cachedMovie] = await Promise.all([
+                Show.find({ movie: movieId, showDateTime: { $gte: new Date() } }).lean(),
+                getJson(redisKeys.movie(movieId)),
             ]);
-            const movieApiData = movieDetailsResponse.data;
-            const movieCreditsData = movieCreditsResponse.data;
+            const databaseMovie = cachedMovie ? null : await Movie.findById(movieId).lean();
+            const movie = cachedMovie || databaseMovie || await fetchMovieFromTmdb(movieId);
+            await setJson(redisKeys.movie(movieId), movie, redisTtl.movie);
 
-            movie = {
-                _id: movieId,
-                title: movieApiData.title,
-                overview: movieApiData.overview,
-                poster_path: movieApiData.poster_path,
-                backdrop_path: movieApiData.backdrop_path,
-                genres: movieApiData.genres,
-                casts: movieCreditsData.cast,
-                release_date: movieApiData.release_date,
-                original_language: movieApiData.original_language, 
-                tagline: movieApiData.tagline || "",
-                vote_average: movieApiData.vote_average,
-                runtime: movieApiData.runtime,
-            };
-        }
-
-        // Virtual show generation logic (instead of auto-inserting)
-        const dateTime = {};
-        const today = new Date();
-        
-        // Generate showtimes for the next 7 days
-        for (let i = 0; i < 7; i++) {
-            const date = new Date(today);
-            date.setDate(date.getDate() + i);
-            const dateString = date.toISOString().split('T')[0];
-            
-            // Standard times for every movie
-            const standardTimes = ["10:00", "13:30", "17:00", "20:30"];
-            
-            if (!dateTime[dateString]) {
-                dateTime[dateString] = [];
+            const showsByTimestamp = new Map();
+            for (const show of shows) {
+                const timestamp = new Date(show.showDateTime).getTime();
+                if (!showsByTimestamp.has(timestamp)) showsByTimestamp.set(timestamp, show);
             }
 
-            standardTimes.forEach(time => {
-                const dateTimeString = `${dateString}T${time}:00.000Z`;
-                const showDT = new Date(dateTimeString);
-                
-                // Only show future showtimes
-                if (showDT < today) return;
+            const dateTime = {};
+            const now = new Date();
+            const standardTimes = ['10:00', '13:30', '17:00', '20:30'];
+            for (let dayOffset = 0; dayOffset < 7; dayOffset += 1) {
+                const date = new Date(now);
+                date.setDate(date.getDate() + dayOffset);
+                const dateString = date.toISOString().split('T')[0];
+                dateTime[dateString] = [];
 
-                // Check if this show already exists in DB
-                const existingShow = shows.find(s => s.showDateTime.getTime() === showDT.getTime());
-                
-                if (existingShow) {
-                    dateTime[dateString].push({
-                        time: existingShow.showDateTime, 
-                        showId: existingShow._id,
-                        price: existingShow.showPrice,
-                        hall: "Standard Hall",
-                        isVirtual: false
-                    });
-                } else {
-                    // Generate a "virtual" show ID that can be used for booking
-                    // Format: virtual_<movieId>_<timestamp>
-                    const virtualId = `virtual_${movieId}_${showDT.getTime()}`;
-                    dateTime[dateString].push({
-                        time: showDT, 
-                        showId: virtualId,
-                        price: 50, // Default virtual price
-                        hall: "Standard Hall",
-                        isVirtual: true
+                for (const time of standardTimes) {
+                    const showDateTime = new Date(`${dateString}T${time}:00.000Z`);
+                    if (showDateTime < now) continue;
+                    const existing = showsByTimestamp.get(showDateTime.getTime());
+                    dateTime[dateString].push(existing ? {
+                        time: existing.showDateTime,
+                        showId: existing._id,
+                        price: existing.showPrice,
+                        hall: existing.hall || 'Standard Hall',
+                        isVirtual: false,
+                    } : {
+                        time: showDateTime,
+                        showId: `virtual_${movieId}_${showDateTime.getTime()}`,
+                        price: 50,
+                        hall: 'Virtual Hall',
+                        isVirtual: true,
                     });
                 }
-            });
-        }
-        
-        res.json({success:true, movie, dateTime})
+            }
+
+            return { movie, dateTime };
+        });
+
+        setCacheHeader(res, result.cache).json({ success: true, ...result.value });
     } catch (error) {
-        console.log(error);
-        return res.status(500).json({ success: false, message: error.message });
+        console.error('[getShow]', error.message);
+        return res.status(500).json({ success: false, message: 'Unable to load showtimes.' });
     }
-}
-export default { getNowPlayingMovies, addShow, importTrendingMovies, getShows, getShow }
+};
+
+export default { getNowPlayingMovies, addShow, importTrendingMovies, getShows, getCinemas, getShow };

@@ -44,6 +44,27 @@ const customStyles = `
     }
 `
 
+const generateFakeOccupied = (showId) => {
+  const seed = showId ? showId.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0) : 42
+  const rows = 'ABCDEFGHIJ'
+  const occupied = new Set()
+  const count = 15 + (seed % 20)
+  for (let index = 0; index < count; index += 1) {
+    const rowIndex = (seed * (index + 3) * 7) % rows.length
+    const row = rows[rowIndex]
+    const maxSeat = rowIndex < 2 ? 9 : 18
+    const seatNumber = ((seed * (index + 1) * 13) % maxSeat) + 1
+    occupied.add(`${row}${seatNumber}`)
+  }
+  return [...occupied]
+}
+
+const sameSeatSet = (left, right) => {
+  if (left.length !== right.length) return false
+  const rightSet = new Set(right)
+  return left.every((seat) => rightSet.has(seat))
+}
+
 // Memoized Seat Component to prevent re-rendering the whole grid
 const Seat = React.memo(({ seatId, status, type, showPrice, onClick }) => {
   const baseStyles = 'w-7 h-7 sm:w-8 sm:h-8 rounded-lg border-2 text-[10px] sm:text-xs font-bold transition-all duration-300 transform relative overflow-hidden'
@@ -133,23 +154,27 @@ const SeatLayout = () => {
     { row: 'J', count: 18, type: 'back', label: 'Back Standard' }
   ], [])
 
-  // Generate deterministic fake occupied seats for mock showtimes
-  const generateFakeOccupied = (showId) => {
-    const seed = showId ? showId.split('').reduce((a, c) => a + c.charCodeAt(0), 0) : 42;
-    const rows = 'ABCDEFGHIJ';
-    const occupied = [];
-    // Generate 15-35 occupied seats based on seed
-    const count = 15 + (seed % 20);
-    for (let i = 0; i < count; i++) {
-      const rowIdx = (seed * (i + 3) * 7) % rows.length;
-      const row = rows[rowIdx];
-      const maxSeat = rowIdx < 2 ? 9 : 18;
-      const seatNum = ((seed * (i + 1) * 13) % maxSeat) + 1;
-      const seatId = `${row}${seatNum}`;
-      if (!occupied.includes(seatId)) occupied.push(seatId);
-    }
-    return occupied;
-  };
+  const occupiedSeatSet = React.useMemo(() => new Set(occupiedSeats), [occupiedSeats])
+  const selectedSeatSet = React.useMemo(() => new Set(selectedSeats), [selectedSeats])
+  const rowConfigByLetter = React.useMemo(
+    () => new Map(seatRows.map((row) => [row.row, row])),
+    [seatRows],
+  )
+  const showtimesForDate = React.useMemo(() => show?.dateTime?.[date] || [], [show, date])
+  const showtimeById = React.useMemo(
+    () => new Map(showtimesForDate.map((item) => [item.showId ?? item._id ?? item.id, item])),
+    [showtimesForDate],
+  )
+  const hallShowCounts = React.useMemo(() => {
+    const counts = new Map()
+    for (const item of showtimesForDate) counts.set(item.hall, (counts.get(item.hall) || 0) + 1)
+    return counts
+  }, [showtimesForDate])
+  const availableHalls = React.useMemo(() => [...hallShowCounts.keys()].sort(), [hallShowCounts])
+  const filteredTimes = React.useMemo(
+    () => selectedHall ? showtimesForDate.filter((item) => item.hall === selectedHall) : showtimesForDate,
+    [selectedHall, showtimesForDate],
+  )
 
   const fetchShow = async () => {
     try {
@@ -226,7 +251,7 @@ const SeatLayout = () => {
       console.error('Error fetching occupied seats:', error)
       return null
     }
-  }, [selectedTime])
+  }, [axios, selectedTime])
 
   const bookTickets = async () => {
     try {
@@ -239,7 +264,6 @@ const SeatLayout = () => {
       const payload = {
         showId,
         selectedSeats,
-        totalAmount: calculateTotal,
         ...(isMock && {
           movieId: String(show.id || show._id),
           showDateTime: selectedTime.time,
@@ -310,7 +334,7 @@ const SeatLayout = () => {
 
         // Get price from selected time or fallback
         if (mounted) {
-          const ttPrice = selectedTime?.price ?? show?.dateTime?.[date]?.find(item => (item.showId ?? item._id ?? item.id) === showId)?.price
+          const ttPrice = selectedTime?.price ?? showtimeById.get(showId)?.price
           setShowPrice(ttPrice ?? 0)
         }
       } catch (err) {
@@ -322,7 +346,7 @@ const SeatLayout = () => {
 
     loadPriceAndSeats()
     return () => { mounted = false }
-  }, [date, selectedTime, show?.dateTime, fetchOccupiedSeats])
+  }, [selectedTime, showtimeById, fetchOccupiedSeats])
 
   // REAL-TIME SYNC: Poll for occupied seats every 5 seconds (skip for mock data)
   useEffect(() => {
@@ -342,7 +366,7 @@ const SeatLayout = () => {
       if (mounted && occupied) {
         setOccupiedSeats(prev => {
           // Only update if there's a change to prevent unnecessary re-renders
-          if (JSON.stringify(prev) === JSON.stringify(occupied)) return prev
+          if (sameSeatSet(prev, occupied)) return prev
           return occupied
         })
       }
@@ -365,13 +389,14 @@ const SeatLayout = () => {
       return toast.error('Loading seat price, please wait...', { icon: '💰', style: { background: '#1a1a1a', color: '#fff', border: '1px solid #333' } })
     }
 
-    if (occupiedSeats.includes(seatId)) {
+    if (occupiedSeatSet.has(seatId)) {
       return toast.error('This seat is already taken', { icon: '🚫', style: { background: '#1a1a1a', color: '#fff', border: '1px solid #ef4444' } })
     }
 
     // FIX: Determine action BEFORE setState to avoid side-effects inside updater.
     setSelectedSeats(prev => {
-      const isSelected = prev.includes(seatId);
+      const nextSeats = new Set(prev)
+      const isSelected = nextSeats.has(seatId)
       if (!isSelected && prev.length >= 8) {
         queueMicrotask(() => toast.error('You can only select up to 8 seats', { icon: '👥', style: { background: '#1a1a1a', color: '#fff', border: '1px solid #333' } }));
         return prev;
@@ -379,10 +404,11 @@ const SeatLayout = () => {
 
       if (isSelected) {
         queueMicrotask(() => toast.success(`Seat ${seatId} deselected`, { icon: '↩️', style: { background: '#1a1a1a', color: '#fff', border: '1px solid #10b981' } }));
-        return prev.filter(seat => seat !== seatId);
+        nextSeats.delete(seatId)
+        return [...nextSeats]
       } else {
         const rowLetter = seatId.charAt(0);
-        const rowConfig = seatRows.find(r => r.row === rowLetter);
+        const rowConfig = rowConfigByLetter.get(rowLetter)
         let seatPrice = showPrice;
         if (rowConfig?.type === 'front') seatPrice = showPrice * 2;
         else if (rowConfig?.type === 'middle') seatPrice = showPrice * 1.5;
@@ -392,25 +418,11 @@ const SeatLayout = () => {
           icon: '✅',
           style: { background: '#1a1a1a', color: '#fff', border: '1px solid #10b981' }
         }));
-        return [...prev, seatId];
+        nextSeats.add(seatId)
+        return [...nextSeats]
       }
     });
-  }, [selectedTime, showPrice, occupiedSeats, seatRows])
-
-  const getAvailableHalls = React.useCallback(() => {
-    if (!show?.dateTime?.[date]) return []
-    const halls = new Set()
-    show.dateTime[date].forEach(item => {
-      halls.add(item.hall)
-    })
-    return Array.from(halls).sort()
-  }, [show, date])
-
-  const getFilteredTimes = React.useCallback(() => {
-    if (!show?.dateTime?.[date]) return []
-    if (!selectedHall) return show.dateTime[date]
-    return show.dateTime[date].filter(item => item.hall === selectedHall)
-  }, [show, date, selectedHall])
+  }, [selectedTime, showPrice, occupiedSeatSet, rowConfigByLetter])
 
   const handleHallSelect = (hall) => {
     setSelectedHall(hall)
@@ -427,29 +439,9 @@ const SeatLayout = () => {
   }
 
   const getSeatStatus = (seatId) => {
-    if (occupiedSeats.includes(seatId)) return 'occupied'
-    if (selectedSeats.includes(seatId)) return 'selected'
+    if (occupiedSeatSet.has(seatId)) return 'occupied'
+    if (selectedSeatSet.has(seatId)) return 'selected'
     return 'available'
-  }
-
-  const getSeatStyles = (status, rowType) => {
-    const baseStyles = 'w-8 h-8 rounded-lg border-2 text-xs font-bold transition-all duration-300 transform relative overflow-hidden'
-
-    switch (status) {
-      case 'selected':
-        return `${baseStyles} bg-gradient-to-br from-green-500 to-green-600 text-white border-green-400 shadow-lg shadow-green-500/50 sync-pulse`
-      case 'occupied':
-        return `${baseStyles} bg-gradient-to-br from-red-600 to-red-800 text-white border-red-500 cursor-not-allowed opacity-80`
-      case 'available':
-      default: {
-        const typeStyles = {
-          front: 'border-yellow-500/40 hover:border-yellow-500 hover:bg-yellow-500/20 hover:text-yellow-500',
-          middle: 'border-primary/40 hover:border-primary hover:bg-primary/20 hover:text-primary',
-          back: 'border-green-500/40 hover:border-green-500 hover:bg-green-500/20 hover:text-green-500'
-        }
-        return `${baseStyles} bg-transparent text-gray-300 hover:text-white hover:scale-105 ${typeStyles[rowType] || typeStyles.middle}`
-      }
-    }
   }
 
   const renderSeatRow = (rowData) => {
@@ -492,12 +484,11 @@ const SeatLayout = () => {
       </div>
     )
   }
-  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const calculateTotal = React.useMemo(() => {
     let total = 0;
     selectedSeats.forEach((seatId) => {
       const rowLetter = seatId.charAt(0);
-      const rowConfig = seatRows.find(r => r.row === rowLetter);
+      const rowConfig = rowConfigByLetter.get(rowLetter)
 
       if (rowConfig) {
         if (rowConfig.type === 'front') total += showPrice * 2;
@@ -506,7 +497,7 @@ const SeatLayout = () => {
       }
     })
     return Math.round(total);
-  }, [selectedSeats, seatRows, showPrice])
+  }, [selectedSeats, rowConfigByLetter, showPrice])
 
   return show ? (
     <div className="min-h-screen bg-black relative">
@@ -552,7 +543,7 @@ const SeatLayout = () => {
               </h4>
 
               <div className="grid grid-cols-1 gap-3">
-                {getAvailableHalls().map((hall, index) => (
+                {availableHalls.map((hall, index) => (
                   <button
                     key={hall}
                     onClick={() => handleHallSelect(hall)}
@@ -568,7 +559,7 @@ const SeatLayout = () => {
                         <div>
                           <h5 className="font-semibold">{hall}</h5>
                           <p className="text-sm opacity-70">
-                            {show.dateTime[date].filter(item => item.hall === hall).length} shows available
+                            {hallShowCounts.get(hall) || 0} shows available
                           </p>
                         </div>
                       </div>
@@ -602,12 +593,12 @@ const SeatLayout = () => {
                   <ClockIcon className="w-12 h-12 text-gray-500 mx-auto mb-4" />
                   <p className="text-gray-400 mb-2">Please select a hall first</p>
                   <p className="text-sm text-gray-500">
-                    Step 1: Choose from {getAvailableHalls().length} available halls above
+                    Step 1: Choose from {availableHalls.length} available halls above
                   </p>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {getFilteredTimes().map((item, index) => (
+                  {filteredTimes.map((item, index) => (
                     <button
                       key={`${item.time}-${item.hall}`}
                       onClick={() => handleTimeSelect(item)}
@@ -632,7 +623,7 @@ const SeatLayout = () => {
                     </button>
                   ))}
 
-                  {getFilteredTimes().length === 0 && (
+                  {filteredTimes.length === 0 && (
                     <div className="text-center py-8">
                       <ClockIcon className="w-12 h-12 text-gray-500 mx-auto mb-4" />
                       <p className="text-gray-400">No shows available for {selectedHall}</p>

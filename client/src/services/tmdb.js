@@ -1,5 +1,6 @@
 // Service: TMDB API helpers
-const API_KEY = '127bc7f7c148cade2892233946154212';
+// Vite variables are public in the browser bundle; use a restricted TMDB browser key only.
+const API_KEY = import.meta.env.VITE_TMDB_API_KEY;
 const BASE_URL = 'https://api.themoviedb.org/3';
 const IMAGE_BASE = 'https://image.tmdb.org/t/p';
 

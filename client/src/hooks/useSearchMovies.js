@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import useDebounce from './useDebounce';
 
-const API_KEY = '127bc7f7c148cade2892233946154212';
+const API_KEY = import.meta.env.VITE_TMDB_API_KEY;
 const BASE_URL = 'https://api.themoviedb.org/3';
 const IMAGE_BASE = 'https://image.tmdb.org/t/p';
 
@@ -38,9 +38,6 @@ const useSearchMovies = (query, debounceDelay = 300) => {
   useEffect(() => {
     // Guard: empty or too-short query → clear results immediately
     if (!debouncedQuery || debouncedQuery.trim().length < 2) {
-      setResults([]);
-      setIsSearching(false);
-      setSearchError(null);
       return;
     }
 
@@ -49,9 +46,13 @@ const useSearchMovies = (query, debounceDelay = 300) => {
     // Check in-memory cache first
     const cached = searchCache.get(normalizedQuery);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-      setResults(cached.data);
-      setIsSearching(false);
-      return;
+      let active = true;
+      queueMicrotask(() => {
+        if (!active) return;
+        setResults(cached.data);
+        setIsSearching(false);
+      });
+      return () => { active = false; };
     }
 
     // Abort previous in-flight request — this is the KEY to preventing race conditions
@@ -116,6 +117,10 @@ const useSearchMovies = (query, debounceDelay = 300) => {
       controller.abort();
     };
   }, [debouncedQuery]);
+
+  if (!debouncedQuery || debouncedQuery.trim().length < 2) {
+    return { results: [], isSearching: false, searchError: null };
+  }
 
   return { results, isSearching, searchError };
 };
