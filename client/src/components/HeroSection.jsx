@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CalendarIcon, ClockIcon, Star, Play, Ticket } from 'lucide-react';
-import { fetchPopularMovies } from '../services/tmdb';
-import BlurCircle from './BlurCircle';
+import { fetchHomeHero } from '../services/tmdb';
 import Loading from './Loading';
 
 const getImageUrl = (path, size = 'original') => {
@@ -172,32 +171,21 @@ const HeroSection = () => {
   }, []);
 
   useEffect(() => {
+    const controller = new AbortController();
+
     const load = async () => {
       try {
         setIsLoading(true);
-        const cacheKey = 'hero_movies_cache';
-        const cacheTimeKey = 'hero_movies_cache_time';
-        const cachedData = localStorage.getItem(cacheKey);
-        const cachedTime = localStorage.getItem(cacheTimeKey);
-        const now = new Date().getTime();
-
-        // 24 hours = 24 * 60 * 60 * 1000 = 86400000 ms
-        if (cachedData && cachedTime && now - parseInt(cachedTime) < 86400000) {
-          setMovies(JSON.parse(cachedData));
-        } else {
-          const data = await fetchPopularMovies({ includeDetails: true, detailLimit: 5, randomRotate: true, dailySeedSize: 20 });
-          const top5 = data.slice(0, 5);
-          localStorage.setItem(cacheKey, JSON.stringify(top5));
-          localStorage.setItem(cacheTimeKey, now.toString());
-          setMovies(top5);
-        }
+        const data = await fetchHomeHero({ signal: controller.signal });
+        if (!controller.signal.aborted) setMovies(data.movies.slice(0, 5));
       } catch (e) {
-        console.error('Hero load error:', e);
+        if (e.name !== 'AbortError') console.error('Hero load error:', e);
       } finally {
-        setIsLoading(false);
+        if (!controller.signal.aborted) setIsLoading(false);
       }
     };
     load();
+    return () => controller.abort();
   }, []);
 
   // Auto-slide
@@ -230,7 +218,7 @@ const HeroSection = () => {
   const titleWords = titleText.split(' ');
   
   const bgPath = movie.backdrop_original || movie.backdrop_w1280 || movie.backdrop_path;
-  const bgUrl = getImageUrl(bgPath, 'original');
+  const bgUrl = getImageUrl(bgPath, 'w1280');
   const year = movie.release_date?.substring(0, 4) || 'N/A';
   const rating = movie.vote_average?.toFixed(1) || 'N/A';
   const runtimeStr = formatRuntime(movie.runtime);
@@ -244,6 +232,9 @@ const HeroSection = () => {
           key={`bg-${currentIndex}`}
           src={bgUrl}
           alt={movie.title}
+          fetchPriority={currentIndex === 0 ? 'high' : 'auto'}
+          decoding="async"
+          sizes="100vw"
           className="hero-backdrop w-full h-full object-cover object-center animate-pan-right align-top"
           style={{ opacity: 1 }} 
         />
@@ -368,7 +359,7 @@ const HeroSection = () => {
         <div className="thumb-bar flex items-end gap-3 overflow-x-auto py-2 pr-4 pl-2">
           {movies.map((m, i) => {
             const isActive = i === currentIndex;
-            const thumbUrl = getImageUrl(m.backdrop_path, 'w500');
+            const thumbUrl = getImageUrl(m.backdrop_path || m.poster_path, 'w300');
 
             return (
               <button
@@ -388,6 +379,7 @@ const HeroSection = () => {
                   src={thumbUrl} 
                   alt={m.title} 
                   loading="lazy" 
+                  decoding="async"
                   className={`w-full h-full object-cover transition-all duration-500 ${isActive ? 'scale-110 brightness-100' : 'brightness-50 group-hover:brightness-120'}`} 
                 />
                 <div className="absolute inset-0 flex items-end opacity-100"

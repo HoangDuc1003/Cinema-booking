@@ -21,13 +21,16 @@ const ListShows = () => {
       setLoading(false);
     } catch (error) { 
       toast.error(error.message);
+      setLoading(false);
     }
   }
 
   useEffect(() => {
     if (user) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       getAllShows();
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   },[user])
 
   return !loading ? (

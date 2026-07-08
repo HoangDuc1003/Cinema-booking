@@ -2,7 +2,7 @@ import { deleteByPattern, deleteKeys } from './cacheService.js';
 import { redisKeys } from './redisKeys.js';
 
 export const invalidateMovieCatalog = async (movieId = null) => {
-    const keys = [redisKeys.movies(), redisKeys.nowPlayingMovies(), redisKeys.cinemas()];
+    const keys = [redisKeys.movies(), redisKeys.nowPlayingMovies(), redisKeys.cinemas(), redisKeys.homeHero()];
     if (movieId) keys.push(redisKeys.movie(movieId), redisKeys.showtimes(movieId));
     await deleteKeys(keys);
     if (!movieId) await deleteByPattern(redisKeys.showtimesPattern());

@@ -5,6 +5,7 @@ import { importTrendingMoviesLogic } from '../services/movieService.js';
 import { getJson, rememberJson, setJson } from '../services/cacheService.js';
 import { invalidateMovieCatalog } from '../services/cacheInvalidationService.js';
 import { redisKeys, redisTtl } from '../services/redisKeys.js';
+import { getPublicHomeHero } from '../services/heroService.js';
 
 const tmdbHeaders = () => ({ Authorization: `Bearer ${process.env.TMDB_API_KEY}` });
 const setCacheHeader = (res, cache) => res.set('X-Cache', cache);
@@ -64,6 +65,20 @@ export const getTmdbPopular = async (req, res) => {
     } catch (error) {
         console.error('[getTmdbPopular]', error.message);
         return res.status(502).json({ success: false, message: 'Unable to load popular movies.' });
+    }
+};
+
+export const getHomeHero = async (req, res) => {
+    try {
+        const payload = await getPublicHomeHero();
+        return setCacheHeader(res, payload.cache).json({
+            success: true,
+            settings: payload.settings,
+            movies: payload.movies,
+        });
+    } catch (error) {
+        console.error('[getHomeHero]', error.message);
+        return res.status(500).json({ success: false, message: 'Unable to load home hero.' });
     }
 };
 
@@ -441,4 +456,4 @@ export const getShow = async (req, res) => {
     }
 };
 
-export default { getNowPlayingMovies, addShow, importTrendingMovies, getShows, getCinemas, getShow };
+export default { getNowPlayingMovies, addShow, importTrendingMovies, getShows, getCinemas, getShow, getHomeHero };

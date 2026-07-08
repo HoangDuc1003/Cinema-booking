@@ -1,6 +1,7 @@
 import Booking from "../models/Booking.js"
 import Show from "../models/Show.js"
 import User from "../models/User.js"
+import { getAdminHomeHero, updateHomeHero } from "../services/heroService.js"
 export const isAdmin = async (req,res) => {
     res.json({success:true, isAdmin:true})
 }
@@ -11,12 +12,12 @@ export const getDashboardData = async (req,res)=>{
         const bookings = await Booking.find({isPaid:true})
         const activeShows = await Show.find({showDateTime:{$gte:new Date()}}).populate('movie');
 
-        const tototalUser = await User.countDocuments();
+        const totalUser = await User.countDocuments();
         const dashboardData = {
             totalBookings: bookings.length,
             totalRevenue:bookings.reduce((acc,booking)=>acc+booking.amount,0),
             activeShows,
-            tototalUser
+            totalUser
         }
         res.json({success:true,dashboardData});
     } catch (error) {
@@ -47,5 +48,25 @@ export const getAllBookings = async (req,res) =>{
     } catch (error) {
         console.log(error);
         return res.status(500).json({ success: false, message: error.message });
+    }
+}
+
+export const getHeroSettings = async (req,res) =>{
+    try {
+        const hero = await getAdminHomeHero();
+        res.json({success:true,hero});
+    } catch (error) {
+        console.log(error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+}
+
+export const updateHeroSettings = async (req,res) =>{
+    try {
+        const settings = await updateHomeHero(req.body || {});
+        res.json({success:true,message:"Hero updated successfully.",settings});
+    } catch (error) {
+        console.log(error);
+        return res.status(error.status || 500).json({ success: false, message: error.message });
     }
 }

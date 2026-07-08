@@ -8,11 +8,12 @@ const Loading = ({ message = 'Loading movies...' }) => {
 
   useEffect(()=>{
     if(nextUrl){
-      setTimeout(()=>{
+      const id = setTimeout(()=>{
         navigate('/'+nextUrl)
       },8000)
+      return () => clearTimeout(id)
     }
-  },[])
+  },[navigate, nextUrl])
 
   return (
     <div className='flex flex-col justify-center px-6 md:px-6 lg:px-40 mt-25'>

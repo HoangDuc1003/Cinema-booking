@@ -8,6 +8,7 @@ const key = (...parts) => [prefix, ...parts.map(String)].join(':');
 
 export const redisKeys = {
     prefix,
+    homeHero: () => key('cache', 'hero', 'home'),
     movies: () => key('cache', 'movies', 'all'),
     nowPlayingMovies: () => key('cache', 'movies', 'now-playing'),
     movie: (movieId) => key('cache', 'movie', movieId),

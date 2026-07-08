@@ -6,7 +6,7 @@ import toast from 'react-hot-toast'
 
 // Use base URL from env if available, otherwise fallback to empty string 
 const baseURL = import.meta.env.VITE_BASE_URL || "";
-export const api = axios.create({
+const api = axios.create({
     baseURL: baseURL
 });
 
@@ -96,7 +96,7 @@ export const AppProvider = ({ children }) => {
     } catch (error) {
       setIsAdmin(false);
     }
-  }, [getToken, user]);
+  }, [user]);
 
   const fetchFavoriteMovies = useCallback(async () => {
     if (!user) return; 
@@ -109,14 +109,16 @@ export const AppProvider = ({ children }) => {
     } catch (error) {
       console.log(error)
     }
-  }, [getToken, user]);
+  }, [user]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchShows(); 
   }, [fetchShows]);
 
   useEffect(() => {
     if (user) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       fetchIsAdmin();
       fetchFavoriteMovies();
     } else {
