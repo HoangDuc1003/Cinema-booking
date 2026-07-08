@@ -8,7 +8,7 @@ import { useAppContext } from '../../context/AppContext';
 import toast from 'react-hot-toast'
 
 const AddShows = () => {
-  const {axios,getToken,user} = useAppContext();
+  const {axios,getToken,fetchShows} = useAppContext();
   const currency = import.meta.env.VITE_CURRENCY || "$";
   const [nowPlayingMovies, setNowPlayingMovies] = useState([]);
   const [selectedMovie, setSelectedMovie] = useState(null);
@@ -33,6 +33,7 @@ const AddShows = () => {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchNowPlayingMovies();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Add a new showtime
@@ -41,7 +42,7 @@ const AddShows = () => {
 
     const dateObj = new Date(dateTimeInput);
     const dateStr = dateObj.toISOString().split('T')[0];
-    const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const timeStr = dateObj.toTimeString().slice(0, 5);
 
     setDateTimeSelection((prev) => {
       const updatedSelection = { ...prev };
@@ -100,7 +101,6 @@ const AddShows = () => {
         setDateTimeSelection({})
         setShowPrice("")
         setSelectedMovie(null)
-        // eslint-disable-next-line no-undef
         await fetchShows()
       }else{
         toast.error(data.message)

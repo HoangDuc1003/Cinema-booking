@@ -9,7 +9,7 @@ import toast from "react-hot-toast";
 
 const Dashboard = () => {
   const { axios, getToken, user } = useAppContext();
-  const currency = import.meta.env.VITE_CURRENCY;
+  const currency = import.meta.env.VITE_CURRENCY || "$";
   const [dashboardData, setDashboardData] = useState({
     totalBookings: 0,
     totalRevenue: 0,
@@ -27,7 +27,7 @@ const Dashboard = () => {
     },
     {
       title: "Total Revenue",
-      value: currency + dashboardData.totalRevenue || "0",
+      value: `${currency}${dashboardData.totalRevenue || 0}`,
       icon: CircleDollarSignIcon
     },
     {
@@ -47,7 +47,10 @@ const Dashboard = () => {
       const { data } = await axios.get('/api/admin/dashboard', {
         headers: { Authorization: `Bearer ${await getToken()}` }})
       if (data.success) {
-        setDashboardData(data.dashboardData)
+        setDashboardData({
+          ...data.dashboardData,
+          totalUser: data.dashboardData.totalUser ?? data.dashboardData.tototalUser ?? 0,
+        })
         setLoading(false)
 
       } else {
@@ -55,15 +58,17 @@ const Dashboard = () => {
         setLoading(false)
       }
     } catch (error) {
-      toast.error("Error Fetching Dashboard Data: ", error);
+      toast.error(error.response?.data?.message || error.message || "Error Fetching Dashboard Data");
       setLoading(false)
     }
   };
 
   useEffect(() => {
     if (user) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       fetchDashBoardData();
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
 
   return !loading ? (

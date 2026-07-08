@@ -21,13 +21,16 @@ const ListBookings = () => {
       setIsLoading(false);
     } catch (error) {
       toast.error(error.message);
+      setIsLoading(false);
     }
   };
 
   useEffect(() => {
     if(user){
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       getAllBookings();
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   },[user]);
 
   return !isLoading ? (

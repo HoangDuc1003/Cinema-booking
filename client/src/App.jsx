@@ -24,6 +24,7 @@ const DashBoard = lazy(() => import('./pages/admin/DashBoard'));
 const AddShows = lazy(() => import('./pages/admin/AddShows'));
 const ListShows = lazy(() => import('./pages/admin/ListShows'));
 const ListBookings = lazy(() => import('./pages/admin/ListBookings'));
+const HeroSettings = lazy(() => import('./pages/admin/HeroSettings'));
 
 // Suspense fallback — lightweight skeleton instead of text
 const PageFallback = () => (
@@ -105,11 +106,12 @@ const App = () => {
               </ErrorBoundary>
             ) : (
               <div className='min-h-screen flex justify-center items-center'>
-                <SignIn fallbackRedirecUrl={'/admin'}/>
+                <SignIn fallbackRedirectUrl={'/admin'}/>
               </div>
             )}>
               <Route index element={<DashBoard />} />
               <Route path="add-shows" element={<AddShows />} />
+              <Route path="hero" element={<HeroSettings />} />
               <Route path="list-shows" element={<ListShows />} />
               <Route path="add-bookings" element={<AddShows />} />
               <Route path="list-bookings" element={<ListBookings />} />

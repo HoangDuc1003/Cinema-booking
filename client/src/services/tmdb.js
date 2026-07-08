@@ -1,6 +1,8 @@
 // Service: TMDB API helpers
 const API_BASE = (import.meta.env.VITE_BASE_URL || '').replace(/\/$/, '');
 const IMAGE_BASE = 'https://image.tmdb.org/t/p';
+const HERO_CACHE_KEY = 'home_hero_v2';
+const HERO_CACHE_TTL = 1000 * 60 * 2;
 
 const fetchBackendJson = async (path, options = {}) => {
     const response = await fetch(`${API_BASE}/api/show/tmdb${path}`, options);
@@ -9,6 +11,37 @@ const fetchBackendJson = async (path, options = {}) => {
         throw new Error(payload?.message || `Movie source request failed (${response.status})`);
     }
     return payload.data;
+};
+
+export const fetchHomeHero = async ({ signal } = {}) => {
+    try {
+        const cached = sessionStorage.getItem(HERO_CACHE_KEY);
+        if (cached) {
+            const parsed = JSON.parse(cached);
+            if (Date.now() - parsed.t < HERO_CACHE_TTL) return parsed.data;
+        }
+    } catch {
+        //
+    }
+
+    const response = await fetch(`${API_BASE}/api/show/hero`, { signal });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.success) {
+        throw new Error(payload?.message || `Hero request failed (${response.status})`);
+    }
+
+    const data = {
+        settings: payload.settings || {},
+        movies: Array.isArray(payload.movies) ? payload.movies : [],
+    };
+
+    try {
+        sessionStorage.setItem(HERO_CACHE_KEY, JSON.stringify({ t: Date.now(), data }));
+    } catch {
+        //
+    }
+
+    return data;
 };
 
 // Cache settings

@@ -15,9 +15,9 @@ const Layout = () => {
   return isAdmin?(
     <>
         <AdminNavbar/> 
-        <div className='flex'>
+        <div className='flex min-h-[calc(100vh-64px)]'>
             <AdminSideBar/>
-            <div className='flex-1 px-4 py-10 md:px-10 h-[calc(100vh-64px)] overflow-y-auto'>
+            <div className='flex-1 min-w-0 px-4 py-8 md:px-10 h-[calc(100vh-64px)] overflow-y-auto'>
                 <Outlet/>
             </div>
         </div>
