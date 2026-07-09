@@ -158,7 +158,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers' }) => {
       .ts-player-wrap {
         position: relative;
         width: 100%;
-        max-width: 1248px;
+        max-width: min(96vw, 1500px);
         margin: 0 auto;
       }
 
@@ -260,7 +260,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers' }) => {
 
       /* ─── Info Bar ─── */
       .ts-info {
-        max-width: 1248px;
+        max-width: min(96vw, 1500px);
         margin: 20px auto 0;
         padding: 0 0.5rem;
       }
@@ -342,7 +342,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers' }) => {
       /* ─── Sliding Carousel ─── */
       .ts-carousel-wrap {
         position: relative;
-        max-width: 1248px;
+        max-width: min(96vw, 1500px);
         margin: 28px auto 0;
       }
 
@@ -367,7 +367,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers' }) => {
       }
 
       .ts-card {
-        flex: 0 0 calc(20% - 9.6px); /* 5 cards on desktop */
+        flex: 0 0 clamp(250px, 26%, 360px);
         min-width: 0;
         cursor: pointer;
         border-radius: 14px;
@@ -506,7 +506,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers' }) => {
 
       /* ─── Scroll hint ─── */
       .ts-scroll-hint {
-        max-width: 1248px;
+        max-width: min(96vw, 1500px);
         margin: 8px auto 0;
         text-align: center;
         font-size: 0.72rem;
@@ -522,7 +522,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers' }) => {
         .ts-mute-btn { width: 34px; height: 34px; bottom: 10px; right: 10px; }
         .ts-nav-btn { width: 36px; height: 36px; }
         .ts-carousel-track { gap: 8px; }
-        .ts-card { flex: 0 0 calc(33.333% - 5.33px); } /* 3 cards on tablet */
+        .ts-card { flex: 0 0 min(58%, 360px); }
       }
 
       @media (max-width: 480px) {
@@ -530,7 +530,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers' }) => {
         .ts-card-title { font-size: 0.72rem; }
         .ts-card-sub { font-size: 0.62rem; }
         .ts-carousel-track { gap: 6px; }
-        .ts-card { flex: 0 0 calc(50% - 3px); } /* 2 cards on mobile */
+        .ts-card { flex: 0 0 82%; }
       }
     `;
     document.head.appendChild(s);
@@ -601,14 +601,14 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers' }) => {
 
   return (
     
-    <section id={sectionId} className="scroll-mt-20 px-6 md:px-16 lg:px-24 py-16 md:py-20 relative overflow-hidden min-h-screen md:min-h-[80vh]">
+    <section id={sectionId} className="scroll-mt-20 px-4 sm:px-6 lg:px-8 xl:px-10 py-16 md:py-20 relative overflow-hidden min-h-screen md:min-h-[80vh]">
       <BlurCircle top='80px' right='-60px' delay="0.5s" />
       <BlurCircle top='600px' left='-65px' delay="1s" />
       <BlurCircle top='800px' right='-100px' delay="1.5s" />
       <BlurCircle top='0px' left='0' delay="2s" />
 
       {/* Section Header */}
-      <div className="flex items-end justify-between max-w-[1248px] mx-auto mb-8 relative z-10">
+      <div className="flex items-end justify-between max-w-[min(96vw,1500px)] mx-auto mb-8 relative z-10">
         <div>
           <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-white tracking-wide">Trailers</h2>
           

@@ -1,27 +1,52 @@
 import React, { useMemo } from 'react';
 import MovieCard from './MovieCard';
+import useIntersectionObserver from '../hooks/useIntersectionObserver';
 
 /**
  * @param {Array} movies 
  * @param {string} columns 
+ * @param {boolean} animated
+ * @param {number} staggerDelay
  */
 const MovieGrid = ({
   movies = [],
   columns = 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4',
+  animated = true,
+  staggerDelay = 35,
 }) => {
+  const { ref, isVisible } = useIntersectionObserver({
+    threshold: 0.08,
+    rootMargin: '0px 0px -80px 0px',
+    triggerOnce: true,
+  });
+
   const movieItems = useMemo(() => {
     if (!movies || movies.length === 0) return null;
 
     return movies.map((movie, index) => {
       const key = movie._id || movie.id || index;
-      return <MovieCard key={key} movie={movie} />;
+      const delay = Math.min(index * staggerDelay, 140);
+      const itemStyle = animated
+        ? {
+            opacity: isVisible ? 1 : 0,
+            transform: isVisible ? 'translate3d(0, 0, 0)' : 'translate3d(0, 18px, 0)',
+            transition: `opacity 420ms ease ${delay}ms, transform 520ms cubic-bezier(0.16, 1, 0.3, 1) ${delay}ms`,
+            willChange: isVisible ? 'auto' : 'opacity, transform',
+          }
+        : undefined;
+
+      return (
+        <div key={key} style={itemStyle}>
+          <MovieCard movie={movie} />
+        </div>
+      );
     });
-  }, [movies]);
+  }, [movies, animated, staggerDelay, isVisible]);
 
   if (!movieItems) return null;
 
   return (
-    <div className={`grid ${columns} gap-4 sm:gap-6 w-full`}>
+    <div ref={ref} className={`grid ${columns} gap-4 sm:gap-6 w-full`}>
       {movieItems}
     </div>
   );
