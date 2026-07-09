@@ -370,7 +370,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers' }) => {
       }
 
       .ts-card {
-        flex: 0 0 clamp(250px, 26%, 360px);
+        flex: 0 0 clamp(200px, 20.8%, 288px);
         min-width: 0;
         cursor: pointer;
         border-radius: 14px;
@@ -525,7 +525,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers' }) => {
         .ts-mute-btn { width: 34px; height: 34px; bottom: 10px; right: 10px; }
         .ts-nav-btn { width: 36px; height: 36px; }
         .ts-carousel-track { gap: 8px; }
-        .ts-card { flex: 0 0 min(58%, 360px); }
+        .ts-card { flex: 0 0 min(46.4%, 288px); }
       }
 
       @media (max-width: 480px) {
@@ -533,7 +533,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers' }) => {
         .ts-card-title { font-size: 0.72rem; }
         .ts-card-sub { font-size: 0.62rem; }
         .ts-carousel-track { gap: 6px; }
-        .ts-card { flex: 0 0 82%; }
+        .ts-card { flex: 0 0 65.6%; }
       }
     `;
     document.head.appendChild(s);
