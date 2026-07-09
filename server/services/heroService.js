@@ -7,6 +7,8 @@ import { redisKeys, redisTtl } from './redisKeys.js';
 
 const HERO_CONFIG_KEY = 'homeHero';
 const HERO_LIMIT = 5;
+const TMDB_DAILY_PAGE_WINDOW = 20;
+const VIETNAM_TIME_OFFSET_MS = 7 * 60 * 60 * 1000;
 const MOVIE_SELECT = '_id title overview poster_path backdrop_path release_date vote_average runtime genres updatedAt';
 
 const createHttpError = (status, message) => {
@@ -33,6 +35,18 @@ const normalizeGenres = (genres) => {
     return genres.slice(0, 3).map((genre) => (
         typeof genre === 'string' ? { id: genre, name: genre } : genre
     )).filter((genre) => genre?.name);
+};
+
+const getVietnamDayNumber = (date = new Date()) => (
+    Math.floor((date.getTime() + VIETNAM_TIME_OFFSET_MS) / 86400000)
+);
+
+const getDailyTmdbPage = () => (getVietnamDayNumber() % TMDB_DAILY_PAGE_WINDOW) + 1;
+
+const rotateByDailySeed = (items = []) => {
+    if (!items.length) return items;
+    const offset = getVietnamDayNumber() % items.length;
+    return [...items.slice(offset), ...items.slice(0, offset)];
 };
 
 export const normalizeHeroMovie = (movie) => {
@@ -83,12 +97,12 @@ const loadMoviesByIds = async (movieIds) => {
     return ids.map((id) => normalizeHeroMovie(byId.get(id))).filter(Boolean);
 };
 
-const fetchTmdbPopularMovies = async () => {
+const fetchTmdbPopularMovies = async (page = getDailyTmdbPage()) => {
     if (!process.env.TMDB_API_KEY) return [];
     try {
         const { data } = await axios.get('https://api.themoviedb.org/3/movie/popular', {
             headers: { Authorization: `Bearer ${process.env.TMDB_API_KEY}` },
-            params: { language: 'en-US', page: 1 },
+            params: { language: 'en-US', page },
             timeout: Number(process.env.TMDB_TIMEOUT_MS) || 3000,
         });
         return (data.results || []).map(normalizeHeroMovie).filter(Boolean);
@@ -101,31 +115,33 @@ const fetchTmdbPopularMovies = async () => {
 const loadAutoHeroMovies = async () => {
     const movies = new Map();
 
-    const activeShows = await Show.find({ showDateTime: { $gte: new Date() } })
-        .populate({ path: 'movie', select: MOVIE_SELECT })
-        .sort({ showDateTime: 1 })
-        .limit(24)
-        .lean();
+    const [tmdbMovies, activeShows, recentMovies] = await Promise.all([
+        fetchTmdbPopularMovies(),
+        Show.find({ showDateTime: { $gte: new Date() } })
+            .populate({ path: 'movie', select: MOVIE_SELECT })
+            .sort({ showDateTime: 1 })
+            .limit(24)
+            .lean(),
+        Movie.find({})
+            .select(MOVIE_SELECT)
+            .sort({ updatedAt: -1 })
+            .limit(24)
+            .lean(),
+    ]);
 
-    for (const show of activeShows) {
+    for (const movie of tmdbMovies) {
+        addUniqueMovie(movies, movie);
+        if (movies.size >= HERO_LIMIT) return [...movies.values()];
+    }
+
+    for (const show of rotateByDailySeed(activeShows)) {
         addUniqueMovie(movies, show.movie);
         if (movies.size >= HERO_LIMIT) return [...movies.values()];
     }
 
-    const recentMovies = await Movie.find({ _id: { $nin: [...movies.keys()] } })
-        .select(MOVIE_SELECT)
-        .sort({ updatedAt: -1 })
-        .limit(HERO_LIMIT - movies.size)
-        .lean();
-
-    for (const movie of recentMovies) addUniqueMovie(movies, movie);
-
-    if (movies.size < HERO_LIMIT) {
-        const tmdbMovies = await fetchTmdbPopularMovies();
-        for (const movie of tmdbMovies) {
-            addUniqueMovie(movies, movie);
-            if (movies.size >= HERO_LIMIT) break;
-        }
+    for (const movie of rotateByDailySeed(recentMovies)) {
+        addUniqueMovie(movies, movie);
+        if (movies.size >= HERO_LIMIT) break;
     }
 
     return [...movies.values()].slice(0, HERO_LIMIT);
@@ -148,6 +164,7 @@ const buildHomeHeroPayload = async () => {
             mode: config.mode,
             effectiveMode,
             movieIds: config.movieIds,
+            dailyPage: getDailyTmdbPage(),
             updatedAt: config.updatedAt,
         },
         movies,
