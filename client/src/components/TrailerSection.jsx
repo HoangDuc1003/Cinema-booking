@@ -158,7 +158,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers' }) => {
       .ts-player-wrap {
         position: relative;
         width: 100%;
-        max-width: min(96vw, 1500px);
+        max-width: 1248px;
         margin: 0 auto;
       }
 
@@ -260,7 +260,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers' }) => {
 
       /* ─── Info Bar ─── */
       .ts-info {
-        max-width: min(96vw, 1500px);
+        max-width: 1248px;
         margin: 20px auto 0;
         padding: 0 0.5rem;
       }
@@ -342,8 +342,11 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers' }) => {
       /* ─── Sliding Carousel ─── */
       .ts-carousel-wrap {
         position: relative;
+        width: min(96vw, 1500px);
         max-width: min(96vw, 1500px);
         margin: 28px auto 0;
+        left: 50%;
+        transform: translateX(-50%);
       }
 
       .ts-carousel-inner {
@@ -601,14 +604,14 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers' }) => {
 
   return (
     
-    <section id={sectionId} className="scroll-mt-20 px-4 sm:px-6 lg:px-8 xl:px-10 py-16 md:py-20 relative overflow-hidden min-h-screen md:min-h-[80vh]">
+    <section id={sectionId} className="scroll-mt-20 px-6 md:px-16 lg:px-24 py-16 md:py-20 relative overflow-hidden min-h-screen md:min-h-[80vh]">
       <BlurCircle top='80px' right='-60px' delay="0.5s" />
       <BlurCircle top='600px' left='-65px' delay="1s" />
       <BlurCircle top='800px' right='-100px' delay="1.5s" />
       <BlurCircle top='0px' left='0' delay="2s" />
 
       {/* Section Header */}
-      <div className="flex items-end justify-between max-w-[min(96vw,1500px)] mx-auto mb-8 relative z-10">
+      <div className="flex items-end justify-between max-w-[1248px] mx-auto mb-8 relative z-10">
         <div>
           <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-white tracking-wide">Trailers</h2>
           
