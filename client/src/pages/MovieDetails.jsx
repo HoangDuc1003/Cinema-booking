@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState, useCallback, useMemo } from 'react'
+import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { fetchMovieDetails, fetchPopularMovies } from '../services/tmdb';
 import BlurCircle from '../components/BlurCircle'
@@ -221,18 +221,22 @@ const MovieDetails = () => {
         <TrailerSection sectionId="movie-trailers" featuredMovie={show} movieOnly />
       )}
 
-      <p className='relative text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-2 mt-20'>You May Also Like</p>
-      <div className='relative overflow-hidden mb-10' />
+      <div className="max-w-6xl mx-auto w-full">
+        <p className='relative text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-2 mt-20'>You May Also Like</p>
+        <div className='relative overflow-hidden mb-10' />
+      </div>
 
       <BlurCircle top='150px' left='0' />
       <BlurCircle bottom='50px' right='50px' />
 
-      <MovieGrid
-        movies={movies}
-        columns="sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-        animated={true}
-        staggerDelay={100}
-      />
+      <div className="max-w-6xl mx-auto w-full">
+        <MovieGrid
+          movies={movies}
+          columns="sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+          animated={true}
+          staggerDelay={100}
+        />
+      </div>
 
       <div className='flex justify-center mt-10'>
         <button

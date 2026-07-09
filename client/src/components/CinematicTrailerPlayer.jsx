@@ -190,7 +190,7 @@ const CinematicTrailerPlayer = ({
 
   return (
     <div className={`cinematic-player-wrapper ${className}`}>
-      <div className="w-full md:w-[88%] lg:w-[75%] max-w-[936px] mx-auto">
+      <div className="w-full md:w-[95%] lg:w-[85%] max-w-[1040px] mx-auto">
         <div className="cinematic-player-viewport">
           <div className="cinematic-top-mask" />
           <div className="cinematic-bottom-mask" />
