@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CalendarIcon, ClockIcon, Star, Play, Ticket, ImageIcon, Video } from 'lucide-react';
 import { fetchHomeHero, fetchMovieTrailers } from '../services/tmdb';
 import Loading from './Loading';
 import { dummyShowsData } from '../assets/assets';
+import useYouTubePlayer from '../hooks/useYouTubePlayer';
 
 const getImageUrl = (path, size = 'original') => {
   if (!path) return '';
@@ -28,10 +29,6 @@ const keepLastWordsTogether = (text = '', tailWords = 2) => {
   return head + ' ' + tail;
 };
 
-/**
- * Returns true if the image at `url` loads successfully, false otherwise.
- * Never rejects; always resolves. Cleans up event listeners on abort.
- */
 const canLoadImage = (url, signal) =>
   new Promise((resolve) => {
     if (!url) { resolve(false); return; }
@@ -51,10 +48,6 @@ const canLoadImage = (url, signal) =>
     img.src = url;
   });
 
-/**
- * For each movie, try candidate image URLs in priority order,
- * assign movie.heroImageUrl to the first valid one, drop movies with none.
- */
 const validateMovieCandidates = async (movies, signal) => {
   const results = [];
   for (const movie of movies) {
@@ -65,7 +58,6 @@ const validateMovieCandidates = async (movies, signal) => {
       movie.backdrop_path,
       movie.poster_path,
     ];
-    // Deduplicate while preserving order
     const seen = new Set();
     const unique = [];
     for (const c of candidates) {
@@ -89,33 +81,44 @@ const validateMovieCandidates = async (movies, signal) => {
   return results;
 };
 
-// CSS animations
+const extractVideoId = (url) => {
+  if (!url) return null;
+  try {
+    const urlObj = new URL(url);
+    if (urlObj.hostname.includes('youtube.com')) {
+      return urlObj.searchParams.get('v') || urlObj.pathname.split('/').pop();
+    }
+    if (urlObj.hostname.includes('youtu.be')) {
+      return urlObj.pathname.substring(1);
+    }
+    return url;
+  } catch {
+    return url;
+  }
+};
+
+const getHighlightStart = (duration) => {
+  if (!duration || duration <= 35) return 0;
+  if (duration <= 70) return 8;
+  return Math.min(Math.max(Math.round(duration * 0.22), 12), duration - 25);
+};
+
 const STYLES = `
-  /* Hardware-accelerated text fade up */
   @keyframes fadeSlideUp {
     0%   { transform: translateY(20px); opacity: 0; }
     100% { transform: translateY(0);    opacity: 1; }
   }
-
-  /* Subtle background breathing */
   @keyframes cinematicBreathe {
     0%, 100% { opacity: 0.05; }
     50%      { opacity: 0.2; } 
   }
-  
   @keyframes panRight {
-  0% { 
-    transform: scale(1.1) translateX(-2%); 
+    0% { transform: scale(1.1) translateX(-2%); }
+    100% { transform: scale(1.1) translateX(2%); }
   }
-  100% { 
-    transform: scale(1.1) translateX(2%); 
+  .animate-pan-right {
+    animation: panRight 10s linear forwards; 
   }
-}
-
-.animate-pan-right {
-  animation: panRight 10s linear forwards; 
-}
-
   @keyframes verticalWhiteFlare {
     0%   { opacity: 0; transform: translateX(50%) scaleX(0.1) scaleY(1); }
     30%  { opacity: 1; transform: translateX(50%) scaleX(3.5) scaleY(1.1); } 
@@ -123,14 +126,10 @@ const STYLES = `
     75%  { opacity: 0.9; transform: translateX(50%) scaleX(2.5) scaleY(1.05); } 
     100% { opacity: 0; transform: translateX(50%) scaleX(0.1) scaleY(1); } 
   }
-
-  /* Soft dark dip for background transition */
   @keyframes darkDipTransition {
     0%, 100% { opacity: 0; }
     40%, 60% { opacity: 0.5; }
   }
-
-  /* Per-character text fly-ins */
   @keyframes charFromLeft {
     0% { transform: translateX(-50px) translateY(5px) rotate(-4deg); opacity: 0; }
     100% { transform: translateX(0) translateY(0) rotate(0); opacity: 1; }
@@ -140,23 +139,19 @@ const STYLES = `
     100% { transform: translateX(0) translateY(0) rotate(0); opacity: 1; }
   }
 
-  /* Animation Classes */
   .hero-fade-up { animation: fadeSlideUp 0.6s cubic-bezier(0.22,1,0.36,1) forwards; opacity: 0; }
   .d1 { animation-delay: 50ms;   }
   .d2 { animation-delay: 150ms; }
   .d3 { animation-delay: 250ms; }
   .d4 { animation-delay: 350ms; }
   
-  /* Text shadow for readability */
   .cinematic-shadow {
     text-shadow: 0px 2px 10px rgba(0,0,0,0.8), 0px 4px 20px rgba(0,0,0,0.5);
   }
 
-  /* Hide scrollbars */
   .thumb-bar::-webkit-scrollbar { display: none; }
   .thumb-bar { scrollbar-width: none; }
 
-  /* Mobile Adjustments */
   @media (max-width: 640px) {
     .hero-title { font-size: clamp(24px, 6.5vw, 32px) !important; }
     .hero-overview { display: none !important; }
@@ -166,13 +161,11 @@ const STYLES = `
     .thumb-bar img { height: 44px !important; }
   }
 
-  /* Additional hero optimizations */
   .hero-section-container {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     -webkit-text-size-adjust: 100%;
   }
-    
 
   .hero-backdrop {
     will-change: transform, opacity;
@@ -185,14 +178,11 @@ const STYLES = `
 
   .hero-video-frame {
     position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 100%;
-    height: 100%;
-    border: 0;
-    pointer-events: none;
-    transform: translate(-50%, -50%) scale(1.18);
-    overflow: hidden;
+    top: 50%; left: 50%;
+    width: max(100vw, 177.78vh);
+    height: max(56.25vw, 100vh);
+    transform: translate(-50%, -50%) scale(1.22);
+    border: 0; pointer-events: none;
   }
 
   .hero-title-word { filter: drop-shadow(0 6px 12px rgba(0,0,0,0.6)); }
@@ -205,6 +195,66 @@ const STYLES = `
   }
 `;
 
+const HeroVideoPlayer = ({ 
+  trailer, 
+  onNext, 
+  onError, 
+  remainingPreviewMsRef,
+  playbackStartedAtRef,
+  previewTimerRef,
+  highlightAppliedRef
+}) => {
+  const handleReady = (player) => {
+    player.mute();
+  };
+
+  const handleStateChange = (event) => {
+    if (!window.YT) return;
+    if (event.data === window.YT.PlayerState.PLAYING) {
+      if (!highlightAppliedRef.current) {
+        highlightAppliedRef.current = true;
+        const duration = event.target.getDuration();
+        const startSec = getHighlightStart(duration);
+        event.target.seekTo(startSec, true);
+      }
+      
+      playbackStartedAtRef.current = Date.now();
+      previewTimerRef.current = setTimeout(() => {
+        onNext();
+      }, remainingPreviewMsRef.current);
+
+    } else if (
+      event.data === window.YT.PlayerState.PAUSED || 
+      event.data === window.YT.PlayerState.BUFFERING
+    ) {
+      if (playbackStartedAtRef.current) {
+        const elapsed = Date.now() - playbackStartedAtRef.current;
+        remainingPreviewMsRef.current -= elapsed;
+        clearTimeout(previewTimerRef.current);
+        playbackStartedAtRef.current = null;
+      }
+    }
+  };
+
+  const { containerRef } = useYouTubePlayer({
+    videoId: extractVideoId(trailer.videoUrl || trailer.embedUrl),
+    onReady: handleReady,
+    onStateChange: handleStateChange,
+    onEnded: onNext,
+    onError: onError,
+    playerVars: {
+      mute: 1,
+      controls: 0,
+      modestbranding: 1,
+      rel: 0,
+      disablekb: 1,
+      fs: 0
+    }
+  });
+
+  return <div className="hero-video-frame" ref={containerRef} />;
+};
+
 const HeroSection = ({ onWatchTrailer }) => {
   const navigate = useNavigate();
   const styleRef = useRef(false);
@@ -216,16 +266,32 @@ const HeroSection = ({ onWatchTrailer }) => {
   const [heroTrailers, setHeroTrailers] = useState({});
   const [trailerLoadingId, setTrailerLoadingId] = useState(null);
   
-  // Animation states
+  const trailerRequestRef = useRef(null);
+
   const [isFading, setIsFading] = useState(false);
   const [hideText, setHideText] = useState(false);
   const [flyKey, setFlyKey] = useState(0);
 
+  const remainingPreviewMsRef = useRef(20000);
+  const playbackStartedAtRef = useRef(null);
+  const previewTimerRef = useRef(null);
+  const highlightAppliedRef = useRef(false);
 
-  const switchTo = (getNextIndex) => {
-    if (isFading) return;
+  const switchHeroMovie = useCallback((getNextIndex, { animate = true } = {}) => {
+    if (isFading && animate) return;
+    
+    clearTimeout(previewTimerRef.current);
+    remainingPreviewMsRef.current = 20000;
+    playbackStartedAtRef.current = null;
+    highlightAppliedRef.current = false;
+
+    if (!animate) {
+      setCurrentIndex((prev) => typeof getNextIndex === 'function' ? getNextIndex(prev) : getNextIndex);
+      setFlyKey((k) => k + 1);
+      return;
+    }
+
     setIsFading(true);
-
     setHideText(true);
     setTimeout(() => {
       setCurrentIndex((prev) => typeof getNextIndex === 'function' ? getNextIndex(prev) : getNextIndex);
@@ -235,8 +301,7 @@ const HeroSection = ({ onWatchTrailer }) => {
       setFlyKey((k) => k + 1);
     }, 650);
     setTimeout(() => setIsFading(false), 1200);
-  };
-
+  }, [isFading]);
 
   useEffect(() => {
     if (styleRef.current) return;
@@ -248,7 +313,6 @@ const HeroSection = ({ onWatchTrailer }) => {
 
   useEffect(() => {
     const controller = new AbortController();
-
     const load = async () => {
       try {
         const data = await fetchHomeHero({ signal: controller.signal });
@@ -269,26 +333,36 @@ const HeroSection = ({ onWatchTrailer }) => {
     return () => controller.abort();
   }, []);
 
-  // Auto-slide
   useEffect(() => {
-    if (!movies.length) return;
-    const id = setInterval(() => switchTo((prev) => (prev + 1) % movies.length), 6000);
+    if (!movies.length || mediaMode === 'trailer') return;
+    const id = setInterval(() => switchHeroMovie((prev) => (prev + 1) % movies.length, { animate: true }), 6000);
     return () => clearInterval(id);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [movies, isFading]);
+  }, [movies, mediaMode, switchHeroMovie]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        if (playbackStartedAtRef.current) {
+          const elapsed = Date.now() - playbackStartedAtRef.current;
+          remainingPreviewMsRef.current -= elapsed;
+          clearTimeout(previewTimerRef.current);
+          playbackStartedAtRef.current = null;
+        }
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, []);
 
   const handleThumbClick = (index) => {
     if (index === currentIndex || isFading) return;
-    switchTo(index);
+    switchHeroMovie(index, { animate: true });
   };
-
 
   if (isLoading || !movies.length) {
     return (
       <div className="h-screen w-full bg-[#0a0a0a] flex items-center justify-center text-white text-sm tracking-widest uppercase">
-        <div className="animate-pulse">
-          <Loading/>
-          </div>
+        <div className="animate-pulse"><Loading/></div>
       </div>
     );
   }
@@ -325,39 +399,48 @@ const HeroSection = ({ onWatchTrailer }) => {
     }
 
     setMediaMode('trailer');
-    if (heroTrailers[movieKey]) return;
+    if (heroTrailers[movieKey] !== undefined && heroTrailers[movieKey].length > 0) return;
 
+    if (trailerRequestRef.current) {
+      trailerRequestRef.current.abort();
+    }
+    const controller = new AbortController();
+    trailerRequestRef.current = controller;
     setTrailerLoadingId(movieKey);
+
     try {
-      const trailers = await fetchMovieTrailers(movie);
-      setHeroTrailers((current) => ({ ...current, [movieKey]: trailers }));
-      if (!trailers.length) setMediaMode('poster');
-    } catch {
-      setMediaMode('poster');
+      const trailers = await fetchMovieTrailers(movie, { signal: controller.signal });
+      if (controller.signal.aborted) return;
+      
+      setHeroTrailers((current) => ({ ...current, [movieKey]: trailers || [] }));
+      if (!trailers || !trailers.length) {
+        setMediaMode('poster');
+      }
+    } catch (e) {
+      if (e.name !== 'AbortError') setMediaMode('poster');
     } finally {
-      setTrailerLoadingId(null);
+      if (!controller.signal.aborted) setTrailerLoadingId(null);
     }
   };
 
-  // Derived animation flag: only run poster-transition effects when fading AND not in video mode
-  const shouldRunPosterTransition = isFading && !showVideo;
+  const shouldRunPosterTransition = isFading && mediaMode === 'poster';
 
   return (
     <div className="hero-section-container relative flex flex-col justify-center h-screen w-full overflow-hidden bg-[#0a0a0a] text-white">
-      
-
       <div className="absolute inset-0 z-0">
         {showVideo ? (
-          <div className="absolute inset-0 overflow-hidden">
-            <iframe
-              key={`hero-video-${movieKey}-${activeTrailer.id}`}
-              src={`${activeTrailer.videoUrl}?autoplay=1&mute=1&controls=0&loop=1&playlist=${activeTrailer.videoUrl.split('/').pop()}&rel=0&modestbranding=1&playsinline=1`}
-              title={`${movie.title} trailer`}
-              className="hero-video-frame"
-              allow="autoplay; encrypted-media; picture-in-picture"
-              allowFullScreen
-            />
-          </div>
+          <HeroVideoPlayer 
+            trailer={activeTrailer}
+            onNext={() => switchHeroMovie((currentIndex + 1) % movies.length, { animate: false })}
+            onError={() => {
+              setMediaMode('poster');
+              switchHeroMovie((currentIndex + 1) % movies.length, { animate: true });
+            }}
+            remainingPreviewMsRef={remainingPreviewMsRef}
+            playbackStartedAtRef={playbackStartedAtRef}
+            previewTimerRef={previewTimerRef}
+            highlightAppliedRef={highlightAppliedRef}
+          />
         ) : (
           <img
             key={`bg-${currentIndex}`}
@@ -371,15 +454,12 @@ const HeroSection = ({ onWatchTrailer }) => {
             style={{ opacity: 1 }} 
           />
         )}
-        {/* Soft Breathing Dark Layer */}
         <div className="absolute inset-0 bg-black pointer-events-none will-change-opacity" 
              style={{
                animation: showVideo ? 'none' : 'cinematicBreathe 7s ease-in-out infinite',
                opacity: showVideo ? 0.05 : undefined,
                zIndex: 1,
              }} />
-             
-        {/* Left dark gradient */}
         <div className="absolute inset-0 pointer-events-none"
              style={{
                background: showVideo
@@ -387,16 +467,11 @@ const HeroSection = ({ onWatchTrailer }) => {
                  : 'linear-gradient(90deg, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0.3) 25%, transparent 60%)',
                zIndex: 2,
              }} />
-
-        {/* Bottom Gradient (Only for Thumbnail visibility) */}
         <div className="absolute inset-0 pointer-events-none"
              style={{ background: 'linear-gradient(0deg, rgba(10,10,10,0.9) 0%, rgba(10,10,10,0.4) 15%, transparent 30%)', zIndex: 2 }} />
-             
-        {/* Vignette effect */}
         <div className="absolute inset-0 pointer-events-none"
              style={{ background: 'radial-gradient(circle at center, transparent 30%, rgba(0,0,0,0.3) 100%)', mixBlendMode: 'overlay', zIndex: 3 }} />
       </div>
-
 
       <div
         key={`flare-${isFading}`}
@@ -413,7 +488,6 @@ const HeroSection = ({ onWatchTrailer }) => {
         }}
       />
       
-      {/* Background Dip Transition */}
       <div
         key={`dark-${isFading}`}
         className="absolute inset-0 bg-black pointer-events-none will-change-opacity"
@@ -423,7 +497,6 @@ const HeroSection = ({ onWatchTrailer }) => {
           opacity: 0 
         }}
       />
-
 
       <div
         className="relative z-10 px-6 sm:px-8 md:px-14 lg:px-20 mb-8 sm:mb-12 max-md:mt-auto max-md:mb-20 transition-opacity duration-300 ease-out"
@@ -437,17 +510,16 @@ const HeroSection = ({ onWatchTrailer }) => {
         {!hideText && (
           <div key={`content-block-${flyKey}`}>
             {movie.genres?.length > 0 && (
-              <div className=" d1 flex flex-wrap gap-1.5 sm:gap-2 mb-2 sm:mb-4">
+              <div className="d1 flex flex-wrap gap-1.5 sm:gap-2 mb-2 sm:mb-4">
                 {movie.genres.slice(0, 3).map((g) => (
-                  <span key={g.id} className="px-2 sm:px-3 py-0.5 sm:py-1 rounded-full text-[9px] sm:text-[10px] font-bold uppercase tracking-widest  "
+                  <span key={g.id} className="px-2 sm:px-3 py-0.5 sm:py-1 rounded-full text-[9px] sm:text-[10px] font-bold uppercase tracking-widest"
                     style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff' }}>
                     {g.name}
                   </span>
                 ))}
               </div>
             )}
-
-            <h1 className="d1 hero-title font-black leading-[1.1] mb-3 sm:mb-5 text-white " 
+            <h1 className="d1 hero-title font-black leading-[1.1] mb-3 sm:mb-5 text-white" 
                 style={{ fontSize: 'clamp(28px, 4.5vw, 54px)', wordBreak: 'normal', overflowWrap: 'normal' }}>
               {titleWords.map((word, wIndex) => {
                 const animName = wIndex % 2 === 0 ? 'charFromLeft' : 'charFromRight';
@@ -459,32 +531,21 @@ const HeroSection = ({ onWatchTrailer }) => {
                 );
               })}
             </h1>
-
             <div className="hero-meta hero-fade-up d2 flex items-center flex-wrap gap-5 text-[15px] font-medium text-white mb-6 cinematic-shadow">
               <span className="flex items-center gap-1.5"><CalendarIcon className="w-4 h-4" />{year}</span>
               <span className="flex items-center gap-1.5"><ClockIcon className="w-4 h-4" />{runtimeStr || "1h30m"}</span>
               <span className="flex items-center gap-1.5"><Star className="w-4 h-4 text-yellow-400 fill-yellow-400" />{rating||"8.9"}</span>
             </div>
-
             <p className="hero-overview hero-fade-up text-gray-200 d3 text-sm sm:text-base leading-relaxed mb-4 sm:mb-8 line-clamp-3 sm:line-clamp-3 font-medium max-w-[400px]">
               {movie.overview}
             </p>
-
             <div className="hero-actions hero-fade-up d4 flex flex-nowrap items-center gap-2 sm:gap-3 md:gap-4">
-              <button onClick={() => { navigate(`/movies/${movie._id || movie.id}`), window.scrollTo({top: 0,behavior:'smooth'})}}  //smooth scrolling to top
-                className="group flex items-center gap-1.5 sm:gap-2 md:gap-3 px-4 py-2.5 sm:px-6 sm:py-3 md:px-10 md:py-5 bg-linear-to-r from-primary to-primary-dull
-                 hover:from-primary-dull hover:to-primary text-white font-semibold rounded-full shadow-lg shadow-primary/30 
-                 hover:shadow-xl hover:shadow-primary/60 hover:scale-105 active:scale-95 transition-all duration-300 border
-                  border-primary/30 hover:border-primary/60 relative overflow-hidden text-xs sm:text-sm md:text-base whitespace-nowrap">
+              <button onClick={() => { navigate(`/movies/${movie._id || movie.id}`); window.scrollTo({top: 0,behavior:'smooth'}); }}
+                className="group flex items-center gap-1.5 sm:gap-2 md:gap-3 px-4 py-2.5 sm:px-6 sm:py-3 md:px-10 md:py-5 bg-linear-to-r from-primary to-primary-dull hover:from-primary-dull hover:to-primary text-white font-semibold rounded-full shadow-lg shadow-primary/30 hover:shadow-xl hover:shadow-primary/60 hover:scale-105 active:scale-95 transition-all duration-300 border border-primary/30 hover:border-primary/60 relative overflow-hidden text-xs sm:text-sm md:text-base whitespace-nowrap">
                 <Ticket className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6" /> Book Now
               </button>
-              <button
-                type="button"
-                onClick={() => onWatchTrailer?.(movie)}
-                className="group flex items-center gap-1.5 sm:gap-2 md:gap-3 px-3.5 py-2 sm:px-5 sm:py-2.5 md:px-8 md:py-4 bg-white/15 hover:bg-white/25 text-white 
-              font-semibold rounded-full border border-white/40 hover:border-primary/40 backdrop-blur-sm hover:scale-105 
-              transition-all duration-300 relative overflow-hidden cursor-pointer text-xs sm:text-sm md:text-base whitespace-nowrap"
-              >
+              <button type="button" onClick={() => onWatchTrailer?.(movie)}
+                className="group flex items-center gap-1.5 sm:gap-2 md:gap-3 px-3.5 py-2 sm:px-5 sm:py-2.5 md:px-8 md:py-4 bg-white/15 hover:bg-white/25 text-white font-semibold rounded-full border border-white/40 hover:border-primary/40 backdrop-blur-sm hover:scale-105 transition-all duration-300 relative overflow-hidden cursor-pointer text-xs sm:text-sm md:text-base whitespace-nowrap">
                 <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Trailer
               </button>
             </div>
@@ -501,35 +562,23 @@ const HeroSection = ({ onWatchTrailer }) => {
             />
           ))}
         </div>
-
         <div className="thumb-bar flex items-end gap-3 overflow-x-auto py-2 pr-4 pl-2">
           {movies.map((m, i) => {
             const isActive = i === currentIndex;
             const thumbUrl = m.heroImageUrl || getImageUrl(m.backdrop_path || m.poster_path, 'w300');
-
             return (
-              <button
-                key={m.id}
-                onClick={() => handleThumbClick(i)}
+              <button key={m.id} onClick={() => handleThumbClick(i)}
                 className="shrink-0 rounded-xl overflow-hidden cursor-pointer relative group will-change-transform"
                 style={{
-                  width: isActive ? 140 : 100, 
-                  height: isActive ? 80 : 56, 
+                  width: isActive ? 140 : 100, height: isActive ? 80 : 56, 
                   transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
                   outline: isActive ? '2px solid rgba(246, 69, 101) ' : '2px solid transparent', 
                   outlineOffset: 2,
                   boxShadow: isActive ? '0 8px 24px rgba(229,9,20,0.36)' : '0 4px 12px rgba(0,0,0,0.6)',
-                }}
-              >
-                <img 
-                  src={thumbUrl} 
-                  alt={m.title} 
-                  loading="lazy" 
-                  decoding="async"
-                  className={`w-full h-full object-cover transition-all duration-500 ${isActive ? 'scale-110 brightness-100' : 'brightness-50 group-hover:brightness-120'}`} 
-                />
-                <div className="absolute inset-0 flex items-end opacity-100"
-                  style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.9) 0%, transparent 70%)' }}>
+                }}>
+                <img src={thumbUrl} alt={m.title} loading="lazy" decoding="async"
+                  className={`w-full h-full object-cover transition-all duration-500 ${isActive ? 'scale-110 brightness-100' : 'brightness-50 group-hover:brightness-120'}`} />
+                <div className="absolute inset-0 flex items-end opacity-100" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.9) 0%, transparent 70%)' }}>
                   <p className="text-white px-2 pb-1.5 leading-tight truncate w-full text-left" style={{ fontSize: 10, fontWeight: isActive ? 700 : 500 }}>
                     {m.title}
                   </p>
