@@ -26,7 +26,7 @@ const mergeTrailerLists = (...lists) => {
    CINEMA PLAYER — used in MovieDetail (movieOnly)
    Clean, full-width, no carousel
 ───────────────────────────────────────── */
-const CinemaPlayer = ({ trailers, movieTitle }) => {
+const CinemaPlayer = ({ trailers }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const styleRef = useRef(false);
@@ -69,141 +69,17 @@ const CinemaPlayer = ({ trailers, movieTitle }) => {
       /* ── CinemaPlayer wrap ── */
       .cp-wrap { position: relative; width: 100%; background: transparent; }
 
-      /* Flex row: player left, sidebar right — sidebar stretches to match player height */
-      .cp-layout {
-        display: flex;
-        gap: 12px;
-        align-items: stretch;
-      }
-      .cp-left {
-        flex: 1;
-        min-width: 0;
-        display: flex;
-        flex-direction: column;
-      }
-
-      /* Player keeps 16:9 and fills full height of left column */
+      /* Player keeps 16:9 */
       .cp-player {
         position: relative;
         width: 100%;
         padding-top: 56.25%;
         overflow: hidden;
         background: #000;
-        flex: 1;
       }
       .cp-player iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: none; }
       .cp-fade { position: absolute; inset: 0; background: #000; z-index: 10; pointer-events: none; opacity: 0; transition: opacity 0.3s ease; }
       .cp-fade.on { opacity: 1; }
-
-      /* Sidebar — exactly as tall as .cp-left (which = player height) */
-      .cp-sidebar {
-        width: 220px;
-        flex-shrink: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        overflow-y: auto;
-        overflow-x: hidden;
-        scrollbar-width: thin;
-        scrollbar-color: rgba(248,69,101,0.35) transparent;
-        /* height will be determined by flex-stretch from parent */
-      }
-      .cp-sidebar::-webkit-scrollbar { width: 4px; }
-      .cp-sidebar::-webkit-scrollbar-track { background: transparent; }
-      .cp-sidebar::-webkit-scrollbar-thumb { background: rgba(248,69,101,0.35); border-radius: 4px; }
-
-      /* Each sidebar card — style mirrors ts-card from Home TrailerSection */
-      .cp-card {
-        flex-shrink: 0;
-        cursor: pointer;
-        border-radius: 10px;
-        overflow: hidden;
-        background: rgba(15,17,28,0.9);
-        border: 1.5px solid rgba(255,255,255,0.06);
-        transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
-        position: relative;
-        text-align: left;
-        width: 100%;
-      }
-      .cp-card:hover {
-        border-color: rgba(248,69,101,0.5);
-        box-shadow: 0 8px 20px rgba(0,0,0,0.4), 0 0 0 1px rgba(248,69,101,0.12);
-        transform: translateX(-2px);
-      }
-      .cp-card.active {
-        border-color: rgba(248,69,101,0.8);
-        box-shadow: 0 0 16px rgba(248,69,101,0.2), 0 6px 18px rgba(0,0,0,0.5);
-      }
-      .cp-card.active::after {
-        content: '';
-        position: absolute;
-        left: 0; top: 10%; bottom: 10%;
-        width: 2px;
-        background: linear-gradient(180deg, transparent, #F84565, transparent);
-        border-radius: 2px;
-      }
-      .cp-card-thumb {
-        position: relative;
-        width: 100%;
-        aspect-ratio: 16/9;
-        overflow: hidden;
-        background: #0d0f1a;
-      }
-      .cp-card-thumb img {
-        width: 100%; height: 100%;
-        object-fit: cover;
-        display: block;
-        transition: transform 0.4s ease;
-      }
-      .cp-card:hover .cp-card-thumb img { transform: scale(1.06); }
-      .cp-card-overlay {
-        position: absolute;
-        inset: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: rgba(0,0,0,0.28);
-        opacity: 0;
-        transition: opacity 0.25s ease;
-      }
-      .cp-card:hover .cp-card-overlay { opacity: 1; }
-      .cp-card-play-icon {
-        width: 28px; height: 28px;
-        border-radius: 50%;
-        background: rgba(248,69,101,0.85);
-        display: flex; align-items: center; justify-content: center;
-        border: 2px solid rgba(255,255,255,0.3);
-      }
-      .cp-card-meta { padding: 6px 8px 7px; }
-      .cp-card-title {
-        color: #f3f4f6;
-        font-weight: 600;
-        font-size: 0.74rem;
-        line-height: 1.3;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        margin-bottom: 2px;
-      }
-      .cp-card-sub {
-        color: #6b7280;
-        font-size: 0.64rem;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-      }
-      .cp-card-num {
-        position: absolute;
-        top: 5px; left: 5px;
-        background: rgba(0,0,0,0.65);
-        backdrop-filter: blur(5px);
-        padding: 1px 6px;
-        border-radius: 5px;
-        font-size: 0.6rem;
-        font-weight: 700;
-        color: #d1d5db;
-        z-index: 5;
-      }
 
       /* Controls bar below player */
       .cp-controls {
@@ -232,35 +108,6 @@ const CinemaPlayer = ({ trailers, movieTitle }) => {
         padding: 0 6px;
       }
       .cp-count { font-size: 0.7rem; color: #6b7280; white-space: nowrap; }
-
-      /* Mobile: hide sidebar, show horizontal scroll below */
-      .cp-mobile-tabs {
-        display: flex;
-        gap: 8px;
-        padding-top: 10px;
-        overflow-x: auto;
-        scrollbar-width: none;
-      }
-      .cp-mobile-tabs::-webkit-scrollbar { display: none; }
-      .cp-mobile-card {
-        flex-shrink: 0;
-        width: 140px;
-        border-radius: 9px;
-        overflow: hidden;
-        background: rgba(15,17,28,0.9);
-        border: 1.5px solid rgba(255,255,255,0.06);
-        transition: all 0.25s ease;
-        cursor: pointer;
-        text-align: left;
-      }
-      .cp-mobile-card.active { border-color: rgba(248,69,101,0.8); }
-      .cp-mobile-card-thumb { width: 100%; aspect-ratio: 16/9; overflow: hidden; background: #0d0f1a; }
-      .cp-mobile-card-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-      .cp-mobile-card-title {
-        padding: 5px 7px;
-        font-size: 0.7rem; font-weight: 600; color: #e5e7eb;
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-      }
     `;
     document.head.appendChild(s);
   }, []);
@@ -270,81 +117,25 @@ const CinemaPlayer = ({ trailers, movieTitle }) => {
 
   return (
     <div className="cp-wrap">
-      {/* ── Desktop layout: player + sidebar (same height) ── */}
-      <div className="cp-layout">
-        {/* Left: player + controls */}
-        <div className="cp-left">
-          <div className="cp-player">
-            <div className={`cp-fade ${isTransitioning ? 'on' : ''}`} />
-            <iframe
-              key={`cp-${current.id || currentIndex}`}
-              src={buildEmbedUrl(current)}
-              title={current.videoName || current.title || 'Trailer'}
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
-              allowFullScreen
-            />
-          </div>
-
-          {hasMultiple && (
-            <div className="cp-controls">
-              <div className="cp-ctrl-group">
-                <button className="cp-btn" onClick={goPrev} aria-label="Previous"><ChevronLeft className="w-4 h-4" /></button>
-                <button className="cp-btn" onClick={goNext} aria-label="Next"><ChevronRight className="w-4 h-4" /></button>
-              </div>
-              <span className="cp-title-line">{current.videoName || 'Official Trailer'}</span>
-              <span className="cp-count">{currentIndex + 1} / {trailers.length}</span>
-            </div>
-          )}
-        </div>
-
-        {/* Right: sidebar — height stretches to match player (flex-stretch) */}
-        {hasMultiple && (
-          <div className="cp-sidebar hidden md:flex">
-            {trailers.map((t, i) => (
-              <button
-                key={t.id || i}
-                className={`cp-card ${i === currentIndex ? 'active' : ''}`}
-                onClick={() => switchTo(i)}
-              >
-                <div className="cp-card-thumb">
-                  <img src={t.thumbnail || t.backdrop_path || t.poster_path} alt={t.title} loading="lazy" />
-                  <div className="cp-card-overlay">
-                    <div className="cp-card-play-icon">
-                      <Play className="w-3 h-3 text-white fill-white ml-0.5" />
-                    </div>
-                  </div>
-                  <span className="cp-card-num">{i + 1}</span>
-                </div>
-                <div className="cp-card-meta">
-                  <p className="cp-card-title">{t.videoName || t.title || 'Trailer'}</p>
-                  <div className="cp-card-sub">
-                    <span>{t.release_date?.substring(0, 4) || 'N/A'}</span>
-                    <span style={{ color: t.vote_average ? '#facc15' : '#4b5563' }}>
-                      {t.vote_average ? `★ ${Number(t.vote_average).toFixed(1)}` : 'HD'}
-                    </span>
-                  </div>
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
+      <div className="cp-player">
+        <div className={`cp-fade ${isTransitioning ? 'on' : ''}`} />
+        <iframe
+          key={`cp-${current.id || currentIndex}`}
+          src={buildEmbedUrl(current)}
+          title={current.videoName || current.title || 'Trailer'}
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+          allowFullScreen
+        />
       </div>
 
-      {/* Mobile: horizontal scroll tabs below */}
       {hasMultiple && (
-        <div className="cp-mobile-tabs md:hidden">
-          {trailers.map((t, i) => (
-            <button
-              key={t.id || i}
-              className={`cp-mobile-card ${i === currentIndex ? 'active' : ''}`}
-              onClick={() => switchTo(i)}
-            >
-              <div className="cp-mobile-card-thumb">
-                <img src={t.thumbnail || t.backdrop_path || t.poster_path} alt={t.title} loading="lazy" />
-              </div>
-              <p className="cp-mobile-card-title">{t.videoName || t.title || 'Trailer'}</p>
-            </button>
-          ))}
+        <div className="cp-controls">
+          <div className="cp-ctrl-group">
+            <button className="cp-btn" onClick={goPrev} aria-label="Previous"><ChevronLeft className="w-4 h-4" /></button>
+            <button className="cp-btn" onClick={goNext} aria-label="Next"><ChevronRight className="w-4 h-4" /></button>
+          </div>
+          <span className="cp-title-line">{current.videoName || 'Official Trailer'}</span>
+          <span className="cp-count">{currentIndex + 1} / {trailers.length}</span>
         </div>
       )}
     </div>
@@ -443,10 +234,11 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
     s.textContent = `
       .ts-player-wrap { position:relative; width:100%; max-width:1248px; margin:0 auto; }
       .ts-player { position:relative; width:100%; padding-top:56.25%; border-radius:0; overflow:hidden; background:transparent; box-shadow:none; }
-      .ts-player iframe { position:absolute; top:0; left:0; width:100%; height:100%; border:none; pointer-events:none; }
+      .ts-player iframe { position:absolute; top:0; left:0; width:100%; height:100%; border:none; pointer-events:none; z-index:0; }
+      .ts-youtube-bottom-mask { position:absolute; bottom:0; left:0; right:0; height:60px; background:#07070a; pointer-events:none; z-index:6; }
       .ts-fade-overlay { position:absolute; inset:0; background:#07070a; z-index:15; pointer-events:none; opacity:0; transition:opacity 0.35s ease; }
       .ts-fade-overlay.active { opacity:1; }
-      .ts-player::after { content:''; position:absolute; bottom:0; left:0; right:0; height:30%; background:linear-gradient(to top,rgba(10,12,20,0.75) 0%,transparent 100%); z-index:5; pointer-events:none; }
+      .ts-player::after { content:''; position:absolute; bottom:0; left:0; right:0; height:45%; background:linear-gradient(to top,rgba(10,12,20,0.75) 0%,transparent 100%); z-index:5; pointer-events:none; }
       .ts-center-btn { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); z-index:20; width:64px; height:64px; border-radius:50%; background:rgba(0,0,0,0.4); backdrop-filter:blur(12px); border:2px solid rgba(255,255,255,0.18); display:flex; align-items:center; justify-content:center; cursor:pointer; transition:all 0.3s cubic-bezier(0.4,0,0.2,1); opacity:0; }
       .ts-player:hover .ts-center-btn { opacity:1; }
       .ts-center-btn:hover { background:rgba(248,69,101,0.55); border-color:rgba(248,69,101,0.8); transform:translate(-50%,-50%) scale(1.1); box-shadow:0 0 28px rgba(248,69,101,0.4); }
@@ -575,7 +367,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
         className="scroll-mt-20 relative overflow-hidden"
         style={{ background: 'transparent', marginTop: 20 }}
       >
-        <CinemaPlayer trailers={trailers} movieTitle={featuredMovie?.title || featuredMovie?.name || ''} />
+        <CinemaPlayer trailers={trailers} />
       </section>
     );
   }
@@ -614,6 +406,8 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
               allowFullScreen
             />
           )}
+          {/* Solid mask over YouTube branding bar — z-index between iframe (0) and fade-overlay (15) */}
+          {currentTrailer && <div className="ts-youtube-bottom-mask" />}
           {currentTrailer && (
             <button className="ts-center-btn" onClick={togglePause} aria-label={isPaused ? 'Play' : 'Pause'}>
               {isPaused ? <Play className="w-6 h-6 text-white ml-1" /> : <Pause className="w-5 h-5 text-white" />}

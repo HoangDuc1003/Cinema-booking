@@ -28,9 +28,66 @@ const keepLastWordsTogether = (text = '', tailWords = 2) => {
   return head + ' ' + tail;
 };
 
-const hasHeroImage = (movie) => Boolean(movie?.backdrop_original || movie?.backdrop_w1280 || movie?.backdrop_path || movie?.poster_path);
+/**
+ * Returns true if the image at `url` loads successfully, false otherwise.
+ * Never rejects; always resolves. Cleans up event listeners on abort.
+ */
+const canLoadImage = (url, signal) =>
+  new Promise((resolve) => {
+    if (!url) { resolve(false); return; }
+    if (signal?.aborted) { resolve(false); return; }
+    const img = new Image();
+    const onLoad = () => { cleanup(); resolve(true); };
+    const onError = () => { cleanup(); resolve(false); };
+    const onAbort = () => { cleanup(); resolve(false); };
+    const cleanup = () => {
+      img.onload = null;
+      img.onerror = null;
+      if (signal) signal.removeEventListener('abort', onAbort);
+    };
+    img.onload = onLoad;
+    img.onerror = onError;
+    if (signal) signal.addEventListener('abort', onAbort, { once: true });
+    img.src = url;
+  });
 
-const filterHeroMovies = (movies = []) => movies.filter(hasHeroImage);
+/**
+ * For each movie, try candidate image URLs in priority order,
+ * assign movie.heroImageUrl to the first valid one, drop movies with none.
+ */
+const validateMovieCandidates = async (movies, signal) => {
+  const results = [];
+  for (const movie of movies) {
+    if (signal?.aborted) break;
+    const candidates = [
+      movie.backdrop_original,
+      movie.backdrop_w1280,
+      movie.backdrop_path,
+      movie.poster_path,
+    ];
+    // Deduplicate while preserving order
+    const seen = new Set();
+    const unique = [];
+    for (const c of candidates) {
+      if (!c) continue;
+      const normalized = getImageUrl(c, 'w1280');
+      if (normalized && !seen.has(normalized)) {
+        seen.add(normalized);
+        unique.push(normalized);
+      }
+    }
+    let heroImageUrl = null;
+    for (const url of unique) {
+      if (signal?.aborted) break;
+      const ok = await canLoadImage(url, signal);
+      if (ok) { heroImageUrl = url; break; }
+    }
+    if (heroImageUrl) {
+      results.push({ ...movie, heroImageUrl });
+    }
+  }
+  return results;
+};
 
 // CSS animations
 const STYLES = `
@@ -128,12 +185,14 @@ const STYLES = `
 
   .hero-video-frame {
     position: absolute;
-    inset: -8% 0;
+    top: 50%;
+    left: 50%;
     width: 100%;
-    height: 116%;
+    height: 100%;
     border: 0;
     pointer-events: none;
-    transform: scale(1.08);
+    transform: translate(-50%, -50%) scale(1.18);
+    overflow: hidden;
   }
 
   .hero-title-word { filter: drop-shadow(0 6px 12px rgba(0,0,0,0.6)); }
@@ -150,10 +209,9 @@ const HeroSection = ({ onWatchTrailer }) => {
   const navigate = useNavigate();
   const styleRef = useRef(false);
 
-
-  const [movies, setMovies] = useState(() => dummyShowsData.slice(0, 5));
+  const [movies, setMovies] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [mediaMode, setMediaMode] = useState('poster');
   const [heroTrailers, setHeroTrailers] = useState({});
   const [trailerLoadingId, setTrailerLoadingId] = useState(null);
@@ -195,8 +253,11 @@ const HeroSection = ({ onWatchTrailer }) => {
       try {
         const data = await fetchHomeHero({ signal: controller.signal });
         if (!controller.signal.aborted) {
-          const nextMovies = filterHeroMovies(Array.isArray(data.movies) && data.movies.length ? data.movies : dummyShowsData);
-          setMovies(nextMovies.slice(0, 5));
+          const rawMovies = Array.isArray(data.movies) && data.movies.length ? data.movies : dummyShowsData;
+          const validMovies = await validateMovieCandidates(rawMovies, controller.signal);
+          if (!controller.signal.aborted) {
+            setMovies(validMovies.slice(0, 5));
+          }
         }
       } catch (e) {
         if (e.name !== 'AbortError') console.error('Hero load error:', e);
@@ -237,8 +298,7 @@ const HeroSection = ({ onWatchTrailer }) => {
   const titleText = keepLastWordsTogether(titleTextRaw, 2);
   const titleWords = titleText.split(' ');
   
-  const bgPath = movie.backdrop_original || movie.backdrop_w1280 || movie.backdrop_path;
-  const bgUrl = getImageUrl(bgPath, 'w1280');
+  const bgUrl = movie.heroImageUrl || getImageUrl(movie.backdrop_original || movie.backdrop_w1280 || movie.backdrop_path, 'w1280');
   const movieKey = String(movie.id || movie._id || currentIndex);
   const activeTrailer = heroTrailers[movieKey]?.[0] || null;
   const showVideo = mediaMode === 'trailer' && activeTrailer?.videoUrl;
@@ -249,7 +309,10 @@ const HeroSection = ({ onWatchTrailer }) => {
   const handleBackdropError = () => {
     setMovies((current) => {
       if (current.length <= 1) return current;
-      const next = current.filter((_, index) => index !== currentIndex);
+      const stableId = movie.id || movie._id;
+      const next = stableId
+        ? current.filter((m) => (m.id || m._id) !== stableId)
+        : current.filter((_, index) => index !== currentIndex);
       setCurrentIndex((index) => Math.min(index, next.length - 1));
       return next;
     });
@@ -276,20 +339,25 @@ const HeroSection = ({ onWatchTrailer }) => {
     }
   };
 
+  // Derived animation flag: only run poster-transition effects when fading AND not in video mode
+  const shouldRunPosterTransition = isFading && !showVideo;
+
   return (
     <div className="hero-section-container relative flex flex-col justify-center h-screen w-full overflow-hidden bg-[#0a0a0a] text-white">
       
 
       <div className="absolute inset-0 z-0">
         {showVideo ? (
-          <iframe
-            key={`hero-video-${movieKey}-${activeTrailer.id}`}
-            src={`${activeTrailer.videoUrl}?autoplay=1&mute=1&controls=0&loop=1&playlist=${activeTrailer.videoUrl.split('/').pop()}&rel=0&modestbranding=1&playsinline=1`}
-            title={`${movie.title} trailer`}
-            className="hero-video-frame"
-            allow="autoplay; encrypted-media; picture-in-picture"
-            allowFullScreen
-          />
+          <div className="absolute inset-0 overflow-hidden">
+            <iframe
+              key={`hero-video-${movieKey}-${activeTrailer.id}`}
+              src={`${activeTrailer.videoUrl}?autoplay=1&mute=1&controls=0&loop=1&playlist=${activeTrailer.videoUrl.split('/').pop()}&rel=0&modestbranding=1&playsinline=1`}
+              title={`${movie.title} trailer`}
+              className="hero-video-frame"
+              allow="autoplay; encrypted-media; picture-in-picture"
+              allowFullScreen
+            />
+          </div>
         ) : (
           <img
             key={`bg-${currentIndex}`}
@@ -305,11 +373,20 @@ const HeroSection = ({ onWatchTrailer }) => {
         )}
         {/* Soft Breathing Dark Layer */}
         <div className="absolute inset-0 bg-black pointer-events-none will-change-opacity" 
-             style={{ animation: 'cinematicBreathe 7s ease-in-out infinite', zIndex: 1 }} />
+             style={{
+               animation: showVideo ? 'none' : 'cinematicBreathe 7s ease-in-out infinite',
+               opacity: showVideo ? 0.05 : undefined,
+               zIndex: 1,
+             }} />
              
         {/* Left dark gradient */}
         <div className="absolute inset-0 pointer-events-none"
-             style={{ background: 'linear-gradient(90deg, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0.3) 25%, transparent 60%)', zIndex: 2 }} />
+             style={{
+               background: showVideo
+                 ? 'linear-gradient(90deg, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.2) 25%, transparent 60%)'
+                 : 'linear-gradient(90deg, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0.3) 25%, transparent 60%)',
+               zIndex: 2,
+             }} />
 
         {/* Bottom Gradient (Only for Thumbnail visibility) */}
         <div className="absolute inset-0 pointer-events-none"
@@ -331,7 +408,7 @@ const HeroSection = ({ onWatchTrailer }) => {
           zIndex: 4,
           willChange: 'transform, opacity',
           transformOrigin: 'center center',
-          animation: isFading ? 'verticalWhiteFlare 1.1s cubic-bezier(0.4, 0, 0.2, 1) forwards' : 'none',
+          animation: shouldRunPosterTransition ? 'verticalWhiteFlare 1.1s cubic-bezier(0.4, 0, 0.2, 1) forwards' : 'none',
           opacity: 0,
         }}
       />
@@ -342,7 +419,7 @@ const HeroSection = ({ onWatchTrailer }) => {
         className="absolute inset-0 bg-black pointer-events-none will-change-opacity"
         style={{
           zIndex: 3,
-          animation: isFading ? 'darkDipTransition 1.1s cubic-bezier(0.4, 0, 0.2, 1) forwards' : 'none',
+          animation: shouldRunPosterTransition ? 'darkDipTransition 1.1s cubic-bezier(0.4, 0, 0.2, 1) forwards' : 'none',
           opacity: 0 
         }}
       />
@@ -428,7 +505,7 @@ const HeroSection = ({ onWatchTrailer }) => {
         <div className="thumb-bar flex items-end gap-3 overflow-x-auto py-2 pr-4 pl-2">
           {movies.map((m, i) => {
             const isActive = i === currentIndex;
-            const thumbUrl = getImageUrl(m.backdrop_path || m.poster_path, 'w300');
+            const thumbUrl = m.heroImageUrl || getImageUrl(m.backdrop_path || m.poster_path, 'w300');
 
             return (
               <button
