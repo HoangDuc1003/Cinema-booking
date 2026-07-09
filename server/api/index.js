@@ -62,6 +62,10 @@ app.use(clerkMiddleware({
 }));
 
 app.use(async (req, res, next) => {
+    if (req.path.startsWith('/api/show/tmdb')) {
+        return next();
+    }
+
     try {
         await connectDB();
         next();

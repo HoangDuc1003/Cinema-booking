@@ -1,11 +1,29 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Star, ChevronLeft, ChevronRight, Play, Pause, Volume2, VolumeX } from 'lucide-react';
-import { fetchLatestTrailers } from '../services/tmdb';
+import { fetchLatestTrailers, fetchMovieTrailers } from '../services/tmdb';
 import Loading from './Loading';
 import BlurCircle from './BlurCircle';
 const CARD_SLIDE_INTERVAL = 4000; // Auto-slide thumbnails every 4s
 
-const TrailerSection = () => {
+const getTrailerKey = (trailer) => trailer?.videoUrl || trailer?.embedUrl || trailer?.id;
+
+const mergeTrailerLists = (...lists) => {
+  const seen = new Set();
+  const merged = [];
+
+  for (const list of lists) {
+    for (const trailer of list || []) {
+      const key = getTrailerKey(trailer);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      merged.push(trailer);
+    }
+  }
+
+  return merged;
+};
+
+const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers' }) => {
   const [trailers, setTrailers]         = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading]       = useState(true);
@@ -140,7 +158,7 @@ const TrailerSection = () => {
       .ts-player-wrap {
         position: relative;
         width: 100%;
-        max-width: 960px;
+        max-width: 1248px;
         margin: 0 auto;
       }
 
@@ -242,7 +260,7 @@ const TrailerSection = () => {
 
       /* ─── Info Bar ─── */
       .ts-info {
-        max-width: 960px;
+        max-width: 1248px;
         margin: 20px auto 0;
         padding: 0 0.5rem;
       }
@@ -324,7 +342,7 @@ const TrailerSection = () => {
       /* ─── Sliding Carousel ─── */
       .ts-carousel-wrap {
         position: relative;
-        max-width: 960px;
+        max-width: 1248px;
         margin: 28px auto 0;
       }
 
@@ -488,7 +506,7 @@ const TrailerSection = () => {
 
       /* ─── Scroll hint ─── */
       .ts-scroll-hint {
-        max-width: 960px;
+        max-width: 1248px;
         margin: 8px auto 0;
         text-align: center;
         font-size: 0.72rem;
@@ -526,7 +544,7 @@ const TrailerSection = () => {
       try {
         const data = await fetchLatestTrailers({ limit: 10, ttlHours: 2, pagesToSearch: 4 });
         if (!mounted) return;
-        setTrailers(data);
+        setTrailers((current) => mergeTrailerLists(current.filter((trailer) => trailer.isRequestedTrailer), data));
         setHasError(false);
       } catch (e) {
         console.error('Failed to load trailers:', e);
@@ -539,6 +557,35 @@ const TrailerSection = () => {
     const id = setInterval(load, 1000 * 60 * 60 * 2);
     return () => { mounted = false; clearInterval(id); };
   }, []);
+
+  useEffect(() => {
+    const movieId = featuredMovie?._id || featuredMovie?.id;
+    if (!movieId) return;
+
+    let mounted = true;
+    const controller = new AbortController();
+
+    const loadFeaturedTrailer = async () => {
+      try {
+        const data = await fetchMovieTrailers(featuredMovie, { signal: controller.signal });
+        if (!mounted || !data.length) return;
+        setTrailers((current) => mergeTrailerLists(data, current));
+        setCurrentIndex(0);
+        setActiveIndex(0);
+        setHasError(false);
+      } catch (error) {
+        if (error.name !== 'AbortError') {
+          console.warn('Failed to load requested trailer:', error.message);
+        }
+      }
+    };
+
+    loadFeaturedTrailer();
+    return () => {
+      mounted = false;
+      controller.abort();
+    };
+  }, [featuredMovie]);
 
   if (isLoading) {
     return (
@@ -554,14 +601,14 @@ const TrailerSection = () => {
 
   return (
     
-    <section className="px-6 md:px-16 lg:px-24 py-16 md:py-20 relative overflow-hidden min-h-screen md:min-h-[80vh]">
+    <section id={sectionId} className="scroll-mt-20 px-6 md:px-16 lg:px-24 py-16 md:py-20 relative overflow-hidden min-h-screen md:min-h-[80vh]">
       <BlurCircle top='80px' right='-60px' delay="0.5s" />
       <BlurCircle top='600px' left='-65px' delay="1s" />
       <BlurCircle top='800px' right='-100px' delay="1.5s" />
       <BlurCircle top='0px' left='0' delay="2s" />
 
       {/* Section Header */}
-      <div className="flex items-end justify-between max-w-[960px] mx-auto mb-8 relative z-10">
+      <div className="flex items-end justify-between max-w-[1248px] mx-auto mb-8 relative z-10">
         <div>
           <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-white tracking-wide">Trailers</h2>
           

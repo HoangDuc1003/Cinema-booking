@@ -3,10 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { CalendarIcon, ClockIcon, Star, Play, Ticket } from 'lucide-react';
 import { fetchHomeHero } from '../services/tmdb';
 import Loading from './Loading';
+import { dummyShowsData } from '../assets/assets';
 
 const getImageUrl = (path, size = 'original') => {
   if (!path) return '';
-  if (path.startsWith('http')) return path;
+  if (path.startsWith('http')) return path.replace('/t/p/original/', `/t/p/${size}/`);
   return `https://image.tmdb.org/t/p/${size}${path}`;
 };
 
@@ -131,14 +132,14 @@ const STYLES = `
   }
 `;
 
-const HeroSection = () => {
+const HeroSection = ({ onWatchTrailer }) => {
   const navigate = useNavigate();
   const styleRef = useRef(false);
 
 
-  const [movies, setMovies] = useState([]);
+  const [movies, setMovies] = useState(() => dummyShowsData.slice(0, 5));
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   
   // Animation states
   const [isFading, setIsFading] = useState(false);
@@ -175,9 +176,11 @@ const HeroSection = () => {
 
     const load = async () => {
       try {
-        setIsLoading(true);
         const data = await fetchHomeHero({ signal: controller.signal });
-        if (!controller.signal.aborted) setMovies(data.movies.slice(0, 5));
+        if (!controller.signal.aborted) {
+          const nextMovies = Array.isArray(data.movies) && data.movies.length ? data.movies : dummyShowsData;
+          setMovies(nextMovies.slice(0, 5));
+        }
       } catch (e) {
         if (e.name !== 'AbortError') console.error('Hero load error:', e);
       } finally {
@@ -336,9 +339,13 @@ const HeroSection = () => {
                   border-primary/30 hover:border-primary/60 relative overflow-hidden text-xs sm:text-sm md:text-base whitespace-nowrap">
                 <Ticket className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6" /> Book Now
               </button>
-              <button className="group flex items-center gap-1.5 sm:gap-2 md:gap-3 px-3.5 py-2 sm:px-5 sm:py-2.5 md:px-8 md:py-4 bg-white/15 hover:bg-white/25 text-white 
+              <button
+                type="button"
+                onClick={() => onWatchTrailer?.(movie)}
+                className="group flex items-center gap-1.5 sm:gap-2 md:gap-3 px-3.5 py-2 sm:px-5 sm:py-2.5 md:px-8 md:py-4 bg-white/15 hover:bg-white/25 text-white 
               font-semibold rounded-full border border-white/40 hover:border-primary/40 backdrop-blur-sm hover:scale-105 
-              transition-all duration-300 relative overflow-hidden cursor-pointer text-xs sm:text-sm md:text-base whitespace-nowrap">
+              transition-all duration-300 relative overflow-hidden cursor-pointer text-xs sm:text-sm md:text-base whitespace-nowrap"
+              >
                 <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Trailer
               </button>
             </div>
