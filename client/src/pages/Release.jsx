@@ -3,19 +3,19 @@ import { fetchUpcomingMovies } from '../services/tmdb'
 import MovieGrid from '../components/MovieGrid'
 import BlurCircle from '../components/BlurCircle'
 import Loading from '../components/Loading'
+import { dummyShowsData } from '../assets/assets'
 
 const Release = () => {
-  const [movies, setMovies] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [movies, setMovies] = useState(() => dummyShowsData.slice(0, 10));
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     let mounted = true;
 
     const loadMovies = async () => {
       try {
-        setIsLoading(true);
         const data = await fetchUpcomingMovies();
-        if (mounted) setMovies(data);
+        if (mounted) setMovies(Array.isArray(data) && data.length ? data : dummyShowsData.slice(0, 10));
       } catch (error) {
         console.error(error);
       } finally {
@@ -27,7 +27,7 @@ const Release = () => {
     return () => { mounted = false; };
   }, []);
 
-  if (isLoading) return <Loading />;
+  if (isLoading && !movies.length) return <Loading />;
 
   return (
     <div className='relative pt-30 mb-10 px-6 md:px-16 lg:px-40 xl:px-44 overflow-hidden min-h-[100vh]'>

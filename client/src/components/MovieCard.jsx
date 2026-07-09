@@ -66,7 +66,7 @@ const MovieCard = ({ movie }) => {
   
     const getImageUrl = (path) => {
       if (!path) return '';
-      if (path.startsWith('http')) return path;
+      if (path.startsWith('http')) return path.replace('/t/p/original/', '/t/p/w500/');
       return `https://image.tmdb.org/t/p/w500${path}`;
     };
 

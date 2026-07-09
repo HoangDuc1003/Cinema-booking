@@ -5,12 +5,12 @@ import MovieGrid from '../components/MovieGrid'
 import BlurCircle from '../components/BlurCircle'
 import Loading from '../components/Loading'
 import useSearchMovies from '../hooks/useSearchMovies'
+import { dummyShowsData } from '../assets/assets'
 
 
 const Movies = () => {
-  const [movies, setMovies] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [hasError, setHasError] = useState(false);
+  const [movies, setMovies] = useState(() => dummyShowsData);
+  const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
   // Search hook: handles debounce (300ms), AbortController, and caching
@@ -21,15 +21,12 @@ const Movies = () => {
 
     const loadMovies = async () => {
       try {
-        setIsLoading(true);
         const data = await fetchPopularMovies({ dailyRotate: true, dailySeedSize: 20, pages: 2, maxAdult: 2 });
         if (mounted) {
-          setMovies(data);
-          setHasError(false);
+          setMovies(Array.isArray(data) && data.length ? data : dummyShowsData);
         }
       } catch (error) {
         console.error("No movies available", error);
-        if (mounted) setHasError(true);
       } finally {
         if (mounted) setIsLoading(false);
       }
@@ -51,8 +48,7 @@ const Movies = () => {
     ? `Results for "${searchQuery}"`
     : 'Now Showing';
 
-  if (isLoading) return <Loading />;
-  if (hasError) return <Loading message="Failed to load movies. Retrying..." />;
+  if (isLoading && !movies.length) return <Loading />;
 
   return (
     <div className='relative pt-30 pb-5 px-6 md:px-16 lg:px-40 xl:px-44 min-h-[100vh]'>

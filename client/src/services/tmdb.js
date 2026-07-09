@@ -1,11 +1,35 @@
 // Service: TMDB API helpers
+import { dummyShowsData } from '../assets/assets';
+
 const API_BASE = (import.meta.env.VITE_BASE_URL || '').replace(/\/$/, '');
 const IMAGE_BASE = 'https://image.tmdb.org/t/p';
 const HERO_CACHE_KEY = 'home_hero_v2';
 const HERO_CACHE_TTL = 1000 * 60 * 2;
+const API_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS) || 4500;
+
+const fallbackMovies = (limit = dummyShowsData.length) => dummyShowsData.slice(0, limit);
+
+const fetchWithTimeout = async (url, options = {}) => {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+    const externalSignal = options.signal;
+
+    const abortFromExternal = () => controller.abort();
+    if (externalSignal) {
+        if (externalSignal.aborted) controller.abort();
+        else externalSignal.addEventListener('abort', abortFromExternal, { once: true });
+    }
+
+    try {
+        return await fetch(url, { ...options, signal: controller.signal });
+    } finally {
+        window.clearTimeout(timeoutId);
+        externalSignal?.removeEventListener?.('abort', abortFromExternal);
+    }
+};
 
 const fetchBackendJson = async (path, options = {}) => {
-    const response = await fetch(`${API_BASE}/api/show/tmdb${path}`, options);
+    const response = await fetchWithTimeout(`${API_BASE}/api/show/tmdb${path}`, options);
     const payload = await response.json().catch(() => null);
     if (!response.ok || !payload?.success) {
         throw new Error(payload?.message || `Movie source request failed (${response.status})`);
@@ -24,24 +48,61 @@ export const fetchHomeHero = async ({ signal } = {}) => {
         //
     }
 
-    const response = await fetch(`${API_BASE}/api/show/hero`, { signal });
-    const payload = await response.json().catch(() => null);
-    if (!response.ok || !payload?.success) {
-        throw new Error(payload?.message || `Hero request failed (${response.status})`);
-    }
-
-    const data = {
-        settings: payload.settings || {},
-        movies: Array.isArray(payload.movies) ? payload.movies : [],
-    };
-
     try {
-        sessionStorage.setItem(HERO_CACHE_KEY, JSON.stringify({ t: Date.now(), data }));
-    } catch {
-        //
-    }
+        const response = await fetchWithTimeout(`${API_BASE}/api/show/hero`, { signal });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload?.success) {
+            throw new Error(payload?.message || `Hero request failed (${response.status})`);
+        }
 
-    return data;
+        const data = {
+            settings: payload.settings || {},
+            movies: Array.isArray(payload.movies) && payload.movies.length ? payload.movies : fallbackMovies(5),
+        };
+
+        try {
+            sessionStorage.setItem(HERO_CACHE_KEY, JSON.stringify({ t: Date.now(), data }));
+        } catch {
+            //
+        }
+
+        return data;
+    } catch (error) {
+        if (signal?.aborted) throw error;
+        return {
+            settings: { mode: 'fallback', effectiveMode: 'fallback' },
+            movies: fallbackMovies(5),
+        };
+    }
+};
+
+export const fetchMovieTrailers = async (movie, { signal } = {}) => {
+    const movieId = String(movie?._id || movie?.id || movie || '').trim();
+    if (!movieId) return [];
+
+    const data = await fetchBackendJson(`/movie/${encodeURIComponent(movieId)}/videos`, { signal });
+    const videos = Array.isArray(data.results) ? data.results : [];
+
+    return videos
+        .filter((video) => video.site?.toLowerCase() === 'youtube' && video.key)
+        .sort((a, b) => {
+            const score = (video) => {
+                const name = `${video.name || ''} ${video.type || ''}`.toLowerCase();
+                return (name.includes('official') ? 3 : 0) + (name.includes('trailer') ? 2 : 0) + (video.type === 'Trailer' ? 1 : 0);
+            };
+            return score(b) - score(a);
+        })
+        .map((video) => ({
+            id: `${movieId}_${video.key}`,
+            title: movie?.title || movie?.name || data.title || 'Movie Trailer',
+            release_date: movie?.release_date || '',
+            vote_average: movie?.vote_average,
+            videoUrl: `https://www.youtube.com/embed/${video.key}`,
+            thumbnail: `https://img.youtube.com/vi/${video.key}/hqdefault.jpg`,
+            videoName: video.name || 'Official Trailer',
+            qualityLabel: '1080p',
+            isRequestedTrailer: true,
+        }));
 };
 
 // Cache settings
@@ -141,7 +202,7 @@ export const fetchPopularMovies = async (options = { includeDetails: false, deta
         return results;
     } catch (error) {
         console.error('Error:', error);
-        return [];
+        return fallbackMovies(20);
     }
 }
 
@@ -175,7 +236,8 @@ export const fetchMovieDetails = async (id) => {
         return { ...data };
     } catch (e) {
         console.error('fetchMovieDetails error', e);
-        return null;
+        const fallback = dummyShowsData.find((movie) => String(movie._id || movie.id) === String(id));
+        return fallback || null;
     }
 }
 // services/tmdb.js
@@ -197,7 +259,7 @@ export const fetchUpcomingMovies = async () => {
         }));
     } catch (error) {
         console.error(error);
-        return [];
+        return fallbackMovies(12);
     }
 }
 
@@ -211,7 +273,7 @@ export const fetchNowPlayingMovies = async () => {
         }));
     } catch (error) {
         console.error(error);
-        return [];
+        return fallbackMovies(12);
     }
 }
 

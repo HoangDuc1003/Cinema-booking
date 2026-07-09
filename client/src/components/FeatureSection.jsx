@@ -5,30 +5,25 @@ import BlurCircle from './BlurCircle'
 import { fetchPopularMovies } from '../services/tmdb'
 import MovieGrid from './MovieGrid'
 import Loading from './Loading'
+import { dummyShowsData } from '../assets/assets'
 
 const FeatureSection = () => {
   const navigate = useNavigate();
-  const [movies, setMovies] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [hasError, setHasError] = useState(false);
+  const [movies, setMovies] = useState(() => dummyShowsData.slice(0, 10));
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     let mounted = true;
 
     const loadMovies = async () => {
-      setIsLoading(true);
       try {
-        setHasError(false);
         const data = await fetchPopularMovies({ dailyRotate: true, dailySeedSize: 20 });
         if (mounted) {
-          setMovies(Array.isArray(data) ? data.slice(0, 10) : []);
+          const nextMovies = Array.isArray(data) && data.length ? data : dummyShowsData;
+          setMovies(nextMovies.slice(0, 10));
         }
       } catch (e) {
         console.error('FeatureSection load error', e);
-        if (mounted) {
-          setMovies([]);
-          setHasError(true);
-        }
       } finally {
         if (mounted) setIsLoading(false);
       }
@@ -62,7 +57,7 @@ const FeatureSection = () => {
         </button>
       </div>
 
-      {isLoading || hasError ? (
+      {isLoading && !movies.length ? (
         <Loading />
       ) : (
         <MovieGrid

@@ -7,6 +7,7 @@ import timeFormat from '../lib/timeFormat'
 import MovieGrid from '../components/MovieGrid';
 import DateSelect from '../components/DateSelect';
 import Loading from '../components/Loading';
+import TrailerSection from '../components/TrailerSection';
 import { useAppContext } from '../context/AppContext';
 import toast from 'react-hot-toast';
 import generateMockShowtimes from '../lib/generateMockShowtimes';
@@ -138,6 +139,10 @@ const MovieDetails = () => {
     [show?.genres]
   );
 
+  const handleWatchTrailer = () => {
+    document.getElementById('movie-trailers')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   if (isLoading) return <Loading />;
   if (hasError) return <Loading message="Error loading movie details..." />;
 
@@ -180,7 +185,10 @@ const MovieDetails = () => {
           </p>
 
           <div className='flex items-center flex-wrap gap-4 mt-4'>
-            <button className="group flex items-center gap-3 px-8 py-4 rounded-full backdrop-blur-sm border transition-all duration-300
+            <button
+              type="button"
+              onClick={handleWatchTrailer}
+              className="group flex items-center gap-3 px-8 py-4 rounded-full backdrop-blur-sm border transition-all duration-300
               hover:scale-105 bg-white/10 hover:bg-white/20 border-white/20 hover:border-primary/40 cursor-pointer">
               <PlayCircleIcon className="w-5 h-5" />
               Watch Trailer
@@ -202,6 +210,8 @@ const MovieDetails = () => {
       </div>
 
       <DateSelect id={show._id || show.id} availableDates={availableDates} isMockData={isMockData} />
+
+      <TrailerSection sectionId="movie-trailers" featuredMovie={show} />
 
       <p className='relative text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-2 mt-20'>You May Also Like</p>
       <div className='relative overflow-hidden mb-10' />
