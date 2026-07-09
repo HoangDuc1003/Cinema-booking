@@ -66,33 +66,200 @@ const CinemaPlayer = ({ trailers, movieTitle }) => {
     styleRef.current = true;
     const s = document.createElement('style');
     s.textContent = `
+      /* ── CinemaPlayer wrap ── */
       .cp-wrap { position: relative; width: 100%; background: transparent; }
-      .cp-player { position: relative; width: 100%; padding-top: 56.25%; overflow: hidden; background: #000; }
+
+      /* Flex row: player left, sidebar right — sidebar stretches to match player height */
+      .cp-layout {
+        display: flex;
+        gap: 12px;
+        align-items: stretch;
+      }
+      .cp-left {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+      }
+
+      /* Player keeps 16:9 and fills full height of left column */
+      .cp-player {
+        position: relative;
+        width: 100%;
+        padding-top: 56.25%;
+        overflow: hidden;
+        background: #000;
+        flex: 1;
+      }
       .cp-player iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: none; }
       .cp-fade { position: absolute; inset: 0; background: #000; z-index: 10; pointer-events: none; opacity: 0; transition: opacity 0.3s ease; }
       .cp-fade.on { opacity: 1; }
-      .cp-tabs { display: flex; flex-direction: column; gap: 8px; padding: 0 0 0 16px; max-height: 500px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(248,69,101,0.4) transparent; }
-      .cp-tab { display: flex; gap: 10px; align-items: flex-start; padding: 8px; border-radius: 10px; cursor: pointer; border: 1.5px solid transparent; background: rgba(255,255,255,0.04); transition: all 0.2s ease; text-align: left; width: 100%; }
-      .cp-tab:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.1); }
-      .cp-tab.active { background: rgba(248,69,101,0.1); border-color: rgba(248,69,101,0.45); }
-      .cp-tab-thumb { width: 88px; flex-shrink: 0; aspect-ratio: 16/9; border-radius: 6px; overflow: hidden; background: #111; }
-      .cp-tab-thumb img { width: 100%; height: 100%; object-fit: cover; }
-      .cp-tab-name { font-size: 0.78rem; font-weight: 600; color: #e5e7eb; line-height: 1.3; margin-bottom: 3px; }
-      .cp-tab-sub { font-size: 0.67rem; color: #6b7280; }
-      .cp-controls { display: flex; align-items: center; justify-content: space-between; padding: 12px 0 0; gap: 12px; }
-      .cp-ctrl-group { display: flex; align-items: center; gap: 8px; }
-      .cp-btn { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 50%; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.1); cursor: pointer; color: #d1d5db; transition: all 0.2s ease; }
+
+      /* Sidebar — exactly as tall as .cp-left (which = player height) */
+      .cp-sidebar {
+        width: 220px;
+        flex-shrink: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        overflow-y: auto;
+        overflow-x: hidden;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(248,69,101,0.35) transparent;
+        /* height will be determined by flex-stretch from parent */
+      }
+      .cp-sidebar::-webkit-scrollbar { width: 4px; }
+      .cp-sidebar::-webkit-scrollbar-track { background: transparent; }
+      .cp-sidebar::-webkit-scrollbar-thumb { background: rgba(248,69,101,0.35); border-radius: 4px; }
+
+      /* Each sidebar card — style mirrors ts-card from Home TrailerSection */
+      .cp-card {
+        flex-shrink: 0;
+        cursor: pointer;
+        border-radius: 10px;
+        overflow: hidden;
+        background: rgba(15,17,28,0.9);
+        border: 1.5px solid rgba(255,255,255,0.06);
+        transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
+        position: relative;
+        text-align: left;
+        width: 100%;
+      }
+      .cp-card:hover {
+        border-color: rgba(248,69,101,0.5);
+        box-shadow: 0 8px 20px rgba(0,0,0,0.4), 0 0 0 1px rgba(248,69,101,0.12);
+        transform: translateX(-2px);
+      }
+      .cp-card.active {
+        border-color: rgba(248,69,101,0.8);
+        box-shadow: 0 0 16px rgba(248,69,101,0.2), 0 6px 18px rgba(0,0,0,0.5);
+      }
+      .cp-card.active::after {
+        content: '';
+        position: absolute;
+        left: 0; top: 10%; bottom: 10%;
+        width: 2px;
+        background: linear-gradient(180deg, transparent, #F84565, transparent);
+        border-radius: 2px;
+      }
+      .cp-card-thumb {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 16/9;
+        overflow: hidden;
+        background: #0d0f1a;
+      }
+      .cp-card-thumb img {
+        width: 100%; height: 100%;
+        object-fit: cover;
+        display: block;
+        transition: transform 0.4s ease;
+      }
+      .cp-card:hover .cp-card-thumb img { transform: scale(1.06); }
+      .cp-card-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0,0,0,0.28);
+        opacity: 0;
+        transition: opacity 0.25s ease;
+      }
+      .cp-card:hover .cp-card-overlay { opacity: 1; }
+      .cp-card-play-icon {
+        width: 28px; height: 28px;
+        border-radius: 50%;
+        background: rgba(248,69,101,0.85);
+        display: flex; align-items: center; justify-content: center;
+        border: 2px solid rgba(255,255,255,0.3);
+      }
+      .cp-card-meta { padding: 6px 8px 7px; }
+      .cp-card-title {
+        color: #f3f4f6;
+        font-weight: 600;
+        font-size: 0.74rem;
+        line-height: 1.3;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        margin-bottom: 2px;
+      }
+      .cp-card-sub {
+        color: #6b7280;
+        font-size: 0.64rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .cp-card-num {
+        position: absolute;
+        top: 5px; left: 5px;
+        background: rgba(0,0,0,0.65);
+        backdrop-filter: blur(5px);
+        padding: 1px 6px;
+        border-radius: 5px;
+        font-size: 0.6rem;
+        font-weight: 700;
+        color: #d1d5db;
+        z-index: 5;
+      }
+
+      /* Controls bar below player */
+      .cp-controls {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 0 0;
+        gap: 10px;
+      }
+      .cp-ctrl-group { display: flex; align-items: center; gap: 7px; }
+      .cp-btn {
+        display: flex; align-items: center; justify-content: center;
+        width: 34px; height: 34px;
+        border-radius: 50%;
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.1);
+        cursor: pointer;
+        color: #d1d5db;
+        transition: all 0.2s ease;
+      }
       .cp-btn:hover { background: rgba(248,69,101,0.2); border-color: rgba(248,69,101,0.4); color: #fff; }
-      .cp-title-line { font-size: 0.88rem; font-weight: 600; color: #e5e7eb; flex: 1; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 8px; }
-      .cp-count { font-size: 0.72rem; color: #6b7280; white-space: nowrap; }
-      @media (max-width: 768px) {
-        .cp-tabs-mobile { display: flex; flex-direction: row; gap: 8px; padding-top: 12px; overflow-x: auto; scrollbar-width: none; }
-        .cp-tabs-mobile::-webkit-scrollbar { display: none; }
-        .cp-tab-mobile { display: flex; flex-direction: column; gap: 6px; min-width: 140px; padding: 8px; border-radius: 10px; cursor: pointer; border: 1.5px solid transparent; background: rgba(255,255,255,0.04); transition: all 0.2s ease; }
-        .cp-tab-mobile:hover { background: rgba(255,255,255,0.08); }
-        .cp-tab-mobile.active { background: rgba(248,69,101,0.1); border-color: rgba(248,69,101,0.45); }
-        .cp-tab-thumb-m { width: 100%; aspect-ratio: 16/9; border-radius: 6px; overflow: hidden; background: #111; }
-        .cp-tab-thumb-m img { width: 100%; height: 100%; object-fit: cover; }
+      .cp-title-line {
+        font-size: 0.84rem; font-weight: 600; color: #e5e7eb;
+        flex: 1; text-align: center;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        padding: 0 6px;
+      }
+      .cp-count { font-size: 0.7rem; color: #6b7280; white-space: nowrap; }
+
+      /* Mobile: hide sidebar, show horizontal scroll below */
+      .cp-mobile-tabs {
+        display: flex;
+        gap: 8px;
+        padding-top: 10px;
+        overflow-x: auto;
+        scrollbar-width: none;
+      }
+      .cp-mobile-tabs::-webkit-scrollbar { display: none; }
+      .cp-mobile-card {
+        flex-shrink: 0;
+        width: 140px;
+        border-radius: 9px;
+        overflow: hidden;
+        background: rgba(15,17,28,0.9);
+        border: 1.5px solid rgba(255,255,255,0.06);
+        transition: all 0.25s ease;
+        cursor: pointer;
+        text-align: left;
+      }
+      .cp-mobile-card.active { border-color: rgba(248,69,101,0.8); }
+      .cp-mobile-card-thumb { width: 100%; aspect-ratio: 16/9; overflow: hidden; background: #0d0f1a; }
+      .cp-mobile-card-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+      .cp-mobile-card-title {
+        padding: 5px 7px;
+        font-size: 0.7rem; font-weight: 600; color: #e5e7eb;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
       }
     `;
     document.head.appendChild(s);
@@ -103,9 +270,10 @@ const CinemaPlayer = ({ trailers, movieTitle }) => {
 
   return (
     <div className="cp-wrap">
-      <div style={{ display: 'flex', gap: 0, alignItems: 'flex-start' }}>
-        {/* Main Player */}
-        <div style={{ flex: 1, minWidth: 0 }}>
+      {/* ── Desktop layout: player + sidebar (same height) ── */}
+      <div className="cp-layout">
+        {/* Left: player + controls */}
+        <div className="cp-left">
           <div className="cp-player">
             <div className={`cp-fade ${isTransitioning ? 'on' : ''}`} />
             <iframe
@@ -117,7 +285,6 @@ const CinemaPlayer = ({ trailers, movieTitle }) => {
             />
           </div>
 
-          {/* Controls bar */}
           {hasMultiple && (
             <div className="cp-controls">
               <div className="cp-ctrl-group">
@@ -130,21 +297,32 @@ const CinemaPlayer = ({ trailers, movieTitle }) => {
           )}
         </div>
 
-        {/* Sidebar tabs (desktop, when multiple trailers) */}
+        {/* Right: sidebar — height stretches to match player (flex-stretch) */}
         {hasMultiple && (
-          <div className="cp-tabs hidden md:flex" style={{ width: 240, flexShrink: 0 }}>
+          <div className="cp-sidebar hidden md:flex">
             {trailers.map((t, i) => (
               <button
                 key={t.id || i}
-                className={`cp-tab ${i === currentIndex ? 'active' : ''}`}
+                className={`cp-card ${i === currentIndex ? 'active' : ''}`}
                 onClick={() => switchTo(i)}
               >
-                <div className="cp-tab-thumb">
+                <div className="cp-card-thumb">
                   <img src={t.thumbnail || t.backdrop_path || t.poster_path} alt={t.title} loading="lazy" />
+                  <div className="cp-card-overlay">
+                    <div className="cp-card-play-icon">
+                      <Play className="w-3 h-3 text-white fill-white ml-0.5" />
+                    </div>
+                  </div>
+                  <span className="cp-card-num">{i + 1}</span>
                 </div>
-                <div>
-                  <p className="cp-tab-name">{t.videoName || 'Trailer'}</p>
-                  <p className="cp-tab-sub">{t.release_date?.substring(0, 4) || ''}</p>
+                <div className="cp-card-meta">
+                  <p className="cp-card-title">{t.videoName || t.title || 'Trailer'}</p>
+                  <div className="cp-card-sub">
+                    <span>{t.release_date?.substring(0, 4) || 'N/A'}</span>
+                    <span style={{ color: t.vote_average ? '#facc15' : '#4b5563' }}>
+                      {t.vote_average ? `★ ${Number(t.vote_average).toFixed(1)}` : 'HD'}
+                    </span>
+                  </div>
                 </div>
               </button>
             ))}
@@ -152,19 +330,19 @@ const CinemaPlayer = ({ trailers, movieTitle }) => {
         )}
       </div>
 
-      {/* Mobile tabs row */}
+      {/* Mobile: horizontal scroll tabs below */}
       {hasMultiple && (
-        <div className="cp-tabs-mobile md:hidden">
+        <div className="cp-mobile-tabs md:hidden">
           {trailers.map((t, i) => (
             <button
               key={t.id || i}
-              className={`cp-tab-mobile ${i === currentIndex ? 'active' : ''}`}
+              className={`cp-mobile-card ${i === currentIndex ? 'active' : ''}`}
               onClick={() => switchTo(i)}
             >
-              <div className="cp-tab-thumb-m">
+              <div className="cp-mobile-card-thumb">
                 <img src={t.thumbnail || t.backdrop_path || t.poster_path} alt={t.title} loading="lazy" />
               </div>
-              <p className="cp-tab-name">{t.videoName || 'Trailer'}</p>
+              <p className="cp-mobile-card-title">{t.videoName || t.title || 'Trailer'}</p>
             </button>
           ))}
         </div>
@@ -395,15 +573,9 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
       <section
         id={sectionId}
         className="scroll-mt-20 relative overflow-hidden"
-        style={{ background: 'transparent' }}
+        style={{ background: 'transparent', marginTop: 20 }}
       >
-        {/* Top fade */}
-        <div style={{ position:'absolute', top:0, left:0, right:0, height:48, background:'linear-gradient(to bottom, #07070a 0%, transparent 100%)', zIndex:10, pointerEvents:'none' }} />
-
         <CinemaPlayer trailers={trailers} movieTitle={featuredMovie?.title || featuredMovie?.name || ''} />
-
-        {/* Bottom fade */}
-        <div style={{ position:'absolute', bottom:0, left:0, right:0, height:48, background:'linear-gradient(to top, #07070a 0%, transparent 100%)', zIndex:10, pointerEvents:'none' }} />
       </section>
     );
   }
