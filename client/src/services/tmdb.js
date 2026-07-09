@@ -9,6 +9,15 @@ const API_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS) || 4500;
 
 const fallbackMovies = (limit = dummyShowsData.length) => dummyShowsData.slice(0, limit);
 
+const hasUsableImage = (movie) => Boolean(movie?.poster_path || movie?.backdrop_path || movie?.poster);
+const onlyMoviesWithImages = (movies = []) => movies.filter(hasUsableImage);
+
+const getTmdbMovieId = (movie) => {
+    const candidate = movie?.id ?? movie?._id ?? movie;
+    const value = String(candidate || '').trim();
+    return /^\d+$/.test(value) ? value : '';
+};
+
 const fetchWithTimeout = async (url, options = {}) => {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), API_TIMEOUT_MS);
@@ -57,7 +66,7 @@ export const fetchHomeHero = async ({ signal } = {}) => {
 
         const data = {
             settings: payload.settings || {},
-            movies: Array.isArray(payload.movies) && payload.movies.length ? payload.movies : fallbackMovies(5),
+            movies: onlyMoviesWithImages(Array.isArray(payload.movies) && payload.movies.length ? payload.movies : fallbackMovies(5)),
         };
 
         try {
@@ -71,13 +80,13 @@ export const fetchHomeHero = async ({ signal } = {}) => {
         if (signal?.aborted) throw error;
         return {
             settings: { mode: 'fallback', effectiveMode: 'fallback' },
-            movies: fallbackMovies(5),
+            movies: onlyMoviesWithImages(fallbackMovies(5)),
         };
     }
 };
 
 export const fetchMovieTrailers = async (movie, { signal } = {}) => {
-    const movieId = String(movie?._id || movie?.id || movie || '').trim();
+    const movieId = getTmdbMovieId(movie);
     if (!movieId) return [];
 
     const data = await fetchBackendJson(`/movie/${encodeURIComponent(movieId)}/videos`, { signal });
@@ -165,7 +174,7 @@ export const fetchPopularMovies = async (options = { includeDetails: false, deta
             vote_average: movie.vote_average,
             vote_count: movie.vote_count,
             runtime: movie.runtime,
-        }));
+        })).filter(hasUsableImage);
 
         // Optionally fetch detailed info (runtime, genres, higher-res backdrops)
         if (options && options.includeDetails) {
@@ -193,6 +202,8 @@ export const fetchPopularMovies = async (options = { includeDetails: false, deta
             }
         }
 
+        results = onlyMoviesWithImages(results);
+
         try {
             storage.setItem(cacheKey, JSON.stringify({ t: Date.now(), data: results }));
         } catch (e) {
@@ -202,7 +213,7 @@ export const fetchPopularMovies = async (options = { includeDetails: false, deta
         return results;
     } catch (error) {
         console.error('Error:', error);
-        return fallbackMovies(20);
+        return onlyMoviesWithImages(fallbackMovies(20));
     }
 }
 
@@ -252,28 +263,28 @@ export const fetchLatestTrailers = async (opts = { limit: 10, ttlHours: 2, pages
 export const fetchUpcomingMovies = async () => {
     try {
         const data = await fetchBackendJson('/upcoming?page=1');
-        return data.results.map(movie => ({
+        return onlyMoviesWithImages(data.results.map(movie => ({
             ...movie,
             poster_path: movie.poster_path ? `${IMAGE_BASE}/w500${movie.poster_path}` : null,
             backdrop_path: movie.backdrop_path ? `${IMAGE_BASE}/w780${movie.backdrop_path}` : null,
-        }));
+        })));
     } catch (error) {
         console.error(error);
-        return fallbackMovies(12);
+        return onlyMoviesWithImages(fallbackMovies(12));
     }
 }
 
 export const fetchNowPlayingMovies = async () => {
     try {
         const data = await fetchBackendJson('/now-playing?page=1');
-        return data.results.map(movie => ({
+        return onlyMoviesWithImages(data.results.map(movie => ({
             ...movie,
             poster_path: movie.poster_path ? `${IMAGE_BASE}/w500${movie.poster_path}` : null,
             backdrop_path: movie.backdrop_path ? `${IMAGE_BASE}/w780${movie.backdrop_path}` : null,
-        }));
+        })));
     } catch (error) {
         console.error(error);
-        return fallbackMovies(12);
+        return onlyMoviesWithImages(fallbackMovies(12));
     }
 }
 
@@ -282,7 +293,7 @@ export const searchMovies = async (query, { signal } = {}) => {
         `/search?query=${encodeURIComponent(query)}&page=1`,
         { signal },
     );
-    return (data.results || []).map((movie) => ({
+    return onlyMoviesWithImages((data.results || []).map((movie) => ({
         _id: movie.id.toString(),
         id: movie.id,
         title: movie.title,
@@ -293,5 +304,5 @@ export const searchMovies = async (query, { signal } = {}) => {
         vote_average: movie.vote_average,
         vote_count: movie.vote_count,
         runtime: movie.runtime,
-    }));
+    })));
 };

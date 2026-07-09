@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CalendarIcon, ClockIcon, Star, Play, Ticket } from 'lucide-react';
-import { fetchHomeHero } from '../services/tmdb';
+import { CalendarIcon, ClockIcon, Star, Play, Ticket, ImageIcon, Video } from 'lucide-react';
+import { fetchHomeHero, fetchMovieTrailers } from '../services/tmdb';
 import Loading from './Loading';
 import { dummyShowsData } from '../assets/assets';
 
@@ -27,6 +27,10 @@ const keepLastWordsTogether = (text = '', tailWords = 2) => {
   const tail = words.slice(words.length - tailWords).join('\u00A0');
   return head + ' ' + tail;
 };
+
+const hasHeroImage = (movie) => Boolean(movie?.backdrop_original || movie?.backdrop_w1280 || movie?.backdrop_path || movie?.poster_path);
+
+const filterHeroMovies = (movies = []) => movies.filter(hasHeroImage);
 
 // CSS animations
 const STYLES = `
@@ -122,6 +126,16 @@ const STYLES = `
     image-rendering: auto;
   }
 
+  .hero-video-frame {
+    position: absolute;
+    inset: -8% 0;
+    width: 100%;
+    height: 116%;
+    border: 0;
+    pointer-events: none;
+    transform: scale(1.08);
+  }
+
   .hero-title-word { filter: drop-shadow(0 6px 12px rgba(0,0,0,0.6)); }
 
   @media (prefers-reduced-motion: reduce) {
@@ -140,6 +154,9 @@ const HeroSection = ({ onWatchTrailer }) => {
   const [movies, setMovies] = useState(() => dummyShowsData.slice(0, 5));
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [mediaMode, setMediaMode] = useState('poster');
+  const [heroTrailers, setHeroTrailers] = useState({});
+  const [trailerLoadingId, setTrailerLoadingId] = useState(null);
   
   // Animation states
   const [isFading, setIsFading] = useState(false);
@@ -178,7 +195,7 @@ const HeroSection = ({ onWatchTrailer }) => {
       try {
         const data = await fetchHomeHero({ signal: controller.signal });
         if (!controller.signal.aborted) {
-          const nextMovies = Array.isArray(data.movies) && data.movies.length ? data.movies : dummyShowsData;
+          const nextMovies = filterHeroMovies(Array.isArray(data.movies) && data.movies.length ? data.movies : dummyShowsData);
           setMovies(nextMovies.slice(0, 5));
         }
       } catch (e) {
@@ -222,25 +239,70 @@ const HeroSection = ({ onWatchTrailer }) => {
   
   const bgPath = movie.backdrop_original || movie.backdrop_w1280 || movie.backdrop_path;
   const bgUrl = getImageUrl(bgPath, 'w1280');
+  const movieKey = String(movie.id || movie._id || currentIndex);
+  const activeTrailer = heroTrailers[movieKey]?.[0] || null;
+  const showVideo = mediaMode === 'trailer' && activeTrailer?.videoUrl;
   const year = movie.release_date?.substring(0, 4) || 'N/A';
   const rating = movie.vote_average?.toFixed(1) || 'N/A';
   const runtimeStr = formatRuntime(movie.runtime);
+
+  const handleBackdropError = () => {
+    setMovies((current) => {
+      if (current.length <= 1) return current;
+      const next = current.filter((_, index) => index !== currentIndex);
+      setCurrentIndex((index) => Math.min(index, next.length - 1));
+      return next;
+    });
+  };
+
+  const handleMediaToggle = async () => {
+    if (mediaMode === 'trailer') {
+      setMediaMode('poster');
+      return;
+    }
+
+    setMediaMode('trailer');
+    if (heroTrailers[movieKey]) return;
+
+    setTrailerLoadingId(movieKey);
+    try {
+      const trailers = await fetchMovieTrailers(movie);
+      setHeroTrailers((current) => ({ ...current, [movieKey]: trailers }));
+      if (!trailers.length) setMediaMode('poster');
+    } catch {
+      setMediaMode('poster');
+    } finally {
+      setTrailerLoadingId(null);
+    }
+  };
 
   return (
     <div className="hero-section-container relative flex flex-col justify-center h-screen w-full overflow-hidden bg-[#0a0a0a] text-white">
       
 
       <div className="absolute inset-0 z-0">
-        <img
-          key={`bg-${currentIndex}`}
-          src={bgUrl}
-          alt={movie.title}
-          fetchPriority={currentIndex === 0 ? 'high' : 'auto'}
-          decoding="async"
-          sizes="100vw"
-          className="hero-backdrop w-full h-full object-cover object-center animate-pan-right align-top"
-          style={{ opacity: 1 }} 
-        />
+        {showVideo ? (
+          <iframe
+            key={`hero-video-${movieKey}-${activeTrailer.id}`}
+            src={`${activeTrailer.videoUrl}?autoplay=1&mute=1&controls=0&loop=1&playlist=${activeTrailer.videoUrl.split('/').pop()}&rel=0&modestbranding=1&playsinline=1`}
+            title={`${movie.title} trailer`}
+            className="hero-video-frame"
+            allow="autoplay; encrypted-media; picture-in-picture"
+            allowFullScreen
+          />
+        ) : (
+          <img
+            key={`bg-${currentIndex}`}
+            src={bgUrl}
+            alt={movie.title}
+            fetchPriority={currentIndex === 0 ? 'high' : 'auto'}
+            decoding="async"
+            sizes="100vw"
+            onError={handleBackdropError}
+            className="hero-backdrop w-full h-full object-cover object-center animate-pan-right align-top"
+            style={{ opacity: 1 }} 
+          />
+        )}
         {/* Soft Breathing Dark Layer */}
         <div className="absolute inset-0 bg-black pointer-events-none will-change-opacity" 
              style={{ animation: 'cinematicBreathe 7s ease-in-out infinite', zIndex: 1 }} />
@@ -400,6 +462,16 @@ const HeroSection = ({ onWatchTrailer }) => {
           })}
         </div>
       </div>
+
+      <button
+        type="button"
+        onClick={handleMediaToggle}
+        disabled={trailerLoadingId === movieKey}
+        className="absolute bottom-5 right-5 md:bottom-8 md:right-10 z-30 flex items-center gap-2 rounded-full border border-white/20 bg-black/35 px-4 py-2.5 text-xs md:text-sm font-semibold text-white backdrop-blur-xl shadow-lg shadow-black/30 transition-all duration-300 hover:border-primary/50 hover:bg-primary/20 active:scale-95 disabled:opacity-60"
+      >
+        {mediaMode === 'trailer' ? <ImageIcon className="w-4 h-4" /> : <Video className="w-4 h-4" />}
+        {trailerLoadingId === movieKey ? 'Loading' : mediaMode === 'trailer' ? 'Poster' : 'Trailer'}
+      </button>
     </div>
   );
 };

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react'
+﻿import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { fetchMovieDetails, fetchPopularMovies } from '../services/tmdb';
 import BlurCircle from '../components/BlurCircle'
@@ -23,6 +23,7 @@ const MovieDetails = () => {
   const { axios } = useAppContext();
   const [isFavorited, setIsFavorited] = useState(false);
   const [isMockData, setIsMockData] = useState(false);
+  const [showTrailerSection, setShowTrailerSection] = useState(false);
 
   const toggleFavorite = useCallback((e) => {
     e.stopPropagation();
@@ -48,10 +49,12 @@ const MovieDetails = () => {
       setIsFavorited(favorites.some(f => f.id === show.id));
     }
   }, [show]);
+
   useEffect(() => {
     let mounted = true;
 
     const loadMovieDetails = async () => {
+      setShowTrailerSection(false);
       setIsLoading(true);
       setHasError(false);
       setIsMockData(false);
@@ -140,7 +143,10 @@ const MovieDetails = () => {
   );
 
   const handleWatchTrailer = () => {
-    document.getElementById('movie-trailers')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setShowTrailerSection(true);
+    window.setTimeout(() => {
+      document.getElementById('movie-trailers')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 80);
   };
 
   if (isLoading) return <Loading />;
@@ -211,7 +217,9 @@ const MovieDetails = () => {
 
       <DateSelect id={show._id || show.id} availableDates={availableDates} isMockData={isMockData} />
 
-      <TrailerSection sectionId="movie-trailers" featuredMovie={show} />
+      {showTrailerSection && (
+        <TrailerSection sectionId="movie-trailers" featuredMovie={show} movieOnly />
+      )}
 
       <p className='relative text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-2 mt-20'>You May Also Like</p>
       <div className='relative overflow-hidden mb-10' />

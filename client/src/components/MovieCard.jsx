@@ -7,6 +7,7 @@ import { fetchMovieDetails } from '../services/tmdb';
 
 const MovieCard = ({ movie }) => {
   const navigate = useNavigate();
+  const [hasImageError, setHasImageError] = useState(false);
 
   const handleNavigate = useCallback(() => {
     navigate(`/movies/${movie._id || movie.id}`);
@@ -29,6 +30,11 @@ const MovieCard = ({ movie }) => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsFavorited(favorites.some(f => f.id === movie.id));
   }, [movie.id]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setHasImageError(false);
+  }, [movie.id, movie._id, movie.poster_path, movie.backdrop_path, movie.poster]);
 
   const toggleFavorite = (e) => {
     e.stopPropagation();
@@ -70,6 +76,9 @@ const MovieCard = ({ movie }) => {
       return `https://image.tmdb.org/t/p/w500${path}`;
     };
 
+    const imageSrc = getImageUrl(movie.poster_path || movie.backdrop_path || movie.poster);
+    if (!imageSrc || hasImageError) return null;
+
     return (
     <div 
       onClick={() => {handleNavigate(); window.scrollTo({top: 0,behavior:'smooth'})}}
@@ -78,10 +87,11 @@ const MovieCard = ({ movie }) => {
        hover:border-pink-500/50 transition-colors duration-500 shadow-lg"
     >
       <img 
-        src={getImageUrl(movie.poster_path || movie.backdrop_path || movie.poster)} 
+        src={imageSrc} 
         alt={movie.title} 
         loading="lazy"
         decoding="async"
+        onError={() => setHasImageError(true)}
         className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-110"
       />
       
