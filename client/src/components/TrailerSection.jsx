@@ -90,9 +90,10 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
     styleRef.current = true;
     const s = document.createElement('style');
     s.textContent = `
+      .ts-content-shell { position:relative; width:100%; max-width:1248px; margin-inline:auto; }
       .ts-nav-btn { width:42px; height:42px; border-radius:50%; background:rgba(255,255,255,0.06); backdrop-filter:blur(12px); border:1px solid rgba(255,255,255,0.1); display:flex; align-items:center; justify-content:center; cursor:pointer; color:#d1d5db; transition:all 0.25s ease; flex-shrink:0; }
       .ts-nav-btn:hover { background:rgba(248,69,101,0.2); border-color:rgba(248,69,101,0.4); color:#fff; transform:scale(1.08); }
-      .ts-carousel-wrap { position:relative; width:min(96vw,1500px); max-width:min(96vw,1500px); margin:32px auto 0; left:50%; transform:translateX(-50%); }
+      .ts-carousel-wrap { position:relative; width:100%; max-width:100%; margin:32px auto 0; }
       .ts-carousel-inner { display:flex; align-items:center; gap:10px; }
       .ts-carousel-track { display:flex; gap:12px; overflow-x:auto; flex:1; scroll-behavior:smooth; scrollbar-width:none; scroll-snap-type:x mandatory; padding-bottom:6px; }
       .ts-carousel-track::-webkit-scrollbar { display:none; }
@@ -115,7 +116,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
       .ts-dot { width:7px; height:7px; border-radius:50%; background:rgba(255,255,255,0.2); border:none; cursor:pointer; transition:all 0.3s ease; padding:0; }
       .ts-dot:hover { background:rgba(255,255,255,0.4); }
       .ts-dot.active { width:22px; border-radius:9999px; background:#F84565; }
-      .ts-hint { max-width:min(96vw,1500px); margin:8px auto 0; text-align:center; font-size:0.72rem; color:#4b5563; letter-spacing:0.5px; }
+      .ts-hint { max-width:100%; margin:8px auto 0; text-align:center; font-size:0.72rem; color:#4b5563; letter-spacing:0.5px; }
       @media (max-width:768px) {
         .ts-nav-btn { width:34px; height:34px; }
         .ts-carousel-track { gap:8px; }
@@ -190,19 +191,21 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
 
     return (
       <section id={sectionId} className="scroll-mt-20 relative overflow-hidden" style={{ background: 'transparent', marginTop: 20 }}>
-        {currentTrailer && (
-          <CinematicTrailerPlayer
-            videoId={extractVideoId(currentTrailer.embedUrl || currentTrailer.videoUrl)}
-            movieTitle={currentTrailer.videoName || currentTrailer.title}
-            rating={currentTrailer.vote_average}
-            year={currentTrailer.release_date?.substring(0, 4)}
-            qualityLabel={currentTrailer.qualityLabel}
-            currentIndex={currentIndex}
-            total={trailers.length}
-            onNext={goNext}
-            onPrevious={goPrev}
-          />
-        )}
+        <div className="ts-content-shell">
+          {currentTrailer && (
+            <CinematicTrailerPlayer
+              videoId={extractVideoId(currentTrailer.embedUrl || currentTrailer.videoUrl)}
+              movieTitle={currentTrailer.videoName || currentTrailer.title}
+              rating={currentTrailer.vote_average}
+              year={currentTrailer.release_date?.substring(0, 4)}
+              qualityLabel={currentTrailer.qualityLabel}
+              currentIndex={currentIndex}
+              total={trailers.length}
+              onNext={goNext}
+              onPrevious={goPrev}
+            />
+          )}
+        </div>
       </section>
     );
   }
@@ -217,6 +220,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
       <BlurCircle top='800px' right='-100px' delay="1.5s" />
       <BlurCircle top='0px' left='0' delay="2s" />
 
+      <div className="ts-content-shell relative z-10">
       <div className="flex items-end justify-between max-w-[1248px] mx-auto mb-8 relative z-10">
         <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-white tracking-wide">Trailers</h2>
       </div>
@@ -273,6 +277,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
         </div>
       </div>
       <p className="ts-hint relative z-10">{carouselPaused ? 'Auto-scroll paused' : 'Click any trailer to browse • Auto-scrolling'}</p>
+      </div>
     </section>
   );
 };

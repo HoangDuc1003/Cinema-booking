@@ -1,42 +1,57 @@
 import React, { useState, useEffect } from 'react'
+import { Film } from 'lucide-react'
 import { fetchNowPlayingMovies } from '../services/tmdb'
-import BlurCircle from '../components/BlurCircle'
 import Loading from '../components/Loading'
 import MovieGrid from '../components/MovieGrid'
 import { dummyShowsData } from '../assets/assets'
+import CatalogHeader from '../components/CatalogHeader'
+import CatalogPageShell from '../components/CatalogPageShell'
   
 const Theater = () => {
   const [movies, setMovies] = useState(() => dummyShowsData.slice(0, 10));
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
+    let mounted = true;
+
     const loadMovies = async () => {
       try {
         const data = await fetchNowPlayingMovies();
-        setMovies(Array.isArray(data) && data.length ? data : dummyShowsData.slice(0, 10));
+        if (mounted) setMovies(Array.isArray(data) && data.length ? data : dummyShowsData.slice(0, 10));
       } catch (error) {
-        console.error(error);
+        if (error.name !== 'AbortError' && import.meta.env.DEV) console.warn('Theater load error:', error.message);
       } finally {
-        setIsLoading(false);
+        if (mounted) setIsLoading(false);
       }
     };
     loadMovies();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   if (isLoading && !movies.length) return <Loading />;
 
   return (
-    <div className='relative pt-30 pb-10 px-6 md:px-16 lg:px-40 xl:px-44 overflow-hidden min-h-[100vh]'>
-      {/* Blue glow band */}
-      <div
-        className="absolute left-1/2 -translate-x-1/2 w-[150%] h-45 rounded-[100%] blur-[120px] animate-slow-pulse pointer-events-none"
-        style={{ top: '-20px', zIndex: 0, background: 'rgba(0, 123, 255, 0.5)' }}
+    <CatalogPageShell
+      header={(
+        <CatalogHeader
+          icon={Film}
+          eyebrow="Playing now"
+          title="Now in Theaters"
+          description="Browse films currently lighting up the big screen and choose the next showtime for your cinema night."
+          count={movies.length}
+          countLabel="movies"
+        />
+      )}
+    >
+      <MovieGrid
+        movies={movies}
+        columns="grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
+        animated={true}
+        staggerDelay={10}
       />
-      <BlurCircle top='150px' left='0'/>
-      <BlurCircle bottom='50px' right='50px'/>
-      <h1 className='relative text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-20'>Now in Theaters</h1>
-      <MovieGrid movies={movies} animated={true} staggerDelay={20} />
-    </div>
+    </CatalogPageShell>
   );
 }
 

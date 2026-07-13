@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { Search, X } from 'lucide-react'
+import { Clapperboard, LoaderCircle, Search, X } from 'lucide-react'
 import { fetchPopularMovies } from '../services/tmdb'
 import MovieGrid from '../components/MovieGrid'
-import BlurCircle from '../components/BlurCircle'
 import Loading from '../components/Loading'
 import useSearchMovies from '../hooks/useSearchMovies'
 import { dummyShowsData } from '../assets/assets'
+import CatalogHeader from '../components/CatalogHeader'
+import CatalogPageShell from '../components/CatalogPageShell'
 
 
 const Movies = () => {
@@ -21,19 +22,28 @@ const Movies = () => {
 
     const loadMovies = async () => {
       try {
-        const data = await fetchPopularMovies({ dailyRotate: true, dailySeedSize: 20, pages: 2, maxAdult: 2 });
+        const data = await fetchPopularMovies({
+          dailyRotate: true,
+          dailySeedSize: 20,
+          pages: 2,
+          maxAdult: 2,
+        });
         if (mounted) {
           setMovies(Array.isArray(data) && data.length ? data : dummyShowsData);
         }
       } catch (error) {
-        console.error("No movies available", error);
+        if (error.name !== 'AbortError' && import.meta.env.DEV) {
+          console.warn('No movies available:', error.message);
+        }
       } finally {
         if (mounted) setIsLoading(false);
       }
     };
 
     loadMovies();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   // Determine which movies to display: search results take priority
@@ -44,76 +54,81 @@ const Movies = () => {
     return movies;
   }, [searchQuery, searchResults, movies]);
 
-  const pageTitle = searchQuery.trim().length >= 2
-    ? `Results for "${searchQuery}"`
-    : 'Now Showing';
+  const trimmedQuery = searchQuery.trim();
+  const hasSearchQuery = trimmedQuery.length >= 2;
+  const searchStatus = isSearching
+    ? 'Searching the NitroCine catalog…'
+    : hasSearchQuery
+      ? `${displayedMovies.length} result${displayedMovies.length === 1 ? '' : 's'} for “${trimmedQuery}”`
+      : trimmedQuery.length === 1
+        ? 'Type one more character to search.'
+        : `${displayedMovies.length} movies ready to explore.`;
 
   if (isLoading && !movies.length) return <Loading />;
 
   return (
-    <div className='relative pt-30 pb-5 px-6 md:px-16 lg:px-40 xl:px-44 min-h-[100vh]'>
-      {/* Animated glow band — moved animation to index.css */}
-      <div
-        className="absolute left-1/2 -translate-x-1/2 w-[150%] h-45 rounded-[100%] blur-[120px] 
-          animate-slow-pulse pointer-events-none"
-        style={{ top: '-20px', zIndex: 0, background: 'rgba(0, 123, 255, 0.5)' }}
-      />
-
-      <BlurCircle top='150px' left='0' />
-      <BlurCircle bottom='50px' right='50px' />
-      <BlurCircle top='50px' left='400px' />
-      <BlurCircle top='100px' right='0' />
-
-      <div className="relative z-10">
-        <h1 className='text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-8'>
-          {pageTitle}
-        </h1>
-
-        {/* Search bar */}
-        <div className="relative max-w-xl mb-12">
-          <div className="relative flex items-center">
-            <Search className="absolute left-4 w-5 h-5 text-gray-400 pointer-events-none" />
+    <CatalogPageShell
+      header={(
+        <CatalogHeader
+          icon={Clapperboard}
+          eyebrow="Explore NitroCine"
+          title="Now Showing"
+          description="Discover audience favorites, current hits, and the next story worth seeing on the big screen."
+          count={displayedMovies.length}
+          countLabel="movies"
+          ariaBusy={isSearching}
+        >
+          <div className="min-w-0">
+            <div className="catalog-search relative flex min-h-13 items-center rounded-2xl border border-white/12 bg-black/25 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] transition-all duration-300 focus-within:border-primary/70 focus-within:bg-black/35 focus-within:ring-4 focus-within:ring-primary/10">
+              <span className="sr-only">Search movies</span>
+              <Search className="pointer-events-none absolute left-4 h-5 w-5 text-gray-400" aria-hidden="true" />
             <input
-              type="text"
+              type="search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search movies..."
-              className="w-full pl-12 pr-12 py-3.5 bg-white/5 border border-white/10 rounded-2xl 
-                text-white placeholder-gray-500 focus:outline-none focus:border-[#F84565]/50 
-                focus:bg-white/8 backdrop-blur-sm transition-all duration-300
-                text-base font-medium"
+                aria-label="Search movies"
+                className="min-h-13 w-full appearance-none bg-transparent py-3 pl-12 pr-14 text-sm font-medium text-white outline-none placeholder:text-gray-400 sm:text-base [&::-webkit-search-cancel-button]:appearance-none"
             />
-            {searchQuery && (
+              {isSearching ? (
+                <span className="absolute right-4 flex h-6 w-6 items-center justify-center text-primary" aria-hidden="true">
+                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                </span>
+              ) : searchQuery && (
               <button
+                type="button"
                 onClick={() => setSearchQuery('')}
-                className="absolute right-4 p-1 rounded-full hover:bg-white/10 transition-colors duration-200"
+                  aria-label="Clear movie search"
+                  className="absolute right-1 flex h-11 w-11 items-center justify-center rounded-xl text-gray-400 transition-colors duration-200 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 <X className="w-4 h-4 text-gray-400" />
               </button>
             )}
-          </div>
-          {/* Search indicator */}
-          {isSearching && (
-            <div className="absolute -bottom-6 left-4 text-xs text-gray-500 flex items-center gap-2">
-              <div className="w-3 h-3 border border-gray-500 border-t-transparent rounded-full animate-spin" />
-              Searching...
             </div>
-          )}
-        </div>
-
-        {displayedMovies.length > 0 ? (
-          <MovieGrid movies={displayedMovies} animated={true} staggerDelay={10} />
+            <p className="mt-2 min-h-5 px-1 text-xs text-gray-400" aria-live="polite">
+              {searchStatus}
+            </p>
+          </div>
+        </CatalogHeader>
+      )}
+    >
+      {displayedMovies.length > 0 ? (
+          <MovieGrid
+            movies={displayedMovies}
+            columns="grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
+            animated={true}
+            staggerDelay={10}
+          />
         ) : (
-          <div className='min-h-[40vh] flex items-center justify-center'>
-            <p className='text-xl font-medium text-gray-400'>
+            <div className="flex min-h-64 items-center justify-center rounded-3xl border border-white/10 bg-white/[0.025] p-8 text-center sm:min-h-80 sm:p-12">
+              <p className="max-w-md text-base font-medium leading-7 text-gray-400 sm:text-lg">
               {searchQuery.trim().length >= 2
                 ? 'No movies found. Try a different search.'
                 : 'No movies available'}
             </p>
           </div>
         )}
-      </div>
-    </div>
+    </CatalogPageShell>
   );
 };
 

@@ -87,50 +87,74 @@ const CinematicTrailerPlayer = ({
     const s = document.createElement('style');
     s.innerHTML = `
       .cinematic-player-wrapper {
+        width: 100%;
+        min-width: 0;
+        margin: 0 auto;
+      }
+      .cinematic-player-card {
         position: relative;
         width: 100%;
         margin: 0 auto;
+        padding: clamp(8px, 1.35vw, 16px);
+        overflow: hidden;
+        isolation: isolate;
+        background: linear-gradient(145deg, rgba(248,69,101,0.12), rgba(18,20,31,0.88) 48%, rgba(248,69,101,0.07));
+        border: 1px solid rgba(248,69,101,0.22);
+        border-radius: clamp(12px, 1.3vw, 18px);
+        box-shadow: 0 24px 80px rgba(0,0,0,0.42);
+      }
+      .cinematic-player-card::before {
+        content: '';
+        position: absolute;
+        inset: -20%;
+        z-index: -1;
+        background: radial-gradient(ellipse at center, rgba(248,69,101,0.08), transparent 58%);
+        pointer-events: none;
       }
       .cinematic-player-viewport {
         position: relative;
         width: 100%;
-        aspect-ratio: 16 / 7.5;
+        aspect-ratio: 16 / 9;
         overflow: hidden;
         background: #000;
-      }
-      @media (max-width: 768px) {
-        .cinematic-player-viewport {
-          aspect-ratio: 16 / 8.5;
-        }
+        border-radius: clamp(8px, 0.9vw, 12px);
       }
       .cinematic-player-frame {
         position: absolute;
-        top: 50%;
-        left: 0;
-        width: 100%;
-        aspect-ratio: 16 / 9;
-        transform: translateY(-50%) scale(1.04);
-        pointer-events: none;
-      }
-      .cinematic-player-frame iframe {
+        inset: 0;
         width: 100%;
         height: 100%;
-        border: none;
+        pointer-events: none;
+        z-index: 1;
+      }
+      .cinematic-player-frame > div,
+      .cinematic-player-frame iframe {
+        display: block;
+        width: 100% !important;
+        height: 100% !important;
+        border: 0;
       }
       .cinematic-top-mask {
         position: absolute;
         top: 0; left: 0; right: 0;
-        height: 15%;
-        background: linear-gradient(to bottom, rgba(10,12,20,1) 0%, transparent 100%);
-        z-index: 5;
+        height: 10%;
+        background: linear-gradient(to bottom, rgba(0,0,0,0.48), transparent);
+        z-index: 6;
         pointer-events: none;
       }
       .cinematic-bottom-mask {
         position: absolute;
         bottom: 0; left: 0; right: 0;
-        height: 25%;
-        background: linear-gradient(to top, rgba(10,12,20,1) 0%, transparent 100%);
-        z-index: 5;
+        height: 16%;
+        background: linear-gradient(to top, rgba(0,0,0,0.62), transparent);
+        z-index: 6;
+        pointer-events: none;
+      }
+      .cinematic-focus-vignette {
+        position: absolute;
+        inset: 0;
+        z-index: 7;
+        background: radial-gradient(ellipse at center, transparent 52%, rgba(0,0,0,0.16) 78%, rgba(0,0,0,0.42) 100%);
         pointer-events: none;
       }
       .cinematic-fade-overlay {
@@ -183,6 +207,36 @@ const CinematicTrailerPlayer = ({
       }
       .cinematic-mute-btn:hover { background: rgba(255,255,255,0.15); }
       .cinematic-mute-btn.is-muted { color: #F84565; border-color: rgba(248,69,101,0.4); }
+      .cinematic-player-details {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 68px;
+        gap: 20px;
+        padding: clamp(12px, 1.4vw, 18px) clamp(4px, 0.7vw, 10px) 2px;
+      }
+      .cinematic-player-copy { min-width: 0; }
+      .cinematic-player-actions {
+        display: flex;
+        flex: 0 0 auto;
+        align-items: center;
+        gap: 16px;
+      }
+      @media (max-width: 640px) {
+        .cinematic-player-card { padding: 6px; border-radius: 12px; }
+        .cinematic-player-viewport { border-radius: 8px; }
+        .cinematic-player-details {
+          align-items: flex-start;
+          flex-direction: column;
+          min-height: 0;
+          gap: 12px;
+          padding: 12px 6px 6px;
+        }
+        .cinematic-player-actions {
+          width: 100%;
+          justify-content: space-between;
+        }
+      }
     `;
     document.head.appendChild(s);
     return () => s.remove();
@@ -190,10 +244,11 @@ const CinematicTrailerPlayer = ({
 
   return (
     <div className={`cinematic-player-wrapper ${className}`}>
-      <div className="w-full md:w-[95%] lg:w-[85%] max-w-[1040px] mx-auto">
+      <div className="cinematic-player-card">
         <div className="cinematic-player-viewport">
           <div className="cinematic-top-mask" />
           <div className="cinematic-bottom-mask" />
+          <div className="cinematic-focus-vignette" />
           <div className={`cinematic-fade-overlay ${isTransitioning ? 'active' : ''}`} />
           
           <div className="cinematic-player-frame" ref={containerRef} />
@@ -217,8 +272,8 @@ const CinematicTrailerPlayer = ({
           </button>
         </div>
 
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mt-4 px-2">
-          <div>
+        <div className="cinematic-player-details">
+          <div className="cinematic-player-copy">
             <h3 className="text-xl font-bold text-white mb-1 line-clamp-1">{movieTitle || 'Official Trailer'}</h3>
             <div className="flex items-center gap-2 flex-wrap">
               {rating && (
@@ -240,7 +295,7 @@ const CinematicTrailerPlayer = ({
           </div>
           
           {total > 1 && (
-            <div className="flex items-center gap-4">
+            <div className="cinematic-player-actions">
               <span className="text-sm font-medium text-gray-400">
                 {currentIndex + 1} / {total}
               </span>
