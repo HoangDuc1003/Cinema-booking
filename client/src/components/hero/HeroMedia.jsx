@@ -1,35 +1,49 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 const HeroMedia = ({
   title,
-  backdropUrl,
-  mobilePosterUrl,
+  posterCandidates = [],
   posterVisible,
   videoVisible,
   children,
-  onPosterError,
-}) => (
-  <div className={`hero-media ${videoVisible ? 'is-video-visible' : ''}`}>
-    <picture className="hero-poster-shell">
-      <source media="(max-width: 767px)" srcSet={mobilePosterUrl} />
-      <img
-        src={backdropUrl}
-        alt={title}
-        fetchPriority="high"
-        decoding="async"
-        sizes="120vw"
-        onError={onPosterError}
-        className={`hero-poster ${posterVisible ? 'is-visible' : 'is-dimmed'}`}
-      />
-    </picture>
+}) => {
+  const candidates = [...new Set(posterCandidates.filter(Boolean))];
+  const candidateKey = candidates.join('|');
+  const [candidateIndex, setCandidateIndex] = useState(0);
+  const [imageReady, setImageReady] = useState(false);
 
-    {children}
+  const currentSource = candidates[candidateIndex] || '';
+  const handleImageError = () => {
+    setImageReady(false);
+    setCandidateIndex((index) => Math.min(index + 1, candidates.length));
+  };
 
-    <div className="hero-media__breath" aria-hidden="true" />
-    <div className="hero-media__gradient hero-media__gradient--side" aria-hidden="true" />
-    <div className="hero-media__gradient hero-media__gradient--bottom" aria-hidden="true" />
-    <div className="hero-media__gradient hero-media__gradient--vignette" aria-hidden="true" />
-  </div>
-);
+  return (
+    <div className={`hero-media ${videoVisible ? 'is-video-visible' : ''}`}>
+      <div className={`hero-poster-shell ${currentSource ? '' : 'is-fallback'}`}>
+        {currentSource && (
+          <img
+            key={`${candidateKey}-${candidateIndex}`}
+            src={currentSource}
+            alt={title}
+            fetchPriority="high"
+            decoding="async"
+            sizes="100vw"
+            onLoad={() => setImageReady(true)}
+            onError={handleImageError}
+            className={`hero-poster ${imageReady ? 'is-ready' : 'is-loading'} ${posterVisible ? 'is-visible' : 'is-dimmed'}`}
+          />
+        )}
+      </div>
+
+      {children}
+
+      <div className="hero-media__breath" aria-hidden="true" />
+      <div className="hero-media__gradient hero-media__gradient--side" aria-hidden="true" />
+      <div className="hero-media__gradient hero-media__gradient--bottom" aria-hidden="true" />
+      <div className="hero-media__gradient hero-media__gradient--vignette" aria-hidden="true" />
+    </div>
+  );
+};
 
 export default React.memo(HeroMedia);

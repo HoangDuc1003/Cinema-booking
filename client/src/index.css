@@ -10,11 +10,39 @@
   font-family: 'Outfit', sans-serif;
 }
 
+html,
+body,
+#root {
+  width: 100%;
+  min-height: 100%;
+  margin: 0;
+}
+
 body {
   color: white;
   background-color: #09090B;
   scrollbar-width: thin;
   scrollbar-color: #787777 #1e1e1e;
+}
+
+@media (max-width: 767px) {
+  .app-navbar {
+    padding-top: max(1.25rem, calc(env(safe-area-inset-top) + 0.75rem));
+    padding-right: max(1.5rem, calc(env(safe-area-inset-right) + 1rem));
+    padding-left: max(1.5rem, calc(env(safe-area-inset-left) + 1rem));
+  }
+
+  .app-mobile-nav {
+    height: 100vh;
+    height: 100dvh;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .app-mobile-nav__close {
+    top: max(1.5rem, calc(env(safe-area-inset-top) + 0.75rem));
+    right: max(1.5rem, calc(env(safe-area-inset-right) + 0.75rem));
+  }
 }
 
 @keyframes ambient-drift {

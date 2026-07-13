@@ -2,25 +2,23 @@ import { ArrowRightIcon } from 'lucide-react'
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import BlurCircle from './BlurCircle'
-import { fetchPopularMovies } from '../services/tmdb'
+import { fetchHomeNowShowing } from '../services/tmdb'
 import MovieGrid from './MovieGrid'
 import Loading from './Loading'
-import { dummyShowsData } from '../assets/assets'
 
 const FeatureSection = () => {
   const navigate = useNavigate();
-  const [movies, setMovies] = useState(() => dummyShowsData.slice(0, 10));
-  const [isLoading, setIsLoading] = useState(false);
+  const [movies, setMovies] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     let mounted = true;
 
     const loadMovies = async () => {
       try {
-        const data = await fetchPopularMovies({ dailyRotate: true, dailySeedSize: 20 });
+        const data = await fetchHomeNowShowing({ limit: 10 });
         if (mounted) {
-          const nextMovies = Array.isArray(data) && data.length ? data : dummyShowsData;
-          setMovies(nextMovies.slice(0, 10));
+          setMovies(Array.isArray(data) ? data.slice(0, 10) : []);
         }
       } catch (e) {
         console.error('FeatureSection load error', e);
@@ -39,13 +37,16 @@ const FeatureSection = () => {
   };
 
   return (
-    <div className='px-4 sm:px-6 md:px-16 lg:px-24 xl:px-40 overflow-hidden'>
+    <section
+      className='home-now-showing px-4 sm:px-6 md:px-16 lg:px-24 xl:px-40 overflow-hidden'
+      aria-labelledby="home-now-showing-title"
+    >
       <div className='relative flex items-center justify-between pt-10 sm:pt-5 pb-6 sm:pb-10'>
         <BlurCircle top='80px' right='-60px' />
         <BlurCircle top='600px' left='-65px' />
         <BlurCircle top='800px' right='-100px' />
         <BlurCircle top='0px' left='0' />
-        <p className='relative text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-2 mt-8 sm:mt-20'>Now Showing</p>
+        <h2 id="home-now-showing-title" className='relative text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-2 mt-8 sm:mt-20'>Now Showing</h2>
         <button
           onClick={handleNavigate}
           className="group flex items-center gap-2 px-4 py-2 sm:px-6 sm:py-3 text-[10px] sm:text-sm text-gray-300 
@@ -59,13 +60,18 @@ const FeatureSection = () => {
 
       {isLoading && !movies.length ? (
         <Loading />
-      ) : (
+      ) : movies.length ? (
         <MovieGrid
           movies={movies}
           columns="grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
           animated={true}
           staggerDelay={80}
+          hydrateRuntime={false}
         />
+      ) : (
+        <p className="rounded-2xl border border-white/10 bg-white/5 px-6 py-10 text-center text-sm text-gray-400">
+          Current releases are temporarily unavailable. Please try again shortly.
+        </p>
       )}
 
       <div className='flex justify-center mt-20'>
@@ -79,7 +85,7 @@ const FeatureSection = () => {
           Show more
         </button>
       </div>
-    </div>
+    </section>
   );
 };
 

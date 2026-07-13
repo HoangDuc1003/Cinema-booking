@@ -22,6 +22,8 @@ dist/
 dist-ssr/
 build/
 out/
+**/test-results/
+**/playwright-report/
 
 # --- Logs ---
 logs

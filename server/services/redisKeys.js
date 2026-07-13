@@ -16,6 +16,8 @@ export const redisKeys = {
     showtimes: (movieId) => key('cache', 'showtimes', movieId),
     showtimesPattern: () => key('cache', 'showtimes', '*'),
     tmdbPopular: (page) => key('cache', 'tmdb', 'popular', page),
+    homeNowShowing: (limit, region) => key('cache', 'tmdb', 'home-now-showing', region, limit),
+    homeNowShowingLastGood: (limit, region) => key('cache', 'tmdb', 'home-now-showing-last-good', region, limit),
     tmdbUpcoming: (page) => key('cache', 'tmdb', 'upcoming', page),
     tmdbNowPlaying: (page) => key('cache', 'tmdb', 'now-playing', page),
     tmdbMovie: (movieId) => key('cache', 'tmdb', 'movie', movieId),
@@ -31,6 +33,7 @@ export const redisKeys = {
 
 export const redisTtl = Object.freeze({
     movies: parsePositiveInteger(process.env.CACHE_MOVIES_TTL_SECONDS, 300),
+    homeNowShowingLastGood: parsePositiveInteger(process.env.CACHE_HOME_NOW_SHOWING_LAST_GOOD_TTL_SECONDS, 86400),
     movie: parsePositiveInteger(process.env.CACHE_MOVIE_TTL_SECONDS, 1800),
     cinemas: parsePositiveInteger(process.env.CACHE_CINEMAS_TTL_SECONDS, 600),
     showtimes: parsePositiveInteger(process.env.CACHE_SHOWTIMES_TTL_SECONDS, 120),

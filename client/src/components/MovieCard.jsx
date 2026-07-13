@@ -1,11 +1,11 @@
 import React, { useCallback, useState, useEffect } from 'react';
-import { StarIcon, Calendar, Clock, Play, Heart } from 'lucide-react';
+import { StarIcon, Calendar, Clock, Play, Heart, Film } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import timeFormat from '../lib/timeFormat';
 import { fetchMovieDetails } from '../services/tmdb';
 
-const MovieCard = ({ movie }) => {
+const MovieCard = ({ movie, hydrateRuntime = true }) => {
   const navigate = useNavigate();
   const [hasImageError, setHasImageError] = useState(false);
 
@@ -54,7 +54,7 @@ const MovieCard = ({ movie }) => {
 
   useEffect(() => {
     let mounted = true;
-    if (runtimeMinutes == null) {
+    if (hydrateRuntime && runtimeMinutes == null) {
       const tmdbId = movie.id || (movie._id && !isNaN(Number(movie._id)) ? Number(movie._id) : null);
       if (tmdbId) {
         fetchMovieDetails(tmdbId)
@@ -66,7 +66,7 @@ const MovieCard = ({ movie }) => {
       }
     }
     return () => { mounted = false; };
-  }, [runtimeMinutes, movie.id, movie._id]);
+  }, [hydrateRuntime, runtimeMinutes, movie.id, movie._id]);
 
   const rating = movie.vote_average ? movie.vote_average.toFixed(1) : (movie.rating || '0.0');
   
@@ -77,7 +77,7 @@ const MovieCard = ({ movie }) => {
     };
 
     const imageSrc = getImageUrl(movie.poster_path || movie.backdrop_path || movie.poster);
-    if (!imageSrc || hasImageError) return null;
+    const showPosterFallback = !imageSrc || hasImageError;
 
     return (
     <div 
@@ -86,14 +86,25 @@ const MovieCard = ({ movie }) => {
       className="relative w-full aspect-2/3 rounded-2xl overflow-hidden group cursor-pointer bg-gray-900 border border-gray-800
        hover:border-pink-500/50 transition-colors duration-500 shadow-lg"
     >
-      <img 
-        src={imageSrc} 
-        alt={movie.title} 
-        loading="lazy"
-        decoding="async"
-        onError={() => setHasImageError(true)}
-        className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-110"
-      />
+      {showPosterFallback ? (
+        <div
+          className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-linear-to-br from-slate-900 via-slate-950 to-black px-6 text-center"
+          role="img"
+          aria-label={`Poster unavailable for ${movie.title}`}
+        >
+          <Film className="h-12 w-12 text-primary/75" aria-hidden="true" />
+          <span className="line-clamp-2 text-sm font-semibold text-white/75">{movie.title}</span>
+        </div>
+      ) : (
+        <img
+          src={imageSrc}
+          alt={movie.title}
+          loading="lazy"
+          decoding="async"
+          onError={() => setHasImageError(true)}
+          className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-110"
+        />
+      )}
       
       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all duration-500 z-10 pointer-events-none"></div>
 
@@ -134,10 +145,12 @@ const MovieCard = ({ movie }) => {
             <Calendar className="w-3.5 h-3.5 text-pink-500" />
             <span className="font-medium">{releaseYear}</span>
           </div>
-          <div className="flex items-center gap-1.5">
+          {runtimeMinutes != null && (
+            <div className="flex items-center gap-1.5">
               <Clock className="w-3.5 h-3.5 text-pink-500" />
               <span className="font-medium">{timeFormat(runtimeMinutes)}</span>
             </div>
+          )}
         </div>
         
         <button className="w-full py-2.5 text-sm bg-pink-500 backdrop-blur-xl border border-pink-300 shadow-[0_8px_32px_rgba(255,255,255,0.2)] flex items-center 

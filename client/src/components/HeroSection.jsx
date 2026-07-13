@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchHomeHero, fetchMovieTrailers } from '../services/tmdb';
+import { fetchHomeHero } from '../services/tmdb';
 import { dummyShowsData } from '../assets/assets';
 import Loading from './Loading';
 import HeroContent from './hero/HeroContent';
@@ -8,9 +8,12 @@ import HeroControls from './hero/HeroControls';
 import HeroMedia from './hero/HeroMedia';
 import HeroPosterRail from './hero/HeroPosterRail';
 import HeroNativeVideo from './hero/HeroNativeVideo';
+import { buildHeroImageCandidates } from './hero/heroImages';
 import {
   HERO_NATIVE_MOCK_FIXTURES,
+  canUseHeroBackgroundVideo,
   isHeroTrailerMockEnabled,
+  resolveConfiguredHeroVideoSource,
   resolveHeroMockTrailers,
   resolveNativeHeroVideoSource,
 } from './hero/heroMock';
@@ -31,14 +34,6 @@ const HERO_POSTER_TRANSITION_MS = 1_200;
 
 const getNow = () => performance.now();
 
-const getImageUrl = (path, size = 'original') => {
-  if (!path) return '';
-  if (path.startsWith('http')) {
-    return path.replace(/\/t\/p\/(?:original|w\d+)\//, `/t/p/${size}/`);
-  }
-  return `https://image.tmdb.org/t/p/${size}${path}`;
-};
-
 const getHeroMovieKey = (movie, fallback = '') => String(movie?.id || movie?._id || fallback);
 
 const formatRuntime = (minutes) => {
@@ -48,50 +43,83 @@ const formatRuntime = (minutes) => {
   return `${hours}h ${remainingMinutes}m`;
 };
 
-const canLoadImage = (url, signal) => new Promise((resolve) => {
+const canLoadImage = (url, signal, timeoutMs = 6_000) => new Promise((resolve) => {
   if (!url || signal?.aborted) {
     resolve(false);
     return;
   }
 
   const image = new Image();
+  let settled = false;
+  let timeoutId;
   const cleanup = () => {
+    window.clearTimeout(timeoutId);
     image.onload = null;
     image.onerror = null;
     signal?.removeEventListener('abort', handleAbort);
   };
-  const handleAbort = () => {
+  const finish = (loaded) => {
+    if (settled) return;
+    settled = true;
     cleanup();
-    resolve(false);
+    resolve(loaded);
+  };
+  const handleAbort = () => {
+    finish(false);
   };
 
   image.onload = () => {
-    cleanup();
-    resolve(true);
+    finish(image.naturalWidth > 0 && image.naturalHeight > 0);
   };
   image.onerror = () => {
-    cleanup();
-    resolve(false);
+    finish(false);
   };
   signal?.addEventListener('abort', handleAbort, { once: true });
+  timeoutId = window.setTimeout(() => finish(false), timeoutMs);
   image.src = url;
 });
 
 const validateMovieCandidates = async (movies, signal) => {
+  const findFirstLoadable = async (candidates) => {
+    for (const url of candidates) {
+      if (signal?.aborted) return '';
+      if (await canLoadImage(url, signal)) return url;
+    }
+    return '';
+  };
+
+  const putFirst = (candidates, selected) => (
+    selected ? [selected, ...candidates.filter((candidate) => candidate !== selected)] : candidates
+  );
+
   const validateMovie = async (movie) => {
-    const candidates = [
+    const desktopCandidates = buildHeroImageCandidates([
       movie.backdrop_original,
       movie.backdrop_w1280,
       movie.backdrop_path,
       movie.poster_path,
-    ];
-    const uniqueUrls = [...new Set(candidates.filter(Boolean).map((path) => getImageUrl(path, 'w1280')))];
+    ], 'w1280');
+    const mobileCandidates = buildHeroImageCandidates([
+      movie.poster_path,
+      movie.backdrop_original,
+      movie.backdrop_w1280,
+      movie.backdrop_path,
+    ], 'w780');
 
-    for (const url of uniqueUrls) {
-      if (signal?.aborted) return null;
-      if (await canLoadImage(url, signal)) return { ...movie, heroImageUrl: url };
-    }
-    return null;
+    const [heroImageUrl, heroMobileImageUrl] = await Promise.all([
+      findFirstLoadable(desktopCandidates),
+      findFirstLoadable(mobileCandidates),
+    ]);
+    const fallbackUrl = heroImageUrl || heroMobileImageUrl;
+    if (!fallbackUrl) return null;
+
+    return {
+      ...movie,
+      heroImageUrl: heroImageUrl || fallbackUrl,
+      heroMobileImageUrl: heroMobileImageUrl || fallbackUrl,
+      heroImageCandidates: putFirst(desktopCandidates, heroImageUrl || fallbackUrl),
+      heroMobileImageCandidates: putFirst(mobileCandidates, heroMobileImageUrl || fallbackUrl),
+    };
   };
 
   const results = await Promise.all(movies.slice(0, 5).map(validateMovie));
@@ -153,8 +181,6 @@ const HeroSection = ({ onWatchTrailer }) => {
   const machineRef = useRef(machine);
   const generationRef = useRef(machine.generation);
   const trailerCacheRef = useRef(new Map());
-  const trailerPromisesRef = useRef(new Map());
-  const trailerControllersRef = useRef(new Map());
   const autoAttemptedKeysRef = useRef(new Set());
   const transitionLockRef = useRef(false);
   const transitionTimersRef = useRef(new Set());
@@ -164,6 +190,7 @@ const HeroSection = ({ onWatchTrailer }) => {
   const previewHandledGenerationRef = useRef(null);
 
   const isLargeScreen = useMediaQuery('(min-width: 1024px)');
+  const isMobileScreen = useMediaQuery('(max-width: 767px)');
   const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
   const saveData = useSaveData();
   const desktopAutoEligible = isLargeScreen && !reducedMotion && !saveData;
@@ -191,12 +218,6 @@ const HeroSection = ({ onWatchTrailer }) => {
     transitionTimersRef.current.clear();
   }, []);
 
-  const abortTrailerLoads = useCallback(() => {
-    trailerControllersRef.current.forEach((controller) => controller.abort());
-    trailerControllersRef.current.clear();
-    trailerPromisesRef.current.clear();
-  }, []);
-
   const loadHeroTrailers = useCallback((targetMovie, targetKey, { force = false } = {}) => {
     if (force) trailerCacheRef.current.delete(targetKey);
     if (trailerCacheRef.current.has(targetKey)) {
@@ -213,29 +234,17 @@ const HeroSection = ({ onWatchTrailer }) => {
       return Promise.resolve(mockedTrailers);
     }
 
-    const existingPromise = trailerPromisesRef.current.get(targetKey);
-    if (existingPromise) return existingPromise;
+    const configuredSource = resolveConfiguredHeroVideoSource(targetMovie);
+    const configuredTrailers = configuredSource ? [{
+      id: `hero-native-${targetKey}`,
+      title: targetMovie.title || targetMovie.name || 'Hero trailer',
+      videoUrl: configuredSource.src,
+      mimeType: configuredSource.type,
+      isRequestedTrailer: true,
+    }] : [];
 
-    const controller = new AbortController();
-    trailerControllersRef.current.set(targetKey, controller);
-    const promise = fetchMovieTrailers(targetMovie, { signal: controller.signal })
-      .then((trailers) => {
-        if (controller.signal.aborted) throw new DOMException('Aborted', 'AbortError');
-        const normalized = Array.isArray(trailers) ? trailers : [];
-        trailerCacheRef.current.set(targetKey, normalized);
-        return normalized;
-      })
-      .finally(() => {
-        if (trailerPromisesRef.current.get(targetKey) === promise) {
-          trailerPromisesRef.current.delete(targetKey);
-        }
-        if (trailerControllersRef.current.get(targetKey) === controller) {
-          trailerControllersRef.current.delete(targetKey);
-        }
-      });
-
-    trailerPromisesRef.current.set(targetKey, promise);
-    return promise;
+    trailerCacheRef.current.set(targetKey, configuredTrailers);
+    return Promise.resolve(configuredTrailers);
   }, [heroTrailerMockEnabled]);
 
   const startTrailerAttempt = useCallback(async ({ source = 'manual', forceMetadata = false } = {}) => {
@@ -306,12 +315,11 @@ const HeroSection = ({ onWatchTrailer }) => {
     clearPlaybackTimers();
     window.clearTimeout(recompactTimerRef.current);
     recompactTimerRef.current = null;
-    abortTrailerLoads();
     setManualPlaybackRequested(false);
     setMuted(true);
     const generation = nextGeneration();
     dispatch({ type: 'POSTER_REQUESTED', generation, movieKey });
-  }, [abortTrailerLoads, clearPlaybackTimers, nextGeneration]);
+  }, [clearPlaybackTimers, nextGeneration]);
 
   const switchMovie = useCallback((targetIndex, { animate = true, continueTrailer = false } = {}) => {
     const availableMovies = moviesRef.current;
@@ -322,11 +330,14 @@ const HeroSection = ({ onWatchTrailer }) => {
     clearPlaybackTimers();
     window.clearInterval(carouselIntervalRef.current);
     carouselIntervalRef.current = null;
-    abortTrailerLoads();
     window.clearTimeout(recompactTimerRef.current);
     recompactTimerRef.current = null;
     previewHandledGenerationRef.current = null;
-    setManualPlaybackRequested(continueTrailer);
+    setManualPlaybackRequested(
+      continueTrailer && canUseHeroBackgroundVideo(availableMovies[normalizedIndex], {
+        mockEnabled: heroTrailerMockEnabled,
+      }),
+    );
     setMuted(true);
 
     const targetKey = getHeroMovieKey(availableMovies[normalizedIndex], normalizedIndex);
@@ -353,7 +364,7 @@ const HeroSection = ({ onWatchTrailer }) => {
     }, HERO_POSTER_TRANSITION_MS);
     transitionTimersRef.current.add(swapTimer);
     transitionTimersRef.current.add(settleTimer);
-  }, [abortTrailerLoads, clearPlaybackTimers, nextGeneration, reducedMotion]);
+  }, [clearPlaybackTimers, heroTrailerMockEnabled, nextGeneration, reducedMotion]);
 
   const advanceTrailerSequence = useCallback(() => {
     const availableMovies = moviesRef.current;
@@ -369,12 +380,11 @@ const HeroSection = ({ onWatchTrailer }) => {
       clearPlaybackTimers();
       clearTransitionTimers();
       transitionLockRef.current = false;
-      abortTrailerLoads();
       window.clearInterval(carouselIntervalRef.current);
       carouselIntervalRef.current = null;
       window.clearTimeout(recompactTimerRef.current);
     };
-  }, [abortTrailerLoads, clearPlaybackTimers, clearTransitionTimers]);
+  }, [clearPlaybackTimers, clearTransitionTimers]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -396,7 +406,6 @@ const HeroSection = ({ onWatchTrailer }) => {
         if (controller.signal.aborted) return;
         const rawMovies = Array.isArray(data.movies) && data.movies.length ? data.movies : dummyShowsData;
         const immediateMovies = rawMovies.slice(0, 5);
-        applyMovies(immediateMovies);
         const validMovies = await validateMovieCandidates(immediateMovies, controller.signal);
         if (!controller.signal.aborted && validMovies.length) applyMovies(validMovies);
       } catch (error) {
@@ -447,6 +456,9 @@ const HeroSection = ({ onWatchTrailer }) => {
 
   const currentMovie = movies[currentIndex];
   const currentMovieKey = getHeroMovieKey(currentMovie, currentIndex);
+  const heroBackgroundAvailable = canUseHeroBackgroundVideo(currentMovie, {
+    mockEnabled: heroTrailerMockEnabled,
+  });
 
   useEffect(() => {
     if (!currentMovie || machine.movieKey !== currentMovieKey || machine.phase !== HERO_PHASES.POSTER) return;
@@ -459,7 +471,11 @@ const HeroSection = ({ onWatchTrailer }) => {
       return () => window.clearTimeout(timerId);
     }
 
-    if (!desktopAutoEligible || autoAttemptedKeysRef.current.has(currentMovieKey)) return;
+    if (
+      !desktopAutoEligible
+      || !heroBackgroundAvailable
+      || autoAttemptedKeysRef.current.has(currentMovieKey)
+    ) return;
     autoAttemptedKeysRef.current.add(currentMovieKey);
     timerId = window.setTimeout(() => {
       void startTrailerAttempt({ source: 'auto' });
@@ -469,6 +485,7 @@ const HeroSection = ({ onWatchTrailer }) => {
     currentMovie,
     currentMovieKey,
     desktopAutoEligible,
+    heroBackgroundAvailable,
     machine.movieKey,
     machine.phase,
     manualPlaybackRequested,
@@ -649,9 +666,26 @@ const HeroSection = ({ onWatchTrailer }) => {
     );
   }
 
-  const backdropUrl = currentMovie.heroImageUrl
-    || getImageUrl(currentMovie.backdrop_original || currentMovie.backdrop_w1280 || currentMovie.backdrop_path, 'w1280');
-  const mobilePosterUrl = getImageUrl(currentMovie.poster_path || currentMovie.backdrop_path || backdropUrl, 'w780');
+  const desktopImageCandidates = currentMovie.heroImageCandidates?.length
+    ? currentMovie.heroImageCandidates
+    : buildHeroImageCandidates([
+      currentMovie.heroImageUrl,
+      currentMovie.backdrop_original,
+      currentMovie.backdrop_w1280,
+      currentMovie.backdrop_path,
+      currentMovie.poster_path,
+    ], 'w1280');
+  const mobileImageCandidates = currentMovie.heroMobileImageCandidates?.length
+    ? currentMovie.heroMobileImageCandidates
+    : buildHeroImageCandidates([
+      currentMovie.heroMobileImageUrl,
+      currentMovie.poster_path,
+      currentMovie.heroImageUrl,
+      currentMovie.backdrop_original,
+      currentMovie.backdrop_w1280,
+      currentMovie.backdrop_path,
+    ], 'w780');
+  const posterCandidates = isMobileScreen ? mobileImageCandidates : desktopImageCandidates;
   const trailerActive = [
     HERO_PHASES.TRAILER_ENTERING,
     HERO_PHASES.TRAILER_EXPANDED,
@@ -679,21 +713,6 @@ const HeroSection = ({ onWatchTrailer }) => {
   const videoVisible = playerActive && !machine.posterVisible;
   const compact = isLargeScreen && !reducedMotion && machine.phase === HERO_PHASES.TRAILER_COMPACT;
 
-  const handlePosterError = () => {
-    if (movies.length <= 1) return;
-    const stableId = currentMovie.id || currentMovie._id;
-    const nextMovies = movies.filter((movie) => (movie.id || movie._id) !== stableId);
-    const nextIndex = Math.min(currentIndex, nextMovies.length - 1);
-    const nextKey = getHeroMovieKey(nextMovies[nextIndex], nextIndex);
-    const generation = nextGeneration();
-    moviesRef.current = nextMovies;
-    currentIndexRef.current = nextIndex;
-    setMovies(nextMovies);
-    setCurrentIndex(nextIndex);
-    setManualPlaybackRequested(false);
-    dispatch({ type: 'MOVIE_CHANGED', generation, movieKey: nextKey });
-  };
-
   const navigateToMovie = () => {
     navigate(`/movies/${currentMovie._id || currentMovie.id}`);
     window.scrollTo({ top: 0, behavior: reducedMotion ? 'auto' : 'smooth' });
@@ -702,13 +721,11 @@ const HeroSection = ({ onWatchTrailer }) => {
   return (
     <section ref={rootRef} className="hero-section" aria-label="Featured movie">
       <HeroMedia
-        key={`media-${currentMovieKey}`}
+        key={`media-${currentMovieKey}-${posterCandidates.join('|')}`}
         title={currentMovie.title || currentMovie.name}
-        backdropUrl={backdropUrl}
-        mobilePosterUrl={mobilePosterUrl}
+        posterCandidates={posterCandidates}
         posterVisible={machine.posterVisible}
         videoVisible={videoVisible}
-        onPosterError={handlePosterError}
       >
         {playerEnabled && (
           <HeroNativeVideo
@@ -762,14 +779,18 @@ const HeroSection = ({ onWatchTrailer }) => {
       <HeroPosterRail
         movies={movies}
         currentIndex={currentIndex}
-        getThumbnailUrl={(movie) => movie.heroImageUrl || getImageUrl(movie.backdrop_path || movie.poster_path, 'w300')}
+        getThumbnailUrls={(movie) => buildHeroImageCandidates([
+          movie.heroImageUrl,
+          movie.backdrop_path,
+          movie.poster_path,
+        ], 'w300')}
         onSelect={(index) => switchMovie(index, {
           animate: true,
           continueTrailer: trailerActive || trailerLoading,
         })}
       />
 
-      {isLargeScreen && (
+      {isLargeScreen && heroBackgroundAvailable && (
         <HeroControls
           trailerActive={trailerActive}
           trailerLoading={trailerLoading}

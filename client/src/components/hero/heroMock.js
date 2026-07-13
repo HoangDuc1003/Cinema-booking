@@ -88,6 +88,27 @@ export const resolveNativeHeroVideoSource = (trailer) => {
   };
 };
 
+export const resolveConfiguredHeroVideoSource = (movie) => {
+  if (!movie || typeof movie !== 'object') return null;
+
+  const videoUrl = movie.heroVideoUrl
+    || movie.backgroundVideoUrl
+    || movie.hero_video_url
+    || movie.background_video_url
+    || '';
+  const mimeType = movie.heroVideoMimeType
+    || movie.backgroundVideoMimeType
+    || movie.hero_video_mime_type
+    || movie.background_video_mime_type
+    || '';
+
+  return resolveNativeHeroVideoSource({ videoUrl, mimeType });
+};
+
+export const canUseHeroBackgroundVideo = (movie, { mockEnabled = false } = {}) => (
+  Boolean(mockEnabled) || Boolean(resolveConfiguredHeroVideoSource(movie))
+);
+
 export const resolveHeroMockTrailers = ({ movieKey, movie, fixtures } = {}) => {
   if (!Array.isArray(fixtures) || fixtures.length === 0) return [];
 

@@ -5,12 +5,33 @@ const API_BASE = (import.meta.env.VITE_BASE_URL || '').replace(/\/$/, '');
 const IMAGE_BASE = 'https://image.tmdb.org/t/p';
 const HERO_CACHE_KEY = 'home_hero_v2';
 const HERO_CACHE_TTL = 1000 * 60 * 2;
+const HOME_NOW_SHOWING_CACHE_KEY = 'home_now_showing_v1';
+const HOME_NOW_SHOWING_CACHE_TTL = 1000 * 60 * 5;
+const HOME_NOW_SHOWING_STALE_TTL = 1000 * 60 * 60 * 24;
 const API_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS) || 4500;
 
 const fallbackMovies = (limit = dummyShowsData.length) => dummyShowsData.slice(0, limit);
 
 const hasUsableImage = (movie) => Boolean(movie?.poster_path || movie?.backdrop_path || movie?.poster);
 const onlyMoviesWithImages = (movies = []) => movies.filter(hasUsableImage);
+
+const getTmdbImageUrl = (path, size) => {
+    if (!path) return null;
+    if (/^https?:\/\//i.test(path)) return path;
+    return `${IMAGE_BASE}/${size}${path}`;
+};
+
+const normalizeMovieCard = (movie) => ({
+    ...movie,
+    _id: String(movie?._id || movie?.id || ''),
+    id: movie?.id || movie?._id,
+    title: movie?.title || movie?.name || 'Untitled',
+    poster_path: getTmdbImageUrl(movie?.poster_path || movie?.poster, 'w500'),
+    backdrop_path: getTmdbImageUrl(movie?.backdrop_path, 'w780'),
+    popularity: Number(movie?.popularity) || 0,
+    vote_average: Number(movie?.vote_average) || 0,
+    vote_count: Number(movie?.vote_count) || 0,
+});
 
 const getTmdbMovieId = (movie) => {
     const candidate = movie?.id ?? movie?._id ?? movie;
@@ -112,6 +133,55 @@ export const fetchMovieTrailers = async (movie, { signal } = {}) => {
             qualityLabel: '1080p',
             isRequestedTrailer: true,
         }));
+};
+
+export const fetchHomeNowShowing = async ({ limit = 10, region } = {}) => {
+    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 10, 1), 20);
+    const safeRegion = /^[A-Za-z]{2}$/.test(String(region || ''))
+        ? String(region).toUpperCase()
+        : '';
+    let staleEntry = null;
+
+    try {
+        const cached = sessionStorage.getItem(HOME_NOW_SHOWING_CACHE_KEY);
+        if (cached) {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed?.data)) {
+                staleEntry = parsed;
+                if (Date.now() - parsed.t < HOME_NOW_SHOWING_CACHE_TTL) {
+                    return parsed.data.slice(0, safeLimit);
+                }
+            }
+        }
+    } catch {
+        // Cache is an optimization; continue with the live source.
+    }
+
+    try {
+        const query = new URLSearchParams({ limit: String(safeLimit) });
+        if (safeRegion) query.set('region', safeRegion);
+        const data = await fetchBackendJson(`/home-now-showing?${query.toString()}`);
+        const rawMovies = Array.isArray(data?.results) ? data.results : [];
+        const movies = onlyMoviesWithImages(rawMovies.map(normalizeMovieCard));
+        if (!movies.length) throw new Error('Home Now Showing returned no usable movies.');
+
+        try {
+            sessionStorage.setItem(HOME_NOW_SHOWING_CACHE_KEY, JSON.stringify({
+                t: Date.now(),
+                data: movies,
+            }));
+        } catch {
+            // Still return fresh data when storage is unavailable.
+        }
+
+        return movies.slice(0, safeLimit);
+    } catch (error) {
+        if (staleEntry && Date.now() - staleEntry.t < HOME_NOW_SHOWING_STALE_TTL) {
+            return staleEntry.data.slice(0, safeLimit);
+        }
+        console.error('fetchHomeNowShowing error', error);
+        return onlyMoviesWithImages(fallbackMovies(safeLimit).map(normalizeMovieCard));
+    }
 };
 
 // Cache settings

@@ -1,6 +1,29 @@
-import React from 'react';
+import React, { useState } from 'react';
 
-const HeroPosterRail = ({ movies, currentIndex, getThumbnailUrl, onSelect }) => (
+const HeroPosterThumbnail = ({ sources }) => {
+  const [sourceIndex, setSourceIndex] = useState(0);
+  const [ready, setReady] = useState(false);
+  const source = sources[sourceIndex] || '';
+
+  if (!source) return <i className="hero-poster-thumb__fallback" aria-hidden="true" />;
+
+  return (
+    <img
+      src={source}
+      alt=""
+      loading="lazy"
+      decoding="async"
+      className={ready ? 'is-ready' : 'is-loading'}
+      onLoad={() => setReady(true)}
+      onError={() => {
+        setReady(false);
+        setSourceIndex((index) => Math.min(index + 1, sources.length));
+      }}
+    />
+  );
+};
+
+const HeroPosterRail = ({ movies, currentIndex, getThumbnailUrls, onSelect }) => (
   <div className="hero-poster-rail" aria-label="Hero movie navigation">
     <div className="hero-poster-rail__progress" aria-hidden="true">
       {movies.map((movie, index) => (
@@ -10,6 +33,7 @@ const HeroPosterRail = ({ movies, currentIndex, getThumbnailUrl, onSelect }) => 
     <div className="hero-poster-rail__items">
       {movies.map((movie, index) => {
         const active = index === currentIndex;
+        const thumbnailUrls = getThumbnailUrls(movie);
         return (
           <button
             type="button"
@@ -19,7 +43,10 @@ const HeroPosterRail = ({ movies, currentIndex, getThumbnailUrl, onSelect }) => 
             aria-label={`Show ${movie.title || movie.name}`}
             className={`hero-poster-thumb ${active ? 'is-active' : ''}`}
           >
-            <img src={getThumbnailUrl(movie)} alt="" loading="lazy" decoding="async" />
+            <HeroPosterThumbnail
+              key={thumbnailUrls.join('|')}
+              sources={thumbnailUrls}
+            />
             <span>{movie.title || movie.name}</span>
           </button>
         );

@@ -13,6 +13,7 @@ const MovieGrid = ({
   columns = 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4',
   animated = true,
   staggerDelay = 35,
+  hydrateRuntime = true,
 }) => {
   const { ref, isVisible } = useIntersectionObserver({
     threshold: 0.08,
@@ -37,11 +38,11 @@ const MovieGrid = ({
 
       return (
         <div key={key} style={itemStyle}>
-          <MovieCard movie={movie} />
+          <MovieCard movie={movie} hydrateRuntime={hydrateRuntime} />
         </div>
       );
     });
-  }, [movies, animated, staggerDelay, isVisible]);
+  }, [movies, animated, staggerDelay, hydrateRuntime, isVisible]);
 
   if (!movieItems) return null;
 

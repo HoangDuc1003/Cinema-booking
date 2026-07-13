@@ -6,6 +6,8 @@ import { getJson, rememberJson, setJson } from '../services/cacheService.js';
 import { invalidateMovieCatalog } from '../services/cacheInvalidationService.js';
 import { redisKeys, redisTtl } from '../services/redisKeys.js';
 import { getPublicHomeHero } from '../services/heroService.js';
+import { getPublicHomeNowShowing } from '../services/homeNowShowingService.js';
+import { fetchTmdbImage } from '../services/tmdbImageService.js';
 
 const tmdbHeaders = () => ({ Authorization: `Bearer ${process.env.TMDB_API_KEY}` });
 const setCacheHeader = (res, cache) => res.set('X-Cache', cache);
@@ -79,6 +81,40 @@ export const getHomeHero = async (req, res) => {
     } catch (error) {
         console.error('[getHomeHero]', error.message);
         return res.status(500).json({ success: false, message: 'Unable to load home hero.' });
+    }
+};
+
+export const getTmdbHomeNowShowing = async (req, res) => {
+    try {
+        const result = await getPublicHomeNowShowing({
+            limit: req.query.limit,
+            region: req.query.region,
+        });
+        return setCacheHeader(res, result.cache).json({ success: true, data: result.value });
+    } catch (error) {
+        console.error('[getTmdbHomeNowShowing]', error.message);
+        return res.status(502).json({ success: false, message: 'Unable to load home now-showing movies.' });
+    }
+};
+
+export const getTmdbImage = async (req, res) => {
+    try {
+        const image = await fetchTmdbImage({
+            path: req.query.path,
+            size: req.query.size,
+        });
+        return res
+            .set('Content-Type', image.contentType)
+            .set('Cache-Control', 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=2592000')
+            .set('Content-Length', String(image.body.length))
+            .send(image.body);
+    } catch (error) {
+        const status = error.status === 400 ? 400 : 502;
+        console.warn('[getTmdbImage]', error.message);
+        return res.status(status).json({
+            success: false,
+            message: status === 400 ? 'Invalid image request.' : 'Unable to load movie image.',
+        });
     }
 };
 

@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import {
   HERO_NATIVE_MOCK_FIXTURE,
   HERO_NATIVE_MOCK_FIXTURES,
+  canUseHeroBackgroundVideo,
   isHeroTrailerMockEnabled,
+  resolveConfiguredHeroVideoSource,
   resolveHeroMockTrailers,
   resolveNativeHeroVideoSource,
 } from '../src/components/hero/heroMock.js';
@@ -132,4 +134,35 @@ test('native source resolver rejects unsupported or missing source metadata', ()
   assert.equal(resolveNativeHeroVideoSource({ videoUrl: 'https://media.test/trailer' }), null);
   assert.equal(resolveNativeHeroVideoSource({ videoUrl: '/video/trailer.m3u8' }), null);
   assert.equal(resolveNativeHeroVideoSource(null), null);
+});
+
+test('configured Hero source accepts first-party native fields and rejects iframe-only movies', () => {
+  assert.deepEqual(resolveConfiguredHeroVideoSource({
+    heroVideoUrl: 'https://cdn.test/hero.webm',
+  }), {
+    src: 'https://cdn.test/hero.webm',
+    type: 'video/webm',
+  });
+  assert.deepEqual(resolveConfiguredHeroVideoSource({
+    background_video_url: 'https://cdn.test/hero-stream',
+    background_video_mime_type: 'video/mp4',
+  }), {
+    src: 'https://cdn.test/hero-stream',
+    type: 'video/mp4',
+  });
+  assert.equal(resolveConfiguredHeroVideoSource({
+    heroVideoUrl: 'https://www.youtube.com/watch?v=abc',
+  }), null);
+  assert.equal(resolveConfiguredHeroVideoSource({}), null);
+});
+
+test('production Hero stays on poster when a movie has only an iframe trailer', () => {
+  const youtubeOnlyMovie = {
+    id: 42,
+    videoUrl: 'https://www.youtube.com/embed/abc',
+  };
+
+  assert.equal(canUseHeroBackgroundVideo(youtubeOnlyMovie), false);
+  assert.equal(canUseHeroBackgroundVideo(youtubeOnlyMovie, { mockEnabled: true }), true);
+  assert.equal(canUseHeroBackgroundVideo({ heroVideoUrl: '/hero/movie.mp4' }), true);
 });
