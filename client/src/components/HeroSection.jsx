@@ -1,604 +1,786 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CalendarIcon, ClockIcon, Star, Play, Ticket, ImageIcon, Video } from 'lucide-react';
 import { fetchHomeHero, fetchMovieTrailers } from '../services/tmdb';
-import Loading from './Loading';
 import { dummyShowsData } from '../assets/assets';
-import useYouTubePlayer from '../hooks/useYouTubePlayer';
+import Loading from './Loading';
+import HeroContent from './hero/HeroContent';
+import HeroControls from './hero/HeroControls';
+import HeroMedia from './hero/HeroMedia';
+import HeroPosterRail from './hero/HeroPosterRail';
+import HeroNativeVideo from './hero/HeroNativeVideo';
+import {
+  HERO_NATIVE_MOCK_FIXTURES,
+  isHeroTrailerMockEnabled,
+  resolveHeroMockTrailers,
+  resolveNativeHeroVideoSource,
+} from './hero/heroMock';
+import {
+  HERO_FAILURE_REASONS,
+  HERO_PHASES,
+  createInitialHeroState,
+  getPlaybackRemaining,
+  heroReducer,
+} from './hero/heroMachine';
+import './hero/hero.css';
+
+const MAX_MANUAL_RETRIES = 2;
+const VIDEO_ENTER_DURATION_MS = 850;
+const RECOMPACT_DELAY_MS = 3_000;
+const HERO_POSTER_SWAP_DELAY_MS = 400;
+const HERO_POSTER_TRANSITION_MS = 1_200;
+
+const getNow = () => performance.now();
 
 const getImageUrl = (path, size = 'original') => {
   if (!path) return '';
-  if (path.startsWith('http')) return path.replace('/t/p/original/', `/t/p/${size}/`);
+  if (path.startsWith('http')) {
+    return path.replace(/\/t\/p\/(?:original|w\d+)\//, `/t/p/${size}/`);
+  }
   return `https://image.tmdb.org/t/p/${size}${path}`;
 };
 
+const getHeroMovieKey = (movie, fallback = '') => String(movie?.id || movie?._id || fallback);
+
 const formatRuntime = (minutes) => {
-  if (typeof minutes !== 'number' || Number.isNaN(minutes) || minutes <= 0) return 'N/A';
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  return `${h}h ${m}m`;
+  if (!Number.isFinite(minutes) || minutes <= 0) return 'N/A';
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return `${hours}h ${remainingMinutes}m`;
 };
 
-const keepLastWordsTogether = (text = '', tailWords = 2) => {
-  const t = String(text).trim();
-  if (!t) return t;
-  const words = t.split(/\s+/);
-  if (words.length <= tailWords) return t;
-  const head = words.slice(0, words.length - tailWords).join(' ');
-  const tail = words.slice(words.length - tailWords).join('\u00A0');
-  return head + ' ' + tail;
-};
+const canLoadImage = (url, signal) => new Promise((resolve) => {
+  if (!url || signal?.aborted) {
+    resolve(false);
+    return;
+  }
 
-const canLoadImage = (url, signal) =>
-  new Promise((resolve) => {
-    if (!url) { resolve(false); return; }
-    if (signal?.aborted) { resolve(false); return; }
-    const img = new Image();
-    const onLoad = () => { cleanup(); resolve(true); };
-    const onError = () => { cleanup(); resolve(false); };
-    const onAbort = () => { cleanup(); resolve(false); };
-    const cleanup = () => {
-      img.onload = null;
-      img.onerror = null;
-      if (signal) signal.removeEventListener('abort', onAbort);
-    };
-    img.onload = onLoad;
-    img.onerror = onError;
-    if (signal) signal.addEventListener('abort', onAbort, { once: true });
-    img.src = url;
-  });
+  const image = new Image();
+  const cleanup = () => {
+    image.onload = null;
+    image.onerror = null;
+    signal?.removeEventListener('abort', handleAbort);
+  };
+  const handleAbort = () => {
+    cleanup();
+    resolve(false);
+  };
+
+  image.onload = () => {
+    cleanup();
+    resolve(true);
+  };
+  image.onerror = () => {
+    cleanup();
+    resolve(false);
+  };
+  signal?.addEventListener('abort', handleAbort, { once: true });
+  image.src = url;
+});
 
 const validateMovieCandidates = async (movies, signal) => {
-  const results = [];
-  for (const movie of movies) {
-    if (signal?.aborted) break;
+  const validateMovie = async (movie) => {
     const candidates = [
       movie.backdrop_original,
       movie.backdrop_w1280,
       movie.backdrop_path,
       movie.poster_path,
     ];
-    const seen = new Set();
-    const unique = [];
-    for (const c of candidates) {
-      if (!c) continue;
-      const normalized = getImageUrl(c, 'w1280');
-      if (normalized && !seen.has(normalized)) {
-        seen.add(normalized);
-        unique.push(normalized);
-      }
+    const uniqueUrls = [...new Set(candidates.filter(Boolean).map((path) => getImageUrl(path, 'w1280')))];
+
+    for (const url of uniqueUrls) {
+      if (signal?.aborted) return null;
+      if (await canLoadImage(url, signal)) return { ...movie, heroImageUrl: url };
     }
-    let heroImageUrl = null;
-    for (const url of unique) {
-      if (signal?.aborted) break;
-      const ok = await canLoadImage(url, signal);
-      if (ok) { heroImageUrl = url; break; }
-    }
-    if (heroImageUrl) {
-      results.push({ ...movie, heroImageUrl });
-    }
-  }
-  return results;
-};
-
-const extractVideoId = (url) => {
-  if (!url) return null;
-  try {
-    const urlObj = new URL(url);
-    if (urlObj.hostname.includes('youtube.com')) {
-      return urlObj.searchParams.get('v') || urlObj.pathname.split('/').pop();
-    }
-    if (urlObj.hostname.includes('youtu.be')) {
-      return urlObj.pathname.substring(1);
-    }
-    return url;
-  } catch {
-    return url;
-  }
-};
-
-const getHighlightStart = (duration) => {
-  if (!duration || duration <= 35) return 0;
-  if (duration <= 70) return 8;
-  return Math.min(Math.max(Math.round(duration * 0.22), 12), duration - 25);
-};
-
-const STYLES = `
-  @keyframes fadeSlideUp {
-    0%   { transform: translateY(20px); opacity: 0; }
-    100% { transform: translateY(0);    opacity: 1; }
-  }
-  @keyframes cinematicBreathe {
-    0%, 100% { opacity: 0.05; }
-    50%      { opacity: 0.2; } 
-  }
-  @keyframes panRight {
-    0% { transform: scale(1.1) translateX(-2%); }
-    100% { transform: scale(1.1) translateX(2%); }
-  }
-  .animate-pan-right {
-    animation: panRight 10s linear forwards; 
-  }
-  @keyframes verticalWhiteFlare {
-    0%   { opacity: 0; transform: translateX(50%) scaleX(0.1) scaleY(1); }
-    30%  { opacity: 1; transform: translateX(50%) scaleX(3.5) scaleY(1.1); } 
-    50%  { opacity: 0.1; transform: translateX(50%) scaleX(0.3) scaleY(1); } 
-    75%  { opacity: 0.9; transform: translateX(50%) scaleX(2.5) scaleY(1.05); } 
-    100% { opacity: 0; transform: translateX(50%) scaleX(0.1) scaleY(1); } 
-  }
-  @keyframes darkDipTransition {
-    0%, 100% { opacity: 0; }
-    40%, 60% { opacity: 0.5; }
-  }
-  @keyframes charFromLeft {
-    0% { transform: translateX(-50px) translateY(5px) rotate(-4deg); opacity: 0; }
-    100% { transform: translateX(0) translateY(0) rotate(0); opacity: 1; }
-  }
-  @keyframes charFromRight {
-    0% { transform: translateX(50px) translateY(5px) rotate(4deg); opacity: 0; }
-    100% { transform: translateX(0) translateY(0) rotate(0); opacity: 1; }
-  }
-
-  .hero-fade-up { animation: fadeSlideUp 0.6s cubic-bezier(0.22,1,0.36,1) forwards; opacity: 0; }
-  .d1 { animation-delay: 50ms;   }
-  .d2 { animation-delay: 150ms; }
-  .d3 { animation-delay: 250ms; }
-  .d4 { animation-delay: 350ms; }
-  
-  .cinematic-shadow {
-    text-shadow: 0px 2px 10px rgba(0,0,0,0.8), 0px 4px 20px rgba(0,0,0,0.5);
-  }
-
-  .thumb-bar::-webkit-scrollbar { display: none; }
-  .thumb-bar { scrollbar-width: none; }
-
-  @media (max-width: 640px) {
-    .hero-title { font-size: clamp(24px, 6.5vw, 32px) !important; }
-    .hero-overview { display: none !important; }
-    .hero-meta { font-size: 12px !important; gap: 0.75rem !important; margin-bottom: 0.75rem !important; }
-    .hero-actions { flex-wrap: nowrap !important; gap: 0.5rem !important; }
-    .thumb-bar { gap: 0.5rem !important; padding: 0.5rem !important; }
-    .thumb-bar img { height: 44px !important; }
-  }
-
-  .hero-section-container {
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-    -webkit-text-size-adjust: 100%;
-  }
-
-  .hero-backdrop {
-    will-change: transform, opacity;
-    backface-visibility: hidden;
-    -webkit-backface-visibility: hidden;
-    transform: translateZ(0);
-    transition: transform 600ms ease-out, opacity 600ms ease-out;
-    image-rendering: auto;
-  }
-
-  .hero-video-frame {
-    position: absolute;
-    top: 50%; left: 50%;
-    width: max(100vw, 177.78vh);
-    height: max(56.25vw, 100vh);
-    transform: translate(-50%, -50%) scale(1.22);
-    border: 0; pointer-events: none;
-  }
-
-  .hero-title-word { filter: drop-shadow(0 6px 12px rgba(0,0,0,0.6)); }
-
-  @media (prefers-reduced-motion: reduce) {
-    .hero-fade-up, .d1, .d2, .d3, .d4, .hero-title span, .thumb-bar img {
-      animation: none !important;
-      transition: none !important;
-    }
-  }
-`;
-
-const HeroVideoPlayer = ({ 
-  trailer, 
-  onNext, 
-  onError, 
-  remainingPreviewMsRef,
-  playbackStartedAtRef,
-  previewTimerRef,
-  highlightAppliedRef
-}) => {
-  const handleReady = (player) => {
-    player.mute();
+    return null;
   };
 
-  const handleStateChange = (event) => {
-    if (!window.YT) return;
-    if (event.data === window.YT.PlayerState.PLAYING) {
-      if (!highlightAppliedRef.current) {
-        highlightAppliedRef.current = true;
-        const duration = event.target.getDuration();
-        const startSec = getHighlightStart(duration);
-        event.target.seekTo(startSec, true);
-      }
-      
-      playbackStartedAtRef.current = Date.now();
-      previewTimerRef.current = setTimeout(() => {
-        onNext();
-      }, remainingPreviewMsRef.current);
+  const results = await Promise.all(movies.slice(0, 5).map(validateMovie));
+  return results.filter(Boolean);
+};
 
-    } else if (
-      event.data === window.YT.PlayerState.PAUSED || 
-      event.data === window.YT.PlayerState.BUFFERING
-    ) {
-      if (playbackStartedAtRef.current) {
-        const elapsed = Date.now() - playbackStartedAtRef.current;
-        remainingPreviewMsRef.current -= elapsed;
-        clearTimeout(previewTimerRef.current);
-        playbackStartedAtRef.current = null;
-      }
-    }
-  };
+const useMediaQuery = (query) => {
+  const [matches, setMatches] = useState(() => (
+    typeof window !== 'undefined' && window.matchMedia(query).matches
+  ));
 
-  const { containerRef } = useYouTubePlayer({
-    videoId: extractVideoId(trailer.videoUrl || trailer.embedUrl),
-    onReady: handleReady,
-    onStateChange: handleStateChange,
-    onEnded: onNext,
-    onError: onError,
-    playerVars: {
-      mute: 1,
-      controls: 0,
-      modestbranding: 1,
-      rel: 0,
-      disablekb: 1,
-      fs: 0
-    }
-  });
+  useEffect(() => {
+    const mediaQuery = window.matchMedia(query);
+    const handleChange = (event) => setMatches(event.matches);
+    mediaQuery.addEventListener?.('change', handleChange);
+    return () => mediaQuery.removeEventListener?.('change', handleChange);
+  }, [query]);
 
-  return <div className="hero-video-frame" ref={containerRef} />;
+  return matches;
+};
+
+const useSaveData = () => {
+  const [saveData, setSaveData] = useState(() => Boolean(navigator.connection?.saveData));
+
+  useEffect(() => {
+    const connection = navigator.connection;
+    if (!connection) return undefined;
+    const handleChange = () => setSaveData(Boolean(connection.saveData));
+    connection.addEventListener?.('change', handleChange);
+    return () => connection.removeEventListener?.('change', handleChange);
+  }, []);
+
+  return saveData;
 };
 
 const HeroSection = ({ onWatchTrailer }) => {
   const navigate = useNavigate();
-  const styleRef = useRef(false);
-
-  const [movies, setMovies] = useState([]);
+  const initialMovies = dummyShowsData.slice(0, 5);
+  const [movies, setMovies] = useState(initialMovies);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [isLoading, setIsLoading] = useState(true);
-  const [mediaMode, setMediaMode] = useState('poster');
-  const [heroTrailers, setHeroTrailers] = useState({});
-  const [trailerLoadingId, setTrailerLoadingId] = useState(null);
-  
-  const trailerRequestRef = useRef(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [manualPlaybackRequested, setManualPlaybackRequested] = useState(false);
+  const [muted, setMuted] = useState(true);
+  const [heroVisible, setHeroVisible] = useState(true);
+  const [documentVisible, setDocumentVisible] = useState(() => !document.hidden);
 
-  const [isFading, setIsFading] = useState(false);
-  const [hideText, setHideText] = useState(false);
-  const [flyKey, setFlyKey] = useState(0);
+  const initialMovieKey = getHeroMovieKey(initialMovies[0], 0);
+  const [machine, dispatch] = useReducer(
+    heroReducer,
+    { movieKey: initialMovieKey, generation: 0 },
+    createInitialHeroState,
+  );
 
-  const remainingPreviewMsRef = useRef(20000);
-  const playbackStartedAtRef = useRef(null);
-  const previewTimerRef = useRef(null);
-  const highlightAppliedRef = useRef(false);
+  const rootRef = useRef(null);
+  const mountedRef = useRef(false);
+  const moviesRef = useRef(movies);
+  const currentIndexRef = useRef(currentIndex);
+  const machineRef = useRef(machine);
+  const generationRef = useRef(machine.generation);
+  const trailerCacheRef = useRef(new Map());
+  const trailerPromisesRef = useRef(new Map());
+  const trailerControllersRef = useRef(new Map());
+  const autoAttemptedKeysRef = useRef(new Set());
+  const transitionLockRef = useRef(false);
+  const transitionTimersRef = useRef(new Set());
+  const playbackTimersRef = useRef(new Set());
+  const carouselIntervalRef = useRef(null);
+  const recompactTimerRef = useRef(null);
+  const previewHandledGenerationRef = useRef(null);
 
-  const switchHeroMovie = useCallback((getNextIndex, { animate = true } = {}) => {
-    if (isFading && animate) return;
-    
-    clearTimeout(previewTimerRef.current);
-    remainingPreviewMsRef.current = 20000;
-    playbackStartedAtRef.current = null;
-    highlightAppliedRef.current = false;
+  const isLargeScreen = useMediaQuery('(min-width: 1024px)');
+  const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
+  const saveData = useSaveData();
+  const desktopAutoEligible = isLargeScreen && !reducedMotion && !saveData;
+  const heroTrailerMockEnabled = isHeroTrailerMockEnabled(window.location.search, import.meta.env.DEV);
 
-    if (!animate) {
-      setCurrentIndex((prev) => typeof getNextIndex === 'function' ? getNextIndex(prev) : getNextIndex);
-      setFlyKey((k) => k + 1);
+  useEffect(() => {
+    moviesRef.current = movies;
+    currentIndexRef.current = currentIndex;
+    machineRef.current = machine;
+    generationRef.current = Math.max(generationRef.current, machine.generation);
+  }, [currentIndex, machine, movies]);
+
+  const nextGeneration = useCallback(() => {
+    generationRef.current += 1;
+    return generationRef.current;
+  }, []);
+
+  const clearPlaybackTimers = useCallback(() => {
+    playbackTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+    playbackTimersRef.current.clear();
+  }, []);
+
+  const clearTransitionTimers = useCallback(() => {
+    transitionTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+    transitionTimersRef.current.clear();
+  }, []);
+
+  const abortTrailerLoads = useCallback(() => {
+    trailerControllersRef.current.forEach((controller) => controller.abort());
+    trailerControllersRef.current.clear();
+    trailerPromisesRef.current.clear();
+  }, []);
+
+  const loadHeroTrailers = useCallback((targetMovie, targetKey, { force = false } = {}) => {
+    if (force) trailerCacheRef.current.delete(targetKey);
+    if (trailerCacheRef.current.has(targetKey)) {
+      return Promise.resolve(trailerCacheRef.current.get(targetKey));
+    }
+
+    if (heroTrailerMockEnabled) {
+      const mockedTrailers = resolveHeroMockTrailers({
+        movieKey: targetKey,
+        movie: targetMovie,
+        fixtures: HERO_NATIVE_MOCK_FIXTURES,
+      });
+      trailerCacheRef.current.set(targetKey, mockedTrailers);
+      return Promise.resolve(mockedTrailers);
+    }
+
+    const existingPromise = trailerPromisesRef.current.get(targetKey);
+    if (existingPromise) return existingPromise;
+
+    const controller = new AbortController();
+    trailerControllersRef.current.set(targetKey, controller);
+    const promise = fetchMovieTrailers(targetMovie, { signal: controller.signal })
+      .then((trailers) => {
+        if (controller.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+        const normalized = Array.isArray(trailers) ? trailers : [];
+        trailerCacheRef.current.set(targetKey, normalized);
+        return normalized;
+      })
+      .finally(() => {
+        if (trailerPromisesRef.current.get(targetKey) === promise) {
+          trailerPromisesRef.current.delete(targetKey);
+        }
+        if (trailerControllersRef.current.get(targetKey) === controller) {
+          trailerControllersRef.current.delete(targetKey);
+        }
+      });
+
+    trailerPromisesRef.current.set(targetKey, promise);
+    return promise;
+  }, [heroTrailerMockEnabled]);
+
+  const startTrailerAttempt = useCallback(async ({ source = 'manual', forceMetadata = false } = {}) => {
+    const targetMovie = moviesRef.current[currentIndexRef.current];
+    if (!targetMovie) return;
+
+    const targetKey = getHeroMovieKey(targetMovie, currentIndexRef.current);
+    const currentMachine = machineRef.current;
+    const retrying = currentMachine.phase === HERO_PHASES.TRAILER_FAILED;
+    const retryCount = source === 'manual' && retrying
+      ? currentMachine.retryCount + 1
+      : currentMachine.retryCount;
+
+    if (source === 'manual' && retryCount > MAX_MANUAL_RETRIES) return;
+
+    window.clearInterval(carouselIntervalRef.current);
+    carouselIntervalRef.current = null;
+    if (source !== 'auto') setManualPlaybackRequested(true);
+    setMuted(true);
+
+    const generation = nextGeneration();
+    dispatch({
+      type: 'TRAILER_REQUESTED',
+      generation,
+      movieKey: targetKey,
+      retryCount,
+    });
+
+    try {
+      const trailers = await loadHeroTrailers(targetMovie, targetKey, {
+        force: forceMetadata || retrying,
+      });
+      if (!mountedRef.current || generation !== generationRef.current) return;
+
+      const videoSource = trailers
+        .map((candidate) => resolveNativeHeroVideoSource(candidate))
+        .find(Boolean);
+      if (!videoSource) {
+        if (source === 'auto') setManualPlaybackRequested(false);
+        dispatch({
+          type: 'TRAILER_FAILED',
+          generation,
+          reason: HERO_FAILURE_REASONS.MISSING_VIDEO,
+          retryCount,
+          now: getNow(),
+        });
+        return;
+      }
+
+      dispatch({ type: 'TRAILER_METADATA_RESOLVED', generation, videoSource });
+    } catch (error) {
+      if (error?.name === 'AbortError' || generation !== generationRef.current) return;
+      if (source === 'auto') setManualPlaybackRequested(false);
+      dispatch({
+        type: 'TRAILER_FAILED',
+        generation,
+        reason: /timed out/i.test(error?.message || '')
+          ? HERO_FAILURE_REASONS.TIMEOUT
+          : HERO_FAILURE_REASONS.VIDEO_ERROR,
+        detail: { message: error?.message },
+        retryCount,
+        now: getNow(),
+      });
+    }
+  }, [loadHeroTrailers, nextGeneration]);
+
+  const resetToPoster = useCallback((movieKey = machineRef.current.movieKey) => {
+    clearPlaybackTimers();
+    window.clearTimeout(recompactTimerRef.current);
+    recompactTimerRef.current = null;
+    abortTrailerLoads();
+    setManualPlaybackRequested(false);
+    setMuted(true);
+    const generation = nextGeneration();
+    dispatch({ type: 'POSTER_REQUESTED', generation, movieKey });
+  }, [abortTrailerLoads, clearPlaybackTimers, nextGeneration]);
+
+  const switchMovie = useCallback((targetIndex, { animate = true, continueTrailer = false } = {}) => {
+    const availableMovies = moviesRef.current;
+    if (!availableMovies.length || transitionLockRef.current) return;
+    const normalizedIndex = ((targetIndex % availableMovies.length) + availableMovies.length) % availableMovies.length;
+    if (normalizedIndex === currentIndexRef.current) return;
+
+    clearPlaybackTimers();
+    window.clearInterval(carouselIntervalRef.current);
+    carouselIntervalRef.current = null;
+    abortTrailerLoads();
+    window.clearTimeout(recompactTimerRef.current);
+    recompactTimerRef.current = null;
+    previewHandledGenerationRef.current = null;
+    setManualPlaybackRequested(continueTrailer);
+    setMuted(true);
+
+    const targetKey = getHeroMovieKey(availableMovies[normalizedIndex], normalizedIndex);
+    const generation = nextGeneration();
+    dispatch({ type: 'MOVIE_CHANGED', generation, movieKey: targetKey });
+
+    if (!animate || reducedMotion) {
+      currentIndexRef.current = normalizedIndex;
+      setCurrentIndex(normalizedIndex);
       return;
     }
 
-    setIsFading(true);
-    setHideText(true);
-    setTimeout(() => {
-      setCurrentIndex((prev) => typeof getNextIndex === 'function' ? getNextIndex(prev) : getNextIndex);
-    }, 400);
-    setTimeout(() => {
-      setHideText(false);
-      setFlyKey((k) => k + 1);
-    }, 650);
-    setTimeout(() => setIsFading(false), 1200);
-  }, [isFading]);
+    transitionLockRef.current = true;
+    setIsTransitioning(true);
+    const swapTimer = window.setTimeout(() => {
+      transitionTimersRef.current.delete(swapTimer);
+      currentIndexRef.current = normalizedIndex;
+      setCurrentIndex(normalizedIndex);
+    }, HERO_POSTER_SWAP_DELAY_MS);
+    const settleTimer = window.setTimeout(() => {
+      transitionTimersRef.current.delete(settleTimer);
+      transitionLockRef.current = false;
+      setIsTransitioning(false);
+    }, HERO_POSTER_TRANSITION_MS);
+    transitionTimersRef.current.add(swapTimer);
+    transitionTimersRef.current.add(settleTimer);
+  }, [abortTrailerLoads, clearPlaybackTimers, nextGeneration, reducedMotion]);
+
+  const advanceTrailerSequence = useCallback(() => {
+    const availableMovies = moviesRef.current;
+    if (!availableMovies.length) return;
+    const nextIndex = (currentIndexRef.current + 1) % availableMovies.length;
+    switchMovie(nextIndex, { animate: false, continueTrailer: true });
+  }, [switchMovie]);
 
   useEffect(() => {
-    if (styleRef.current) return;
-    styleRef.current = true;
-    const el = document.createElement('style');
-    el.textContent = STYLES;
-    document.head.appendChild(el);
-  }, []);
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      clearPlaybackTimers();
+      clearTransitionTimers();
+      transitionLockRef.current = false;
+      abortTrailerLoads();
+      window.clearInterval(carouselIntervalRef.current);
+      carouselIntervalRef.current = null;
+      window.clearTimeout(recompactTimerRef.current);
+    };
+  }, [abortTrailerLoads, clearPlaybackTimers, clearTransitionTimers]);
 
   useEffect(() => {
     const controller = new AbortController();
-    const load = async () => {
+    const applyMovies = (nextMovies) => {
+      if (!nextMovies.length) return;
+      const generation = nextGeneration();
+      const nextKey = getHeroMovieKey(nextMovies[0], 0);
+      currentIndexRef.current = 0;
+      moviesRef.current = nextMovies;
+      setCurrentIndex(0);
+      setManualPlaybackRequested(false);
+      setMovies(nextMovies);
+      dispatch({ type: 'MOVIE_CHANGED', generation, movieKey: nextKey });
+    };
+
+    const loadHero = async () => {
       try {
         const data = await fetchHomeHero({ signal: controller.signal });
-        if (!controller.signal.aborted) {
-          const rawMovies = Array.isArray(data.movies) && data.movies.length ? data.movies : dummyShowsData;
-          const validMovies = await validateMovieCandidates(rawMovies, controller.signal);
-          if (!controller.signal.aborted) {
-            setMovies(validMovies.slice(0, 5));
-          }
+        if (controller.signal.aborted) return;
+        const rawMovies = Array.isArray(data.movies) && data.movies.length ? data.movies : dummyShowsData;
+        const immediateMovies = rawMovies.slice(0, 5);
+        applyMovies(immediateMovies);
+        const validMovies = await validateMovieCandidates(immediateMovies, controller.signal);
+        if (!controller.signal.aborted && validMovies.length) applyMovies(validMovies);
+      } catch (error) {
+        if (error?.name !== 'AbortError' && import.meta.env.DEV) {
+          console.warn('Hero load error:', error.message);
         }
-      } catch (e) {
-        if (e.name !== 'AbortError') console.error('Hero load error:', e);
       } finally {
         if (!controller.signal.aborted) setIsLoading(false);
       }
     };
-    load();
+
+    void loadHero();
     return () => controller.abort();
+  }, [nextGeneration]);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root || typeof IntersectionObserver === 'undefined') return undefined;
+    const observer = new IntersectionObserver(([entry]) => {
+      setHeroVisible(entry.isIntersecting && entry.intersectionRatio > 0.08);
+    }, { threshold: [0, 0.08, 0.25] });
+    observer.observe(root);
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
-    if (!movies.length || mediaMode === 'trailer') return;
-    const id = setInterval(() => switchHeroMovie((prev) => (prev + 1) % movies.length, { animate: true }), 6000);
-    return () => clearInterval(id);
-  }, [movies, mediaMode, switchHeroMovie]);
+    const handleVisibilityChange = () => setDocumentVisible(!document.hidden);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
 
   useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        if (playbackStartedAtRef.current) {
-          const elapsed = Date.now() - playbackStartedAtRef.current;
-          remainingPreviewMsRef.current -= elapsed;
-          clearTimeout(previewTimerRef.current);
-          playbackStartedAtRef.current = null;
-        }
+    if (heroVisible && documentVisible) return;
+    dispatch({ type: 'PLAYBACK_PAUSED', generation: machineRef.current.generation, now: getNow() });
+  }, [documentVisible, heroVisible]);
+
+  useEffect(() => {
+    if (isLargeScreen) return;
+    if (machineRef.current.phase === HERO_PHASES.POSTER && !machineRef.current.videoSource) return;
+    resetToPoster(getHeroMovieKey(moviesRef.current[currentIndexRef.current], currentIndexRef.current));
+  }, [isLargeScreen, resetToPoster]);
+
+  useEffect(() => {
+    if ((!reducedMotion && !saveData) || manualPlaybackRequested) return;
+    if (machineRef.current.phase === HERO_PHASES.POSTER) return;
+    resetToPoster(getHeroMovieKey(moviesRef.current[currentIndexRef.current], currentIndexRef.current));
+  }, [manualPlaybackRequested, reducedMotion, resetToPoster, saveData]);
+
+  const currentMovie = movies[currentIndex];
+  const currentMovieKey = getHeroMovieKey(currentMovie, currentIndex);
+
+  useEffect(() => {
+    if (!currentMovie || machine.movieKey !== currentMovieKey || machine.phase !== HERO_PHASES.POSTER) return;
+
+    let timerId;
+    if (manualPlaybackRequested) {
+      timerId = window.setTimeout(() => {
+        void startTrailerAttempt({ source: 'continuation' });
+      }, 0);
+      return () => window.clearTimeout(timerId);
+    }
+
+    if (!desktopAutoEligible || autoAttemptedKeysRef.current.has(currentMovieKey)) return;
+    autoAttemptedKeysRef.current.add(currentMovieKey);
+    timerId = window.setTimeout(() => {
+      void startTrailerAttempt({ source: 'auto' });
+    }, 0);
+    return () => window.clearTimeout(timerId);
+  }, [
+    currentMovie,
+    currentMovieKey,
+    desktopAutoEligible,
+    machine.movieKey,
+    machine.phase,
+    manualPlaybackRequested,
+    startTrailerAttempt,
+  ]);
+
+  useEffect(() => {
+    if (machine.playbackStartedAt == null) {
+      clearPlaybackTimers();
+      return undefined;
+    }
+
+    clearPlaybackTimers();
+    const generation = machine.generation;
+
+    const scheduleBudget = (kind) => {
+      const state = machineRef.current;
+      const remaining = getPlaybackRemaining(state, getNow())[kind];
+      if (remaining <= 0) {
+        dispatch({
+          type: kind === 'compactRemainingMs' ? 'COMPACT_ELAPSED' : 'PREVIEW_ELAPSED',
+          generation,
+          now: getNow(),
+        });
+        return;
       }
-    };
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
-  }, []);
 
-  const handleThumbClick = (index) => {
-    if (index === currentIndex || isFading) return;
-    switchHeroMovie(index, { animate: true });
+      const timerId = window.setTimeout(() => {
+        playbackTimersRef.current.delete(timerId);
+        const latest = machineRef.current;
+        if (latest.generation !== generation || latest.playbackStartedAt == null) return;
+        const nextRemaining = getPlaybackRemaining(latest, getNow())[kind];
+        if (nextRemaining > 8) {
+          scheduleBudget(kind);
+          return;
+        }
+        dispatch({
+          type: kind === 'compactRemainingMs' ? 'COMPACT_ELAPSED' : 'PREVIEW_ELAPSED',
+          generation,
+          now: getNow(),
+        });
+      }, remaining);
+      playbackTimersRef.current.add(timerId);
+    };
+
+    if (isLargeScreen && !reducedMotion && machine.compactRemainingMs > 0 && machine.phase !== HERO_PHASES.TRAILER_COMPACT) {
+      scheduleBudget('compactRemainingMs');
+    }
+    if (machine.previewRemainingMs > 0) scheduleBudget('previewRemainingMs');
+
+    return clearPlaybackTimers;
+  }, [
+    clearPlaybackTimers,
+    machine.compactRemainingMs,
+    machine.generation,
+    machine.phase,
+    machine.playbackStartedAt,
+    machine.previewRemainingMs,
+    isLargeScreen,
+    reducedMotion,
+  ]);
+
+  useEffect(() => {
+    if (machine.phase !== HERO_PHASES.TRAILER_ENTERING) return undefined;
+    const generation = machine.generation;
+    const timerId = window.setTimeout(() => {
+      dispatch({ type: 'VIDEO_ENTERED', generation });
+    }, VIDEO_ENTER_DURATION_MS);
+    return () => window.clearTimeout(timerId);
+  }, [machine.generation, machine.phase]);
+
+  useEffect(() => {
+    if (machine.previewRemainingMs > 0 || previewHandledGenerationRef.current === machine.generation) return;
+    previewHandledGenerationRef.current = machine.generation;
+    advanceTrailerSequence();
+  }, [advanceTrailerSequence, machine.generation, machine.previewRemainingMs]);
+
+  useEffect(() => {
+    if (!movies.length || ![HERO_PHASES.POSTER, HERO_PHASES.TRAILER_FAILED].includes(machine.phase) || isTransitioning) {
+      return undefined;
+    }
+    const intervalId = window.setInterval(() => {
+      switchMovie(currentIndexRef.current + 1, { animate: true, continueTrailer: false });
+    }, 6_000);
+    carouselIntervalRef.current = intervalId;
+    return () => {
+      window.clearInterval(intervalId);
+      if (carouselIntervalRef.current === intervalId) carouselIntervalRef.current = null;
+    };
+  }, [isTransitioning, machine.phase, movies.length, switchMovie]);
+
+  const handleToggleTrailer = () => {
+    const activePhase = [
+      HERO_PHASES.TRAILER_LOADING,
+      HERO_PHASES.TRAILER_ENTERING,
+      HERO_PHASES.TRAILER_EXPANDED,
+      HERO_PHASES.TRAILER_COMPACT,
+    ].includes(machine.phase);
+
+    if (activePhase) {
+      resetToPoster(currentMovieKey);
+      return;
+    }
+
+    if (machine.phase === HERO_PHASES.TRAILER_FAILED && machine.retryCount >= MAX_MANUAL_RETRIES) return;
+    void startTrailerAttempt({
+      source: 'manual',
+      forceMetadata: machine.phase === HERO_PHASES.TRAILER_FAILED,
+    });
   };
 
-  if (isLoading || !movies.length) {
+  const handlePlayerFailure = useCallback(({ generation, reason, detail }) => {
+    if (generation !== generationRef.current) return;
+    setManualPlaybackRequested(false);
+    setMuted(true);
+    dispatch({
+      type: 'TRAILER_FAILED',
+      generation,
+      reason,
+      detail,
+      retryCount: machineRef.current.retryCount,
+      now: getNow(),
+    });
+  }, []);
+
+  const handlePlaybackResumed = useCallback(({ generation, now }) => {
+    dispatch({ type: 'PLAYBACK_RESUMED', generation, now });
+  }, []);
+
+  const handlePlaybackStable = useCallback(({ generation, now }) => {
+    dispatch({ type: 'PLAYBACK_STABLE', generation, now });
+  }, []);
+
+  const handleVisualReady = useCallback(({ generation }) => {
+    dispatch({ type: 'VISUAL_READY', generation });
+  }, []);
+
+  const handleVisualHidden = useCallback(({ generation }) => {
+    dispatch({ type: 'VISUAL_HIDDEN', generation });
+  }, []);
+
+  const handlePlaybackPaused = useCallback(({ generation, now }) => {
+    dispatch({ type: 'PLAYBACK_PAUSED', generation, now });
+  }, []);
+
+  const handleBufferingSustained = useCallback(({ generation }) => {
+    dispatch({ type: 'BUFFERING_SUSTAINED', generation });
+  }, []);
+
+  const handleReveal = () => {
+    if (machine.phase !== HERO_PHASES.TRAILER_COMPACT) return;
+    window.clearTimeout(recompactTimerRef.current);
+    recompactTimerRef.current = null;
+    dispatch({ type: 'REVEAL_OVERVIEW', generation: machine.generation });
+  };
+
+  const handleScheduleRecompact = (revealZone) => {
+    if (machine.phase !== HERO_PHASES.TRAILER_COMPACT) return;
+    window.clearTimeout(recompactTimerRef.current);
+    const generation = machine.generation;
+    recompactTimerRef.current = window.setTimeout(() => {
+      recompactTimerRef.current = null;
+      if (revealZone?.contains?.(document.activeElement)) return;
+      dispatch({ type: 'HIDE_OVERVIEW', generation });
+    }, RECOMPACT_DELAY_MS);
+  };
+
+  const handleCancelRecompact = () => {
+    window.clearTimeout(recompactTimerRef.current);
+    recompactTimerRef.current = null;
+  };
+
+  if (isLoading || !currentMovie) {
     return (
-      <div className="h-screen w-full bg-[#0a0a0a] flex items-center justify-center text-white text-sm tracking-widest uppercase">
-        <div className="animate-pulse"><Loading/></div>
+      <div className="hero-section flex items-center justify-center">
+        <Loading />
       </div>
     );
   }
 
-  const movie = movies[currentIndex];
-  const titleTextRaw = movie.title || movie.name || '';
-  const titleText = keepLastWordsTogether(titleTextRaw, 2);
-  const titleWords = titleText.split(' ');
-  
-  const bgUrl = movie.heroImageUrl || getImageUrl(movie.backdrop_original || movie.backdrop_w1280 || movie.backdrop_path, 'w1280');
-  const movieKey = String(movie.id || movie._id || currentIndex);
-  const activeTrailer = heroTrailers[movieKey]?.[0] || null;
-  const showVideo = mediaMode === 'trailer' && activeTrailer?.videoUrl;
-  const year = movie.release_date?.substring(0, 4) || 'N/A';
-  const rating = movie.vote_average?.toFixed(1) || 'N/A';
-  const runtimeStr = formatRuntime(movie.runtime);
+  const backdropUrl = currentMovie.heroImageUrl
+    || getImageUrl(currentMovie.backdrop_original || currentMovie.backdrop_w1280 || currentMovie.backdrop_path, 'w1280');
+  const mobilePosterUrl = getImageUrl(currentMovie.poster_path || currentMovie.backdrop_path || backdropUrl, 'w780');
+  const trailerActive = [
+    HERO_PHASES.TRAILER_ENTERING,
+    HERO_PHASES.TRAILER_EXPANDED,
+    HERO_PHASES.TRAILER_COMPACT,
+  ].includes(machine.phase);
+  const trailerLoading = machine.phase === HERO_PHASES.TRAILER_LOADING;
+  const trailerFailed = machine.phase === HERO_PHASES.TRAILER_FAILED;
+  const retryExhausted = trailerFailed && machine.retryCount >= MAX_MANUAL_RETRIES;
+  const playerEnabled = Boolean(
+    machine.videoSource?.src
+    && (desktopAutoEligible || manualPlaybackRequested)
+    && !trailerFailed
+  );
+  const playerActive = Boolean(
+    playerEnabled
+    && [
+      HERO_PHASES.TRAILER_LOADING,
+      HERO_PHASES.TRAILER_ENTERING,
+      HERO_PHASES.TRAILER_EXPANDED,
+      HERO_PHASES.TRAILER_COMPACT,
+    ].includes(machine.phase)
+    && heroVisible
+    && documentVisible
+  );
+  const videoVisible = playerActive && !machine.posterVisible;
+  const compact = isLargeScreen && !reducedMotion && machine.phase === HERO_PHASES.TRAILER_COMPACT;
 
-  const handleBackdropError = () => {
-    setMovies((current) => {
-      if (current.length <= 1) return current;
-      const stableId = movie.id || movie._id;
-      const next = stableId
-        ? current.filter((m) => (m.id || m._id) !== stableId)
-        : current.filter((_, index) => index !== currentIndex);
-      setCurrentIndex((index) => Math.min(index, next.length - 1));
-      return next;
-    });
+  const handlePosterError = () => {
+    if (movies.length <= 1) return;
+    const stableId = currentMovie.id || currentMovie._id;
+    const nextMovies = movies.filter((movie) => (movie.id || movie._id) !== stableId);
+    const nextIndex = Math.min(currentIndex, nextMovies.length - 1);
+    const nextKey = getHeroMovieKey(nextMovies[nextIndex], nextIndex);
+    const generation = nextGeneration();
+    moviesRef.current = nextMovies;
+    currentIndexRef.current = nextIndex;
+    setMovies(nextMovies);
+    setCurrentIndex(nextIndex);
+    setManualPlaybackRequested(false);
+    dispatch({ type: 'MOVIE_CHANGED', generation, movieKey: nextKey });
   };
 
-  const handleMediaToggle = async () => {
-    if (mediaMode === 'trailer') {
-      setMediaMode('poster');
-      return;
-    }
-
-    setMediaMode('trailer');
-    if (heroTrailers[movieKey] !== undefined && heroTrailers[movieKey].length > 0) return;
-
-    if (trailerRequestRef.current) {
-      trailerRequestRef.current.abort();
-    }
-    const controller = new AbortController();
-    trailerRequestRef.current = controller;
-    setTrailerLoadingId(movieKey);
-
-    try {
-      const trailers = await fetchMovieTrailers(movie, { signal: controller.signal });
-      if (controller.signal.aborted) return;
-      
-      setHeroTrailers((current) => ({ ...current, [movieKey]: trailers || [] }));
-      if (!trailers || !trailers.length) {
-        setMediaMode('poster');
-      }
-    } catch (e) {
-      if (e.name !== 'AbortError') setMediaMode('poster');
-    } finally {
-      if (!controller.signal.aborted) setTrailerLoadingId(null);
-    }
+  const navigateToMovie = () => {
+    navigate(`/movies/${currentMovie._id || currentMovie.id}`);
+    window.scrollTo({ top: 0, behavior: reducedMotion ? 'auto' : 'smooth' });
   };
-
-  const shouldRunPosterTransition = isFading && mediaMode === 'poster';
 
   return (
-    <div className="hero-section-container relative flex flex-col justify-center h-screen w-full overflow-hidden bg-[#0a0a0a] text-white">
-      <div className="absolute inset-0 z-0">
-        {showVideo ? (
-          <HeroVideoPlayer 
-            trailer={activeTrailer}
-            onNext={() => switchHeroMovie((currentIndex + 1) % movies.length, { animate: false })}
-            onError={() => {
-              setMediaMode('poster');
-              switchHeroMovie((currentIndex + 1) % movies.length, { animate: true });
-            }}
-            remainingPreviewMsRef={remainingPreviewMsRef}
-            playbackStartedAtRef={playbackStartedAtRef}
-            previewTimerRef={previewTimerRef}
-            highlightAppliedRef={highlightAppliedRef}
-          />
-        ) : (
-          <img
-            key={`bg-${currentIndex}`}
-            src={bgUrl}
-            alt={movie.title}
-            fetchPriority={currentIndex === 0 ? 'high' : 'auto'}
-            decoding="async"
-            sizes="100vw"
-            onError={handleBackdropError}
-            className="hero-backdrop w-full h-full object-cover object-center animate-pan-right align-top"
-            style={{ opacity: 1 }} 
+    <section ref={rootRef} className="hero-section" aria-label="Featured movie">
+      <HeroMedia
+        key={`media-${currentMovieKey}`}
+        title={currentMovie.title || currentMovie.name}
+        backdropUrl={backdropUrl}
+        mobilePosterUrl={mobilePosterUrl}
+        posterVisible={machine.posterVisible}
+        videoVisible={videoVisible}
+        onPosterError={handlePosterError}
+      >
+        {playerEnabled && (
+          <HeroNativeVideo
+            key={`hero-video-${machine.generation}`}
+            enabled={playerEnabled}
+            active={playerActive}
+            visible={videoVisible}
+            source={machine.videoSource}
+            generation={machine.generation}
+            muted={muted}
+            onPlaybackResumed={handlePlaybackResumed}
+            onPlaybackStable={handlePlaybackStable}
+            onVisualReady={handleVisualReady}
+            onVisualHidden={handleVisualHidden}
+            onPlaybackPaused={handlePlaybackPaused}
+            onBufferingSustained={handleBufferingSustained}
+            onEnded={advanceTrailerSequence}
+            onFailure={handlePlayerFailure}
           />
         )}
-        <div className="absolute inset-0 bg-black pointer-events-none will-change-opacity" 
-             style={{
-               animation: showVideo ? 'none' : 'cinematicBreathe 7s ease-in-out infinite',
-               opacity: showVideo ? 0.05 : undefined,
-               zIndex: 1,
-             }} />
-        <div className="absolute inset-0 pointer-events-none"
-             style={{
-               background: showVideo
-                 ? 'linear-gradient(90deg, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.2) 25%, transparent 60%)'
-                 : 'linear-gradient(90deg, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0.3) 25%, transparent 60%)',
-               zIndex: 2,
-             }} />
-        <div className="absolute inset-0 pointer-events-none"
-             style={{ background: 'linear-gradient(0deg, rgba(10,10,10,0.9) 0%, rgba(10,10,10,0.4) 15%, transparent 30%)', zIndex: 2 }} />
-        <div className="absolute inset-0 pointer-events-none"
-             style={{ background: 'radial-gradient(circle at center, transparent 30%, rgba(0,0,0,0.3) 100%)', mixBlendMode: 'overlay', zIndex: 3 }} />
-      </div>
+      </HeroMedia>
 
-      <div
-        key={`flare-${isFading}`}
-        className="absolute inset-y-[-20%] right-0 w-[5vw] pointer-events-none"
-        style={{
-          background: 'linear-gradient(90deg, transparent 0%, rgba(229, 9, 20, 0.4) 30%, rgba(229, 9, 20, 1) 50%, rgba(229, 9, 20, 0.4) 70%, transparent 100%)',
-          mixBlendMode: 'screen',
-          filter: 'blur(30px)',
-          zIndex: 4,
-          willChange: 'transform, opacity',
-          transformOrigin: 'center center',
-          animation: shouldRunPosterTransition ? 'verticalWhiteFlare 1.1s cubic-bezier(0.4, 0, 0.2, 1) forwards' : 'none',
-          opacity: 0,
-        }}
-      />
-      
-      <div
-        key={`dark-${isFading}`}
-        className="absolute inset-0 bg-black pointer-events-none will-change-opacity"
-        style={{
-          zIndex: 3,
-          animation: shouldRunPosterTransition ? 'darkDipTransition 1.1s cubic-bezier(0.4, 0, 0.2, 1) forwards' : 'none',
-          opacity: 0 
-        }}
+      {isTransitioning && machine.posterVisible && (
+        <>
+          <div className="hero-transition-dip" aria-hidden="true" />
+          <div className="hero-transition-flare" aria-hidden="true" />
+        </>
+      )}
+
+      <HeroContent
+        movie={currentMovie}
+        year={currentMovie.release_date?.slice(0, 4) || 'N/A'}
+        runtime={formatRuntime(currentMovie.runtime)}
+        rating={Number.isFinite(currentMovie.vote_average) ? currentMovie.vote_average.toFixed(1) : 'N/A'}
+        compact={compact}
+        overviewRevealed={machine.overviewRevealed}
+        trailerActive={trailerActive}
+        trailerLoading={trailerLoading}
+        trailerFailed={trailerFailed}
+        retryExhausted={retryExhausted}
+        failureReason={machine.failureReason}
+        onBook={navigateToMovie}
+        onDetails={navigateToMovie}
+        onToggleTrailer={handleToggleTrailer}
+        onWatchTrailer={onWatchTrailer ? () => onWatchTrailer(currentMovie) : undefined}
+        onReveal={handleReveal}
+        onScheduleRecompact={handleScheduleRecompact}
+        onCancelRecompact={handleCancelRecompact}
       />
 
-      <div
-        className="relative z-10 px-6 sm:px-8 md:px-14 lg:px-20 mb-8 sm:mb-12 max-md:mt-auto max-md:mb-20 transition-opacity duration-300 ease-out"
-        style={{ 
-          maxWidth: '45%', 
-          minWidth: 280, 
-          isolation: 'isolate',
-          opacity: hideText ? 0 : 1 
-        }}
-      >
-        {!hideText && (
-          <div key={`content-block-${flyKey}`}>
-            {movie.genres?.length > 0 && (
-              <div className="d1 flex flex-wrap gap-1.5 sm:gap-2 mb-2 sm:mb-4">
-                {movie.genres.slice(0, 3).map((g) => (
-                  <span key={g.id} className="px-2 sm:px-3 py-0.5 sm:py-1 rounded-full text-[9px] sm:text-[10px] font-bold uppercase tracking-widest"
-                    style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff' }}>
-                    {g.name}
-                  </span>
-                ))}
-              </div>
-            )}
-            <h1 className="d1 hero-title font-black leading-[1.1] mb-3 sm:mb-5 text-white" 
-                style={{ fontSize: 'clamp(28px, 4.5vw, 54px)', wordBreak: 'normal', overflowWrap: 'normal' }}>
-              {titleWords.map((word, wIndex) => {
-                const animName = wIndex % 2 === 0 ? 'charFromLeft' : 'charFromRight';
-                return (
-                  <span key={`w-${wIndex}`} className="hero-title-word inline-block whitespace-nowrap mr-[0.3em] will-change-transform"
-                    style={{ animation: `${animName} 700ms cubic-bezier(0.22,1,0.36,1) ${wIndex * 80}ms both` }}>
-                    {word}
-                  </span>
-                );
-              })}
-            </h1>
-            <div className="hero-meta hero-fade-up d2 flex items-center flex-wrap gap-5 text-[15px] font-medium text-white mb-6 cinematic-shadow">
-              <span className="flex items-center gap-1.5"><CalendarIcon className="w-4 h-4" />{year}</span>
-              <span className="flex items-center gap-1.5"><ClockIcon className="w-4 h-4" />{runtimeStr || "1h30m"}</span>
-              <span className="flex items-center gap-1.5"><Star className="w-4 h-4 text-yellow-400 fill-yellow-400" />{rating||"8.9"}</span>
-            </div>
-            <p className="hero-overview hero-fade-up text-gray-200 d3 text-sm sm:text-base leading-relaxed mb-4 sm:mb-8 line-clamp-3 sm:line-clamp-3 font-medium max-w-[400px]">
-              {movie.overview}
-            </p>
-            <div className="hero-actions hero-fade-up d4 flex flex-nowrap items-center gap-2 sm:gap-3 md:gap-4">
-              <button onClick={() => { navigate(`/movies/${movie._id || movie.id}`); window.scrollTo({top: 0,behavior:'smooth'}); }}
-                className="group flex items-center gap-1.5 sm:gap-2 md:gap-3 px-4 py-2.5 sm:px-6 sm:py-3 md:px-10 md:py-5 bg-linear-to-r from-primary to-primary-dull hover:from-primary-dull hover:to-primary text-white font-semibold rounded-full shadow-lg shadow-primary/30 hover:shadow-xl hover:shadow-primary/60 hover:scale-105 active:scale-95 transition-all duration-300 border border-primary/30 hover:border-primary/60 relative overflow-hidden text-xs sm:text-sm md:text-base whitespace-nowrap">
-                <Ticket className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6" /> Book Now
-              </button>
-              <button type="button" onClick={() => onWatchTrailer?.(movie)}
-                className="group flex items-center gap-1.5 sm:gap-2 md:gap-3 px-3.5 py-2 sm:px-5 sm:py-2.5 md:px-8 md:py-4 bg-white/15 hover:bg-white/25 text-white font-semibold rounded-full border border-white/40 hover:border-primary/40 backdrop-blur-sm hover:scale-105 transition-all duration-300 relative overflow-hidden cursor-pointer text-xs sm:text-sm md:text-base whitespace-nowrap">
-                <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Trailer
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+      <HeroPosterRail
+        movies={movies}
+        currentIndex={currentIndex}
+        getThumbnailUrl={(movie) => movie.heroImageUrl || getImageUrl(movie.backdrop_path || movie.poster_path, 'w300')}
+        onSelect={(index) => switchMovie(index, {
+          animate: true,
+          continueTrailer: trailerActive || trailerLoading,
+        })}
+      />
 
-      <div className="absolute bottom-2 left-8 md:left-14 lg:left-20 z-20 hidden md:flex flex-col gap-3">
-        <div className="flex items-center gap-2 mb-1 rgba(229,9,20,0.36)">
-          {movies.map((_, i) => (
-            <button key={i} onClick={() => handleThumbClick(i)}
-              className="rounded-full transition-all duration-500 ease-out"
-              style={{ height: 6, width: i === currentIndex ? 32 : 6, background: i === currentIndex ? '#fff' : 'rgba(229,9,20,0.36)' }}
-            />
-          ))}
-        </div>
-        <div className="thumb-bar flex items-end gap-3 overflow-x-auto py-2 pr-4 pl-2">
-          {movies.map((m, i) => {
-            const isActive = i === currentIndex;
-            const thumbUrl = m.heroImageUrl || getImageUrl(m.backdrop_path || m.poster_path, 'w300');
-            return (
-              <button key={m.id} onClick={() => handleThumbClick(i)}
-                className="shrink-0 rounded-xl overflow-hidden cursor-pointer relative group will-change-transform"
-                style={{
-                  width: isActive ? 140 : 100, height: isActive ? 80 : 56, 
-                  transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-                  outline: isActive ? '2px solid rgba(246, 69, 101) ' : '2px solid transparent', 
-                  outlineOffset: 2,
-                  boxShadow: isActive ? '0 8px 24px rgba(229,9,20,0.36)' : '0 4px 12px rgba(0,0,0,0.6)',
-                }}>
-                <img src={thumbUrl} alt={m.title} loading="lazy" decoding="async"
-                  className={`w-full h-full object-cover transition-all duration-500 ${isActive ? 'scale-110 brightness-100' : 'brightness-50 group-hover:brightness-120'}`} />
-                <div className="absolute inset-0 flex items-end opacity-100" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.9) 0%, transparent 70%)' }}>
-                  <p className="text-white px-2 pb-1.5 leading-tight truncate w-full text-left" style={{ fontSize: 10, fontWeight: isActive ? 700 : 500 }}>
-                    {m.title}
-                  </p>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <button
-        type="button"
-        onClick={handleMediaToggle}
-        disabled={trailerLoadingId === movieKey}
-        className="absolute bottom-5 right-5 md:bottom-8 md:right-10 z-30 flex items-center gap-2 rounded-full border border-white/20 bg-black/35 px-4 py-2.5 text-xs md:text-sm font-semibold text-white backdrop-blur-xl shadow-lg shadow-black/30 transition-all duration-300 hover:border-primary/50 hover:bg-primary/20 active:scale-95 disabled:opacity-60"
-      >
-        {mediaMode === 'trailer' ? <ImageIcon className="w-4 h-4" /> : <Video className="w-4 h-4" />}
-        {trailerLoadingId === movieKey ? 'Loading' : mediaMode === 'trailer' ? 'Poster' : 'Trailer'}
-      </button>
-    </div>
+      {isLargeScreen && (
+        <HeroControls
+          trailerActive={trailerActive}
+          trailerLoading={trailerLoading}
+          trailerFailed={trailerFailed}
+          retryExhausted={retryExhausted}
+          muted={muted}
+          onToggleMuted={() => setMuted((current) => !current)}
+          onToggleTrailer={handleToggleTrailer}
+        />
+      )}
+    </section>
   );
 };
 
