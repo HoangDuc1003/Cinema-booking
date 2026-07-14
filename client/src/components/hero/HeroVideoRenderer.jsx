@@ -9,6 +9,7 @@ const HeroVideoRenderer = ({
   visible,
   generation,
   muted,
+  volume = 60,
   onPlayerReady,
   onPlaybackRequested,
   onPlaybackPlaying,
@@ -17,6 +18,8 @@ const HeroVideoRenderer = ({
   onVisualHidden,
   onPlaybackPaused,
   onBufferingSustained,
+  onAutoplayBlocked,
+  onMutedFallback,
   onEnded,
   onFailure,
 }) => {
@@ -26,6 +29,7 @@ const HeroVideoRenderer = ({
     visible,
     generation,
     muted,
+    volume,
     onPlayerReady,
     onPlaybackRequested,
     onPlaybackPlaying,
@@ -34,6 +38,8 @@ const HeroVideoRenderer = ({
     onVisualHidden,
     onPlaybackPaused,
     onBufferingSustained,
+    onAutoplayBlocked,
+    onMutedFallback,
     onEnded,
     onFailure,
   };

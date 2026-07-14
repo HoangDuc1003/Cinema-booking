@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 const YOUTUBE_API_SRC = 'https://www.youtube.com/iframe_api';
 const YOUTUBE_API_TIMEOUT_MS = 12_000;
+const DEFAULT_HERO_VOLUME = 60;
 
 export const LOCKED_YOUTUBE_PLAYER_VARS = Object.freeze({
   autoplay: 0,
@@ -147,8 +148,10 @@ export const disableCaptionsBestEffort = (player) => {
   }
 };
 
-const applyMutedStateBestEffort = (player, muted) => {
+const applyAudioPreference = (player, { muted, volume = DEFAULT_HERO_VOLUME }) => {
   try {
+    const safeVolume = Math.max(0, Math.min(100, Number(volume) || DEFAULT_HERO_VOLUME));
+    player?.setVolume?.(safeVolume);
     if (muted) player?.mute?.();
     else player?.unMute?.();
   } catch (error) {
@@ -162,12 +165,14 @@ export const useYouTubePlayer = ({
   enabled = true,
   active = true,
   muted = true,
+  volume = DEFAULT_HERO_VOLUME,
   requestGeneration,
   onReady,
   onApiChange,
   onStateChange,
   onAutoplayBlocked,
   onPlaybackRequest,
+  onMutedFallback,
   onError,
   onEnded,
   playerVars = {},
@@ -183,7 +188,7 @@ export const useYouTubePlayer = ({
   const lastCommandKeyRef = useRef('');
   const playerVarsRef = useRef(playerVars);
   const firstPlayingCaptionKeyRef = useRef('');
-  const requestRef = useRef({ enabled, active, muted, videoId, startSeconds, requestGeneration });
+  const requestRef = useRef({ enabled, active, muted, volume, videoId, startSeconds, requestGeneration });
 
   const [player, setPlayer] = useState(null);
   const [isReady, setIsReady] = useState(false);
@@ -194,6 +199,7 @@ export const useYouTubePlayer = ({
   const onStateChangeRef = useRef(onStateChange);
   const onAutoplayBlockedRef = useRef(onAutoplayBlocked);
   const onPlaybackRequestRef = useRef(onPlaybackRequest);
+  const onMutedFallbackRef = useRef(onMutedFallback);
   const onErrorRef = useRef(onError);
   const onEndedRef = useRef(onEnded);
 
@@ -203,10 +209,11 @@ export const useYouTubePlayer = ({
     onStateChangeRef.current = onStateChange;
     onAutoplayBlockedRef.current = onAutoplayBlocked;
     onPlaybackRequestRef.current = onPlaybackRequest;
+    onMutedFallbackRef.current = onMutedFallback;
     onErrorRef.current = onError;
     onEndedRef.current = onEnded;
     playerVarsRef.current = playerVars;
-    requestRef.current = { enabled, active, muted, videoId, startSeconds, requestGeneration };
+    requestRef.current = { enabled, active, muted, volume, videoId, startSeconds, requestGeneration };
   });
 
   const destroyPlayer = useCallback(() => {
@@ -278,8 +285,11 @@ export const useYouTubePlayer = ({
     activeRequestRef.current = meta;
 
     try {
-      // Every playback attempt begins muted so the originating CTA is sufficient.
-      targetPlayer.mute?.();
+      // Apply audio preference: try unmuted first if preference says so.
+      applyAudioPreference(targetPlayer, {
+        muted: currentRequest.muted,
+        volume: currentRequest.volume,
+      });
       disableCaptionsBestEffort(targetPlayer);
 
       if (!isResume) {
@@ -305,7 +315,10 @@ export const useYouTubePlayer = ({
       }
 
       disableCaptionsBestEffort(targetPlayer);
-      applyMutedStateBestEffort(targetPlayer, currentRequest.muted);
+      applyAudioPreference(targetPlayer, {
+        muted: currentRequest.muted,
+        volume: currentRequest.volume,
+      });
 
       try {
         onPlaybackRequestRef.current?.(targetPlayer, meta);
@@ -386,6 +399,7 @@ export const useYouTubePlayer = ({
                 iframe.style.pointerEvents = 'none';
                 iframe.setAttribute('aria-hidden', 'true');
                 iframe.setAttribute('tabindex', '-1');
+                iframe.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
               }
 
               readyRef.current = true;
@@ -435,7 +449,22 @@ export const useYouTubePlayer = ({
               if (!meta) return;
               const eventVideoId = event.target?.getVideoData?.().video_id;
               if (eventVideoId && eventVideoId !== meta.videoId) return;
+              // When autoplay with sound is blocked, fallback to muted and retry once.
               onAutoplayBlockedRef.current?.(event, meta);
+              try {
+                const playerInstance = playerRef.current;
+                if (playerInstance && readyRef.current) {
+                  playerInstance.mute?.();
+                  playerInstance.setVolume?.(0);
+                  // Retry playback muted — just one attempt
+                  if (typeof playerInstance.playVideo === 'function') {
+                    playerInstance.playVideo();
+                  }
+                  onMutedFallbackRef.current?.(meta);
+                }
+              } catch (fallbackError) {
+                warnInDevelopment('[YouTube Player] Muted fallback failed:', fallbackError);
+              }
             },
             onError: (event) => {
               if (!mountedRef.current || playerRef.current !== createdPlayer) return;
@@ -480,7 +509,7 @@ export const useYouTubePlayer = ({
 
   useEffect(() => {
     if (!enabled || !player || !isReady || !readyRef.current) return;
-    applyMutedStateBestEffort(player, active ? muted : true);
+    applyAudioPreference(player, { muted: active ? muted : true, volume: active ? (requestRef.current.volume || DEFAULT_HERO_VOLUME) : 0 });
   }, [active, enabled, isReady, muted, player]);
 
   useEffect(() => {

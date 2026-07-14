@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import useYouTubePlayer from '../../hooks/useYouTubePlayer';
 import {
   HERO_BUFFERING_HYSTERESIS_MS,
@@ -9,6 +9,33 @@ import {
 } from './heroMachine';
 
 const now = () => performance.now();
+
+const YOUTUBE_VIDEO_RATIO = 16 / 9;
+const YOUTUBE_OVERSCAN = 1.04;
+
+const calculateYouTubeCover = (containerW, containerH) => {
+  if (containerW <= 0 || containerH <= 0) return null;
+  const containerRatio = containerW / containerH;
+  let frameW, frameH;
+
+  if (containerRatio > YOUTUBE_VIDEO_RATIO) {
+    frameW = containerW;
+    frameH = containerW / YOUTUBE_VIDEO_RATIO;
+  } else {
+    frameH = containerH;
+    frameW = containerH * YOUTUBE_VIDEO_RATIO;
+  }
+
+  frameW *= YOUTUBE_OVERSCAN;
+  frameH *= YOUTUBE_OVERSCAN;
+
+  return {
+    width: frameW,
+    height: frameH,
+    left: (containerW - frameW) / 2,
+    top: (containerH - frameH) / 2,
+  };
+};
 
 const YOUTUBE_FAILURE_BY_CODE = Object.freeze({
   2: HERO_FAILURE_REASONS.YOUTUBE_INVALID_PARAMETER,
@@ -25,6 +52,7 @@ const HeroYouTubeVideo = ({
   videoId,
   generation,
   muted,
+  volume = 60,
   onPlayerReady,
   onPlaybackRequested,
   onPlaybackPlaying,
@@ -33,10 +61,14 @@ const HeroYouTubeVideo = ({
   onVisualHidden,
   onPlaybackPaused,
   onBufferingSustained,
+  onAutoplayBlocked,
+  onMutedFallback,
   onEnded,
   onFailure,
 }) => {
   const latestRef = useRef({ enabled, active, videoId, generation });
+  const shellRef = useRef(null);
+  const [coverLayout, setCoverLayout] = useState(null);
   const playingTimerRef = useRef(null);
   const visualTimerRef = useRef(null);
   const bufferingTimerRef = useRef(null);
@@ -209,13 +241,13 @@ const HeroYouTubeVideo = ({
 
   const handleAutoplayBlocked = useCallback((event, meta) => {
     const targetGeneration = meta?.generation ?? generation;
-    fail(
-      HERO_FAILURE_REASONS.AUTOPLAY_BLOCKED,
-      { stage: 'youtube-autoplay', data: event?.data },
-      targetGeneration,
-      meta?.videoId || videoId,
-    );
-  }, [fail, generation, videoId]);
+    onAutoplayBlocked?.(event, { generation: targetGeneration, videoId: meta?.videoId || videoId });
+  }, [generation, onAutoplayBlocked, videoId]);
+
+  const handleMutedFallback = useCallback((meta) => {
+    const targetGeneration = meta?.generation ?? generation;
+    onMutedFallback?.({ generation: targetGeneration, videoId: meta?.videoId || videoId });
+  }, [generation, onMutedFallback, videoId]);
 
   const handleError = useCallback((event, meta) => {
     const targetGeneration = meta?.generation ?? generation;
@@ -234,11 +266,13 @@ const HeroYouTubeVideo = ({
     enabled,
     active,
     muted,
+    volume,
     requestGeneration: generation,
     onReady: handlePlayerReady,
     onStateChange: handleStateChange,
     onAutoplayBlocked: handleAutoplayBlocked,
     onPlaybackRequest: handlePlaybackRequest,
+    onMutedFallback: handleMutedFallback,
     onError: handleError,
     onEnded: undefined,
   });
@@ -259,6 +293,27 @@ const HeroYouTubeVideo = ({
   }, [active, clearAllTimers, enabled, generation, onPlaybackPaused, onVisualHidden]);
 
   useEffect(() => () => clearAllTimers(), [clearAllTimers]);
+
+  // Dynamic cover geometry via ResizeObserver
+  const updateCoverLayout = useCallback(() => {
+    const shell = shellRef.current;
+    if (!shell) return;
+    const nextLayout = calculateYouTubeCover(shell.clientWidth, shell.clientHeight);
+    if (nextLayout) setCoverLayout(nextLayout);
+  }, []);
+
+  useEffect(() => {
+    const shell = shellRef.current;
+    if (!shell || typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(updateCoverLayout);
+    observer.observe(shell);
+    return () => observer.disconnect();
+  }, [updateCoverLayout]);
+
+  // Recalculate on mount/generation change
+  useEffect(() => {
+    updateCoverLayout();
+  }, [generation, updateCoverLayout]);
 
   useEffect(() => {
     if (!import.meta.env.DEV || !player) return undefined;
@@ -291,15 +346,28 @@ const HeroYouTubeVideo = ({
     };
   }, [generation, player, videoId]);
 
+  const mountStyle = coverLayout ? {
+    position: 'absolute',
+    width: `${coverLayout.width}px`,
+    height: `${coverLayout.height}px`,
+    left: `${coverLayout.left}px`,
+    top: `${coverLayout.top}px`,
+    maxWidth: 'none',
+    pointerEvents: 'none',
+    backfaceVisibility: 'hidden',
+    willChange: 'transform',
+  } : undefined;
+
   return (
     <div
+      ref={shellRef}
       className={`hero-video-shell hero-youtube-video ${visible ? 'is-visible' : ''}`}
       aria-hidden="true"
       data-video-safe={visible ? 'true' : 'false'}
       data-video-id={videoId}
     >
       <div className="hero-video-frame">
-        <div ref={containerRef} className="hero-youtube-video__mount" />
+        <div ref={containerRef} className="hero-youtube-video__mount" style={mountStyle} />
       </div>
     </div>
   );

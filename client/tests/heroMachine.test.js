@@ -159,18 +159,18 @@ test('compact budget accumulates exactly 3000ms across pause and resume', () => 
   state = heroReducer(state, { type: 'PLAYBACK_PAUSED', generation: 1, now: 600 });
 
   assert.equal(state.compactRemainingMs, 2_500);
-  assert.equal(state.previewRemainingMs, 19_500);
+  assert.equal(state.previewRemainingMs, 59_500);
   assert.equal(state.playbackStartedAt, null);
 
   state = heroReducer(state, { type: 'PLAYBACK_STABLE', generation: 1, now: 1_000 });
   assert.deepEqual(getPlaybackRemaining(state, 3_499), {
     compactRemainingMs: 1,
-    previewRemainingMs: 17_001,
+    previewRemainingMs: 57_001,
   });
 
   state = heroReducer(state, { type: 'COMPACT_ELAPSED', generation: 1, now: 3_500 });
   assert.equal(state.compactRemainingMs, 0);
-  assert.equal(state.previewRemainingMs, 17_000);
+  assert.equal(state.previewRemainingMs, 57_000);
   assert.equal(state.phase, HERO_PHASES.TRAILER_COMPACT);
   assert.equal(state.hasCompacted, true);
 });

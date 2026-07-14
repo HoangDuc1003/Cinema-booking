@@ -23,12 +23,13 @@ import {
   getPlaybackRemaining,
   heroReducer,
 } from './hero/heroMachine';
+import { useHeroContentDisclosure } from './hero/useHeroContentDisclosure';
 import './hero/hero.css';
 
 const VIDEO_ENTER_DURATION_MS = 850;
-const RECOMPACT_DELAY_MS = 3_000;
 const HERO_POSTER_SWAP_DELAY_MS = 400;
 const HERO_POSTER_TRANSITION_MS = 1_200;
+const HERO_AUTO_CAROUSEL_MS = 9_000;
 
 const getNow = () => performance.now();
 
@@ -39,6 +40,31 @@ const formatRuntime = (minutes) => {
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
   return `${hours}h ${remainingMinutes}m`;
+};
+
+const selectBestHeroMovies = (movies) => {
+  if (!Array.isArray(movies) || !movies.length) return dummyShowsData.slice(0, 5);
+  const scored = movies.map((m) => {
+    const popularity = Number(m.popularity) || 0;
+    const voteAverage = Number(m.vote_average) || 0;
+    const voteCount = Number(m.vote_count) || 0;
+    const hasBackdrop = Boolean(m.backdrop_path || m.backdrop_original);
+    const hasNative = Boolean(resolveConfiguredHeroVideoSource(m));
+    const releaseYear = Number((m.release_date || '').slice(0, 4)) || 0;
+    const isRecent = releaseYear >= new Date().getFullYear() - 1;
+
+    const score = popularity * 0.3
+      + voteAverage * 10
+      + (voteCount > 100 ? 15 : 0)
+      + (hasBackdrop ? 30 : 0)
+      + (hasNative ? 50 : 0)
+      + (isRecent ? 25 : 0);
+
+    return { movie: m, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, 5).map((item) => item.movie);
 };
 
 const canLoadImage = (url, signal, timeoutMs = 6_000) => new Promise((resolve) => {
@@ -155,17 +181,23 @@ const useSaveData = () => {
 
 const HeroSection = () => {
   const navigate = useNavigate();
-  const initialMovies = dummyShowsData.slice(0, 5);
-  const [movies, setMovies] = useState(initialMovies);
+  const initialBestMovies = selectBestHeroMovies(dummyShowsData);
+  const [movies, setMovies] = useState(initialBestMovies);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [manualPlaybackRequested, setManualPlaybackRequested] = useState(false);
-  const [muted, setMuted] = useState(true);
+  const [muted, setMuted] = useState(() => {
+    try {
+      return localStorage.getItem('nitrocine:hero-sound') === 'muted';
+    } catch {
+      return false;
+    }
+  });
   const [heroVisible, setHeroVisible] = useState(() => typeof IntersectionObserver === 'undefined');
   const [documentVisible, setDocumentVisible] = useState(() => !document.hidden);
 
-  const initialMovieKey = getHeroMovieKey(initialMovies[0], 0);
+  const initialMovieKey = getHeroMovieKey(initialBestMovies[0], 0);
   const [machine, dispatch] = useReducer(
     heroReducer,
     { movieKey: initialMovieKey, generation: 0 },
@@ -186,8 +218,6 @@ const HeroSection = () => {
   const transitionTimersRef = useRef(new Set());
   const playbackTimersRef = useRef(new Set());
   const carouselIntervalRef = useRef(null);
-  const recompactTimerRef = useRef(null);
-  const previewHandledGenerationRef = useRef(null);
 
   const isLargeScreen = useMediaQuery('(min-width: 1024px)');
   const isMobileScreen = useMediaQuery('(max-width: 767px)');
@@ -195,6 +225,28 @@ const HeroSection = () => {
   const saveData = useSaveData();
   const desktopAutoEligible = isLargeScreen && !reducedMotion && !saveData;
   const heroTrailerMockEnabled = isHeroTrailerMockEnabled(window.location.search, import.meta.env.DEV);
+
+  const currentMovie = movies[currentIndex] || movies[0];
+  const currentMovieKey = getHeroMovieKey(currentMovie, currentIndex);
+
+  const trailerActive = [
+    HERO_PHASES.TRAILER_ENTERING,
+    HERO_PHASES.TRAILER_EXPANDED,
+    HERO_PHASES.TRAILER_COMPACT,
+  ].includes(machine.phase);
+  const trailerLoading = machine.phase === HERO_PHASES.TRAILER_LOADING;
+  const trailerFailed = machine.phase === HERO_PHASES.TRAILER_FAILED;
+  const playbackPhase = trailerLoading || trailerActive;
+  const videoVisible = trailerActive && machine.visualReady && !machine.posterVisible;
+
+  const disclosure = useHeroContentDisclosure({
+    movieKey: currentMovieKey,
+    phase: machine.phase,
+    playbackStatus: machine.playbackStatus,
+    visualReady: machine.visualReady,
+    posterVisible: machine.posterVisible,
+    reducedMotion,
+  });
 
   useEffect(() => {
     moviesRef.current = movies;
@@ -287,7 +339,13 @@ const HeroSection = () => {
     window.clearInterval(carouselIntervalRef.current);
     carouselIntervalRef.current = null;
     if (source !== 'auto') setManualPlaybackRequested(true);
-    setMuted(true);
+    let shouldMute = true;
+    try {
+      shouldMute = localStorage.getItem('nitrocine:hero-sound') === 'muted';
+    } catch {
+      shouldMute = false;
+    }
+    setMuted(shouldMute);
 
     const generation = nextGeneration();
     attemptLockRef.current = { generation, movieKey: targetKey };
@@ -338,8 +396,6 @@ const HeroSection = () => {
   const resetToPoster = useCallback((movieKey = machineRef.current.movieKey) => {
     abortMetadataRequests();
     clearPlaybackTimers();
-    window.clearTimeout(recompactTimerRef.current);
-    recompactTimerRef.current = null;
     setManualPlaybackRequested(false);
     setMuted(true);
     const generation = nextGeneration();
@@ -356,11 +412,9 @@ const HeroSection = () => {
     clearPlaybackTimers();
     window.clearInterval(carouselIntervalRef.current);
     carouselIntervalRef.current = null;
-    window.clearTimeout(recompactTimerRef.current);
-    recompactTimerRef.current = null;
-    previewHandledGenerationRef.current = null;
     setManualPlaybackRequested(Boolean(continueTrailer));
     setMuted(true);
+    disclosure.expand({ animate: false });
 
     const targetKey = getHeroMovieKey(availableMovies[normalizedIndex], normalizedIndex);
     const generation = nextGeneration();
@@ -386,14 +440,7 @@ const HeroSection = () => {
     }, HERO_POSTER_TRANSITION_MS);
     transitionTimersRef.current.add(swapTimer);
     transitionTimersRef.current.add(settleTimer);
-  }, [abortMetadataRequests, clearPlaybackTimers, nextGeneration, reducedMotion]);
-
-  const advanceTrailerSequence = useCallback(() => {
-    const availableMovies = moviesRef.current;
-    if (!availableMovies.length) return;
-    const nextIndex = (currentIndexRef.current + 1) % availableMovies.length;
-    switchMovie(nextIndex, { animate: false, continueTrailer: true });
-  }, [switchMovie]);
+  }, [abortMetadataRequests, clearPlaybackTimers, disclosure, nextGeneration, reducedMotion]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -405,7 +452,6 @@ const HeroSection = () => {
       transitionLockRef.current = false;
       window.clearInterval(carouselIntervalRef.current);
       carouselIntervalRef.current = null;
-      window.clearTimeout(recompactTimerRef.current);
     };
   }, [abortMetadataRequests, clearPlaybackTimers, clearTransitionTimers]);
 
@@ -430,8 +476,8 @@ const HeroSection = () => {
         const data = await fetchHomeHero({ signal: controller.signal });
         if (controller.signal.aborted) return;
         const rawMovies = Array.isArray(data.movies) && data.movies.length ? data.movies : dummyShowsData;
-        const immediateMovies = rawMovies.slice(0, 5);
-        const validMovies = await validateMovieCandidates(immediateMovies, controller.signal);
+        const bestMovies = selectBestHeroMovies(rawMovies);
+        const validMovies = await validateMovieCandidates(bestMovies, controller.signal);
         if (!controller.signal.aborted && validMovies.length) applyMovies(validMovies);
       } catch (error) {
         if (error?.name !== 'AbortError' && import.meta.env.DEV) {
@@ -480,18 +526,8 @@ const HeroSection = () => {
     resetToPoster(getHeroMovieKey(moviesRef.current[currentIndexRef.current], currentIndexRef.current));
   }, [manualPlaybackRequested, reducedMotion, resetToPoster, saveData]);
 
-  const currentMovie = movies[currentIndex];
-  const currentMovieKey = getHeroMovieKey(currentMovie, currentIndex);
   const configuredHeroSource = resolveConfiguredHeroVideoSource(currentMovie);
   const heroBackgroundAvailable = Boolean(configuredHeroSource);
-  const trailerActive = [
-    HERO_PHASES.TRAILER_ENTERING,
-    HERO_PHASES.TRAILER_EXPANDED,
-    HERO_PHASES.TRAILER_COMPACT,
-  ].includes(machine.phase);
-  const trailerLoading = machine.phase === HERO_PHASES.TRAILER_LOADING;
-  const trailerFailed = machine.phase === HERO_PHASES.TRAILER_FAILED;
-  const playbackPhase = trailerLoading || trailerActive;
   const playbackIntent = manualPlaybackRequested || (desktopAutoEligible && heroBackgroundAvailable);
   const playerEnabled = Boolean(
     machine.videoSource
@@ -501,8 +537,6 @@ const HeroSection = () => {
     && documentVisible
   );
   const playerActive = playerEnabled && playbackPhase;
-  const videoVisible = playerActive && machine.visualReady && !machine.posterVisible;
-  const compact = isLargeScreen && !reducedMotion && machine.phase === HERO_PHASES.TRAILER_COMPACT;
 
   useEffect(() => {
     if (!machine.videoSource || !playbackPhase) return;
@@ -569,10 +603,11 @@ const HeroSection = () => {
       const remaining = getPlaybackRemaining(state, getNow())[kind];
       if (remaining <= 0) {
         dispatch({
-          type: kind === 'compactRemainingMs' ? 'COMPACT_ELAPSED' : 'PREVIEW_ELAPSED',
+          type: 'PREVIEW_ELAPSED',
           generation,
           now: getNow(),
         });
+        resetToPoster(machineRef.current.movieKey);
         return;
       }
 
@@ -590,30 +625,25 @@ const HeroSection = () => {
           return;
         }
         dispatch({
-          type: kind === 'compactRemainingMs' ? 'COMPACT_ELAPSED' : 'PREVIEW_ELAPSED',
+          type: 'PREVIEW_ELAPSED',
           generation,
           now: getNow(),
         });
+        resetToPoster(machineRef.current.movieKey);
       }, remaining);
       playbackTimersRef.current.add(timerId);
     };
 
-    if (isLargeScreen && !reducedMotion && machine.compactRemainingMs > 0 && machine.phase !== HERO_PHASES.TRAILER_COMPACT) {
-      scheduleBudget('compactRemainingMs');
-    }
     if (machine.previewRemainingMs > 0) scheduleBudget('previewRemainingMs');
 
     return clearPlaybackTimers;
   }, [
     clearPlaybackTimers,
-    machine.compactRemainingMs,
     machine.generation,
-    machine.phase,
     machine.playbackStatus,
     machine.playbackStartedAt,
     machine.previewRemainingMs,
-    isLargeScreen,
-    reducedMotion,
+    resetToPoster,
   ]);
 
   useEffect(() => {
@@ -630,27 +660,23 @@ const HeroSection = () => {
 
   useEffect(() => {
     if (
-      machine.previewRemainingMs > 0
-      || machine.playbackStatus !== HERO_PLAYBACK_STATUS.STABLE
-      || previewHandledGenerationRef.current === machine.generation
-    ) return;
-    previewHandledGenerationRef.current = machine.generation;
-    advanceTrailerSequence();
-  }, [advanceTrailerSequence, machine.generation, machine.playbackStatus, machine.previewRemainingMs]);
-
-  useEffect(() => {
-    if (!movies.length || machine.phase !== HERO_PHASES.POSTER || isTransitioning) {
+      !movies.length
+      || machine.phase !== HERO_PHASES.POSTER
+      || isTransitioning
+      || disclosure.isPointerActive
+      || disclosure.isFocusActive
+    ) {
       return undefined;
     }
     const intervalId = window.setInterval(() => {
       switchMovie(currentIndexRef.current + 1, { animate: true, continueTrailer: false });
-    }, 6_000);
+    }, HERO_AUTO_CAROUSEL_MS);
     carouselIntervalRef.current = intervalId;
     return () => {
       window.clearInterval(intervalId);
       if (carouselIntervalRef.current === intervalId) carouselIntervalRef.current = null;
     };
-  }, [isTransitioning, machine.phase, movies.length, switchMovie]);
+  }, [disclosure.isFocusActive, disclosure.isPointerActive, isTransitioning, machine.phase, movies.length, switchMovie]);
 
   const handleToggleTrailer = () => {
     if (machine.phase === HERO_PHASES.TRAILER_LOADING || attemptLockRef.current) return;
@@ -670,6 +696,18 @@ const HeroSection = () => {
       forceMetadata: machine.phase === HERO_PHASES.TRAILER_FAILED,
     });
   };
+
+  const handleToggleMuted = useCallback(() => {
+    setMuted((current) => {
+      const nextMuted = !current;
+      try {
+        localStorage.setItem('nitrocine:hero-sound', nextMuted ? 'muted' : 'on');
+      } catch {
+        // ignore storage errors
+      }
+      return nextMuted;
+    });
+  }, []);
 
   const handlePlayerFailure = useCallback(({ generation, reason, detail }) => {
     if (generation !== generationRef.current) return;
@@ -723,31 +761,16 @@ const HeroSection = () => {
   const handleEnded = useCallback(({ generation }) => {
     if (generation !== generationRef.current) return;
     setMuted(true);
-    advanceTrailerSequence();
-  }, [advanceTrailerSequence]);
+    resetToPoster(machineRef.current.movieKey);
+  }, [resetToPoster]);
 
-  const handleReveal = () => {
-    if (machine.phase !== HERO_PHASES.TRAILER_COMPACT) return;
-    window.clearTimeout(recompactTimerRef.current);
-    recompactTimerRef.current = null;
-    dispatch({ type: 'REVEAL_OVERVIEW', generation: machine.generation });
-  };
+  const handleAutoplayBlocked = useCallback(() => {
+    setMuted(true);
+  }, []);
 
-  const handleScheduleRecompact = (revealZone) => {
-    if (machine.phase !== HERO_PHASES.TRAILER_COMPACT) return;
-    window.clearTimeout(recompactTimerRef.current);
-    const generation = machine.generation;
-    recompactTimerRef.current = window.setTimeout(() => {
-      recompactTimerRef.current = null;
-      if (revealZone?.contains?.(document.activeElement)) return;
-      dispatch({ type: 'HIDE_OVERVIEW', generation });
-    }, RECOMPACT_DELAY_MS);
-  };
-
-  const handleCancelRecompact = () => {
-    window.clearTimeout(recompactTimerRef.current);
-    recompactTimerRef.current = null;
-  };
+  const handleMutedFallback = useCallback(() => {
+    setMuted(true);
+  }, []);
 
   if (isLoading || !currentMovie) {
     return (
@@ -783,7 +806,7 @@ const HeroSection = () => {
   };
 
   return (
-    <section ref={rootRef} className="hero-section" aria-label="Featured movie">
+    <section ref={rootRef} className={`hero-section ${disclosure.isCompact ? 'is-compact' : ''}`.trim()} aria-label="Featured movie">
       <HeroMedia
         key={`media-${currentMovieKey}-${posterCandidates.join('|')}`}
         title={currentMovie.title || currentMovie.name}
@@ -800,6 +823,7 @@ const HeroSection = () => {
             source={machine.videoSource}
             generation={machine.generation}
             muted={muted}
+            volume={60}
             onPlayerReady={handlePlayerReady}
             onPlaybackRequested={handlePlaybackRequested}
             onPlaybackPlaying={handlePlaybackPlaying}
@@ -808,6 +832,8 @@ const HeroSection = () => {
             onVisualHidden={handleVisualHidden}
             onPlaybackPaused={handlePlaybackPaused}
             onBufferingSustained={handleBufferingSustained}
+            onAutoplayBlocked={handleAutoplayBlocked}
+            onMutedFallback={handleMutedFallback}
             onEnded={handleEnded}
             onFailure={handlePlayerFailure}
           />
@@ -822,30 +848,36 @@ const HeroSection = () => {
       )}
 
       <HeroContent
+        movieKey={currentMovieKey}
+        index={currentIndex}
         movie={currentMovie}
         year={currentMovie.release_date?.slice(0, 4) || 'N/A'}
         runtime={formatRuntime(currentMovie.runtime)}
         rating={Number.isFinite(currentMovie.vote_average) ? currentMovie.vote_average.toFixed(1) : 'N/A'}
-        compact={compact}
-        overviewRevealed={machine.overviewRevealed}
+        disclosureState={disclosure.disclosureState}
         trailerActive={trailerActive}
         trailerLoading={trailerLoading}
         trailerFailed={trailerFailed}
+        trailerAvailable={heroBackgroundAvailable}
         failureReason={machine.failureReason}
         onBook={navigateToMovie}
         onDetails={navigateToMovie}
         onToggleTrailer={handleToggleTrailer}
         showVolumeControl={trailerActive && machine.playbackStatus === HERO_PLAYBACK_STATUS.STABLE}
         muted={muted}
-        onToggleMuted={() => setMuted((current) => !current)}
-        onReveal={handleReveal}
-        onScheduleRecompact={handleScheduleRecompact}
-        onCancelRecompact={handleCancelRecompact}
+        onToggleMuted={handleToggleMuted}
+        onPointerEnter={disclosure.handlePointerEnter}
+        onPointerLeave={disclosure.handlePointerLeave}
+        onFocusCapture={disclosure.handleFocusCapture}
+        onBlurCapture={disclosure.handleBlurCapture}
+        onCompactTitleClick={disclosure.handleCompactTitleClick}
+        onCtaClick={disclosure.notifyCtaInteraction}
       />
 
       <HeroPosterRail
         movies={movies}
         currentIndex={currentIndex}
+        className={disclosure.isCompact ? 'is-compact' : ''}
         getThumbnailUrls={(movie) => buildHeroImageCandidates([
           movie.heroImageUrl,
           movie.backdrop_path,
@@ -856,7 +888,6 @@ const HeroSection = () => {
           continueTrailer: trailerActive || trailerLoading,
         })}
       />
-
     </section>
   );
 };

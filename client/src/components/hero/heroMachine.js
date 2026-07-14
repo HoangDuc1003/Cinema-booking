@@ -30,6 +30,14 @@ export const HERO_PLAYBACK_STATUS = Object.freeze({
   FAILED: 'failed',
 });
 
+export const HERO_AUDIO_STATUS = Object.freeze({
+  PREFERRED_ON: 'preferred-on',
+  PREFERRED_OFF: 'preferred-off',
+  SOUND_ACTIVE: 'sound-active',
+  MUTED_ACTIVE: 'muted-active',
+  AUTOPLAY_SOUND_BLOCKED: 'autoplay-sound-blocked',
+});
+
 export const HERO_FAILURE_REASONS = Object.freeze({
   AUTOPLAY_BLOCKED: 'autoplay-blocked',
   TIMEOUT: 'timeout',
@@ -43,16 +51,18 @@ export const HERO_FAILURE_REASONS = Object.freeze({
   MISSING_VIDEO: 'missing-video',
 });
 
+export const HERO_PREVIEW_PLAYBACK_MS = 60_000;
 export const HERO_COMPACT_PLAYBACK_MS = 3_000;
-export const HERO_PREVIEW_PLAYBACK_MS = 20_000;
 export const HERO_BUFFERING_HYSTERESIS_MS = 450;
 export const HERO_PLAYING_HYSTERESIS_MS = 250;
-// YouTube may briefly render its own center feedback after programmatic playback.
-// Keep the poster above the player until that transient chrome has settled.
-export const HERO_VISUAL_READY_CONFIRM_MS = 3_000;
+// Minimum quarantine after PLAYING + currentTime samples confirm real playback.
+// YouTube may briefly render transient center bezels after programmatic playback;
+// the poster stays above the player until this quarantine has elapsed AND samples
+// show continuous currentTime advancement without buffering.
+export const HERO_VISUAL_READY_CONFIRM_MS = 1_200;
 export const HERO_PLAYBACK_TIMEOUT_MS = 8_000;
 
-export const createInitialHeroState = ({ movieKey = '', generation = 0 } = {}) => ({
+export const createInitialHeroState = ({ movieKey = '', generation = 0, audioPreference = HERO_AUDIO_STATUS.PREFERRED_ON } = {}) => ({
   phase: HERO_PHASES.POSTER,
   generation,
   movieKey,
@@ -60,13 +70,13 @@ export const createInitialHeroState = ({ movieKey = '', generation = 0 } = {}) =
   metadataStatus: HERO_METADATA_STATUS.IDLE,
   playerStatus: HERO_PLAYER_STATUS.DISABLED,
   playbackStatus: HERO_PLAYBACK_STATUS.IDLE,
+  audioStatus: audioPreference,
   visualReady: false,
   failureReason: null,
   failureDetail: null,
   retryCount: 0,
   posterVisible: true,
   overviewRevealed: true,
-  hasCompacted: false,
   playbackStartedAt: null,
   compactRemainingMs: HERO_COMPACT_PLAYBACK_MS,
   previewRemainingMs: HERO_PREVIEW_PLAYBACK_MS,
@@ -200,7 +210,6 @@ export const heroReducer = (state, action) => {
       const isFirstConfirmation = ![
         HERO_PHASES.TRAILER_ENTERING,
         HERO_PHASES.TRAILER_EXPANDED,
-        HERO_PHASES.TRAILER_COMPACT,
       ].includes(state.phase);
 
       return {
@@ -294,6 +303,21 @@ export const heroReducer = (state, action) => {
     case 'HIDE_OVERVIEW':
       if (isStale(state, action) || state.phase !== HERO_PHASES.TRAILER_COMPACT) return state;
       return { ...state, overviewRevealed: false };
+
+    case 'AUDIO_PREFERENCE_CHANGED':
+      return { ...state, audioStatus: action.audioStatus };
+
+    case 'AUTOPLAY_SOUND_BLOCKED':
+      if (isStale(state, action)) return state;
+      return { ...state, audioStatus: HERO_AUDIO_STATUS.AUTOPLAY_SOUND_BLOCKED };
+
+    case 'AUDIO_FALLBACK_MUTED':
+      if (isStale(state, action)) return state;
+      return { ...state, audioStatus: HERO_AUDIO_STATUS.MUTED_ACTIVE };
+
+    case 'SOUND_CONFIRMED':
+      if (isStale(state, action)) return state;
+      return { ...state, audioStatus: HERO_AUDIO_STATUS.SOUND_ACTIVE };
 
     case 'TRAILER_FAILED': {
       if (isStale(state, action)) return state;

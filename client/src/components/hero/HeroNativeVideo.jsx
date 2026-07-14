@@ -34,6 +34,7 @@ const HeroNativeVideo = ({
   source,
   generation,
   muted,
+  volume = 60,
   onPlayerReady,
   onPlaybackRequested,
   onPlaybackPlaying,
@@ -42,6 +43,8 @@ const HeroNativeVideo = ({
   onVisualHidden,
   onPlaybackPaused,
   onBufferingSustained,
+  onAutoplayBlocked,
+  onMutedFallback,
   onEnded,
   onFailure,
 }) => {
@@ -282,9 +285,10 @@ const HeroNativeVideo = ({
     const commandKey = `${targetGeneration}:${targetSource}`;
     if (requestedCommandRef.current === commandKey) return;
     requestedCommandRef.current = commandKey;
+    const safeVolume = Math.max(0, Math.min(1, (Number(volume) || 60) / 100));
     video.muted = Boolean(muted);
     video.defaultMuted = Boolean(muted);
-    video.volume = muted ? 0 : 1;
+    video.volume = muted ? 0 : safeVolume;
     onPlaybackRequested?.({ generation: targetGeneration, player: video });
 
     window.clearTimeout(playbackTimeoutRef.current);
@@ -294,12 +298,34 @@ const HeroNativeVideo = ({
 
     const playPromise = video.play();
     playPromise?.catch((error) => {
-      fail(HERO_FAILURE_REASONS.AUTOPLAY_BLOCKED, {
-        stage: 'native-autoplay',
-        message: error?.message,
-      }, targetGeneration);
+      if (!muted || error?.name === 'NotAllowedError' || /NotAllowedError|interact/i.test(error?.message || '')) {
+        onAutoplayBlocked?.(error, { generation: targetGeneration });
+        try {
+          video.muted = true;
+          video.defaultMuted = true;
+          video.volume = 0;
+          const retryPromise = video.play();
+          onMutedFallback?.({ generation: targetGeneration });
+          retryPromise?.catch((retryError) => {
+            fail(HERO_FAILURE_REASONS.AUTOPLAY_BLOCKED, {
+              stage: 'native-autoplay-retry',
+              message: retryError?.message,
+            }, targetGeneration);
+          });
+        } catch (fallbackError) {
+          fail(HERO_FAILURE_REASONS.AUTOPLAY_BLOCKED, {
+            stage: 'native-autoplay',
+            message: error?.message,
+          }, targetGeneration);
+        }
+      } else {
+        fail(HERO_FAILURE_REASONS.AUTOPLAY_BLOCKED, {
+          stage: 'native-autoplay',
+          message: error?.message,
+        }, targetGeneration);
+      }
     });
-  }, [fail, generation, isCurrent, muted, onPlaybackRequested, source?.src]);
+  }, [fail, generation, isCurrent, muted, volume, onAutoplayBlocked, onMutedFallback, onPlaybackRequested, source?.src]);
 
   const handlePlayerReady = useCallback(() => {
     const targetGeneration = generation;
@@ -434,10 +460,11 @@ const HeroNativeVideo = ({
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
+    const safeVolume = Math.max(0, Math.min(1, (Number(volume) || 60) / 100));
     video.muted = Boolean(muted);
     video.defaultMuted = Boolean(muted);
-    video.volume = muted ? 0 : 1;
-  }, [muted]);
+    video.volume = muted ? 0 : safeVolume;
+  }, [muted, volume]);
 
   useEffect(() => {
     cropRef.current = null;

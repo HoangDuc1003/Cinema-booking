@@ -23,8 +23,8 @@ const HeroPosterThumbnail = ({ sources }) => {
   );
 };
 
-const HeroPosterRail = ({ movies, currentIndex, getThumbnailUrls, onSelect }) => (
-  <div className="hero-poster-rail" aria-label="Hero movie navigation">
+const HeroPosterRail = ({ movies, currentIndex, getThumbnailUrls, onSelect, className = '' }) => (
+  <div className={`hero-poster-rail ${className}`.trim()} aria-label="Hero movie navigation">
     <div className="hero-poster-rail__progress" aria-hidden="true">
       {movies.map((movie, index) => (
         <span key={movie.id || movie._id || index} className={index === currentIndex ? 'is-active' : ''} />
