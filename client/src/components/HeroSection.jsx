@@ -10,6 +10,7 @@ import HeroVideoRenderer from './hero/HeroVideoRenderer';
 import { buildHeroImageCandidates } from './hero/heroImages';
 import {
   HERO_NATIVE_MOCK_FIXTURES,
+  canResolveHeroTrailer,
   isHeroTrailerMockEnabled,
   resolveConfiguredHeroVideoSource,
   resolveHeroVideoSource,
@@ -30,6 +31,14 @@ const VIDEO_ENTER_DURATION_MS = 850;
 const HERO_POSTER_SWAP_DELAY_MS = 400;
 const HERO_POSTER_TRANSITION_MS = 1_200;
 const HERO_AUTO_CAROUSEL_MS = 9_000;
+const HERO_MAX_MOVIES = 2;
+
+const HERO_PLAYBACK_INTENT = Object.freeze({
+  NONE: 'none',
+  AUTO: 'auto',
+  MANUAL: 'manual',
+  CONTINUATION: 'continuation',
+});
 
 const getNow = () => performance.now();
 
@@ -43,7 +52,7 @@ const formatRuntime = (minutes) => {
 };
 
 const selectBestHeroMovies = (movies) => {
-  if (!Array.isArray(movies) || !movies.length) return dummyShowsData.slice(0, 5);
+  if (!Array.isArray(movies) || !movies.length) return dummyShowsData.slice(0, HERO_MAX_MOVIES);
   const scored = movies.map((m) => {
     const popularity = Number(m.popularity) || 0;
     const voteAverage = Number(m.vote_average) || 0;
@@ -64,7 +73,7 @@ const selectBestHeroMovies = (movies) => {
   });
 
   scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, 5).map((item) => item.movie);
+  return scored.slice(0, HERO_MAX_MOVIES).map((item) => item.movie);
 };
 
 const canLoadImage = (url, signal, timeoutMs = 6_000) => new Promise((resolve) => {
@@ -146,7 +155,7 @@ const validateMovieCandidates = async (movies, signal) => {
     };
   };
 
-  const results = await Promise.all(movies.slice(0, 5).map(validateMovie));
+  const results = await Promise.all(movies.slice(0, HERO_MAX_MOVIES).map(validateMovie));
   return results.filter(Boolean);
 };
 
@@ -186,12 +195,14 @@ const HeroSection = () => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
-  const [manualPlaybackRequested, setManualPlaybackRequested] = useState(false);
+  const [playbackIntent, setPlaybackIntent] = useState(HERO_PLAYBACK_INTENT.NONE);
   const [muted, setMuted] = useState(() => {
     try {
-      return localStorage.getItem('nitrocine:hero-sound') === 'muted';
+      const stored = localStorage.getItem('nitrocine:hero-sound');
+      // Default muted when no preference exists — required for reliable autoplay
+      return stored === null ? true : stored === 'muted';
     } catch {
-      return false;
+      return true;
     }
   });
   const [heroVisible, setHeroVisible] = useState(() => typeof IntersectionObserver === 'undefined');
@@ -338,14 +349,28 @@ const HeroSection = () => {
 
     window.clearInterval(carouselIntervalRef.current);
     carouselIntervalRef.current = null;
-    if (source !== 'auto') setManualPlaybackRequested(true);
-    let shouldMute = true;
-    try {
-      shouldMute = localStorage.getItem('nitrocine:hero-sound') === 'muted';
-    } catch {
-      shouldMute = false;
+
+    // Set playback intent based on source
+    const intentValue = source === 'manual'
+      ? HERO_PLAYBACK_INTENT.MANUAL
+      : source === 'continuation'
+        ? HERO_PLAYBACK_INTENT.CONTINUATION
+        : HERO_PLAYBACK_INTENT.AUTO;
+    setPlaybackIntent(intentValue);
+
+    // Audio: auto always muted for reliable autoplay; manual reads preference (default muted)
+    if (source === 'auto') {
+      setMuted(true);
+    } else {
+      let preferMuted = true;
+      try {
+        const stored = localStorage.getItem('nitrocine:hero-sound');
+        preferMuted = stored === null ? true : stored === 'muted';
+      } catch {
+        preferMuted = true;
+      }
+      setMuted(preferMuted);
     }
-    setMuted(shouldMute);
 
     const generation = nextGeneration();
     attemptLockRef.current = { generation, movieKey: targetKey };
@@ -364,7 +389,7 @@ const HeroSection = () => {
 
       if (!videoSource) {
         attemptLockRef.current = null;
-        if (source === 'auto') setManualPlaybackRequested(false);
+        // Intent not reset here — bounded fallback effect handles AUTO cleanup
         dispatch({
           type: 'TRAILER_FAILED',
           generation,
@@ -379,7 +404,7 @@ const HeroSection = () => {
     } catch (error) {
       if (attemptLockRef.current?.generation === generation) attemptLockRef.current = null;
       if (error?.name === 'AbortError' || generation !== generationRef.current) return;
-      if (source === 'auto') setManualPlaybackRequested(false);
+      // Intent not reset here — bounded fallback effect handles AUTO cleanup
       dispatch({
         type: 'TRAILER_FAILED',
         generation,
@@ -396,7 +421,7 @@ const HeroSection = () => {
   const resetToPoster = useCallback((movieKey = machineRef.current.movieKey) => {
     abortMetadataRequests();
     clearPlaybackTimers();
-    setManualPlaybackRequested(false);
+    setPlaybackIntent(HERO_PLAYBACK_INTENT.NONE);
     setMuted(true);
     const generation = nextGeneration();
     dispatch({ type: 'POSTER_REQUESTED', generation, movieKey });
@@ -412,7 +437,7 @@ const HeroSection = () => {
     clearPlaybackTimers();
     window.clearInterval(carouselIntervalRef.current);
     carouselIntervalRef.current = null;
-    setManualPlaybackRequested(Boolean(continueTrailer));
+    setPlaybackIntent(continueTrailer ? HERO_PLAYBACK_INTENT.CONTINUATION : HERO_PLAYBACK_INTENT.NONE);
     setMuted(true);
     disclosure.expand({ animate: false });
 
@@ -466,7 +491,7 @@ const HeroSection = () => {
       currentIndexRef.current = 0;
       moviesRef.current = nextMovies;
       setCurrentIndex(0);
-      setManualPlaybackRequested(false);
+      setPlaybackIntent(HERO_PLAYBACK_INTENT.NONE);
       setMovies(nextMovies);
       dispatch({ type: 'MOVIE_CHANGED', generation, movieKey: nextKey });
     };
@@ -520,18 +545,20 @@ const HeroSection = () => {
     dispatch({ type: 'PLAYBACK_PAUSED', generation: machineRef.current.generation, now: getNow() });
   }, [documentVisible, heroVisible]);
 
+  const isUserInitiated = playbackIntent === HERO_PLAYBACK_INTENT.MANUAL
+    || playbackIntent === HERO_PLAYBACK_INTENT.CONTINUATION;
+
   useEffect(() => {
-    if ((!reducedMotion && !saveData) || manualPlaybackRequested) return;
+    if ((!reducedMotion && !saveData) || isUserInitiated) return;
     if (machineRef.current.phase === HERO_PHASES.POSTER) return;
     resetToPoster(getHeroMovieKey(moviesRef.current[currentIndexRef.current], currentIndexRef.current));
-  }, [manualPlaybackRequested, reducedMotion, resetToPoster, saveData]);
+  }, [isUserInitiated, reducedMotion, resetToPoster, saveData]);
 
-  const configuredHeroSource = resolveConfiguredHeroVideoSource(currentMovie);
-  const heroBackgroundAvailable = Boolean(configuredHeroSource);
-  const playbackIntent = manualPlaybackRequested || (desktopAutoEligible && heroBackgroundAvailable);
+  const trailerDiscoverable = canResolveHeroTrailer(currentMovie, { mockEnabled: heroTrailerMockEnabled });
+  const isPlaybackIntended = playbackIntent !== HERO_PLAYBACK_INTENT.NONE;
   const playerEnabled = Boolean(
     machine.videoSource
-    && playbackIntent
+    && isPlaybackIntended
     && playbackPhase
     && heroVisible
     && documentVisible
@@ -556,7 +583,7 @@ const HeroSection = () => {
     ) return;
 
     let timerId;
-    if (manualPlaybackRequested) {
+    if (isUserInitiated) {
       timerId = window.setTimeout(() => {
         void startTrailerAttempt({ source: 'continuation' });
       }, 0);
@@ -565,7 +592,7 @@ const HeroSection = () => {
 
     if (
       !desktopAutoEligible
-      || !heroBackgroundAvailable
+      || !trailerDiscoverable
       || autoAttemptedKeysRef.current.has(currentMovieKey)
     ) return;
     autoAttemptedKeysRef.current.add(currentMovieKey);
@@ -578,12 +605,51 @@ const HeroSection = () => {
     currentMovieKey,
     desktopAutoEligible,
     documentVisible,
-    heroBackgroundAvailable,
+    isUserInitiated,
+    trailerDiscoverable,
     heroVisible,
     machine.movieKey,
     machine.phase,
-    manualPlaybackRequested,
     startTrailerAttempt,
+  ]);
+
+  // Bounded fallback: when an auto-attempt fails with an eligible reason,
+  // switch to the next un-attempted movie and let the auto-attempt effect
+  // try again exactly once.  Manual retries never trigger this fallback.
+  useEffect(() => {
+    if (machine.phase !== HERO_PHASES.TRAILER_FAILED) return;
+
+    if (playbackIntent === HERO_PLAYBACK_INTENT.AUTO) {
+      const fallbackReasons = new Set([
+        HERO_FAILURE_REASONS.MISSING_VIDEO,
+        HERO_FAILURE_REASONS.YOUTUBE_NOT_FOUND,
+        HERO_FAILURE_REASONS.YOUTUBE_EMBEDDING_BLOCKED,
+      ]);
+
+      if (fallbackReasons.has(machine.failureReason) && heroVisible && documentVisible) {
+        const nextIndex = movies.findIndex((m, i) => {
+          if (i === currentIndex) return false;
+          return !autoAttemptedKeysRef.current.has(getHeroMovieKey(m, i));
+        });
+
+        if (nextIndex !== -1) {
+          switchMovie(nextIndex, { animate: true, continueTrailer: false });
+          return;
+        }
+      }
+
+      // No eligible fallback — reset intent so the carousel can resume
+      setPlaybackIntent(HERO_PLAYBACK_INTENT.NONE);
+    }
+  }, [
+    currentIndex,
+    documentVisible,
+    heroVisible,
+    machine.failureReason,
+    machine.phase,
+    movies,
+    playbackIntent,
+    switchMovie,
   ]);
 
   useEffect(() => {
@@ -713,7 +779,7 @@ const HeroSection = () => {
     if (generation !== generationRef.current) return;
     abortMetadataRequests();
     clearPlaybackTimers();
-    setManualPlaybackRequested(false);
+    // Intent not reset here — bounded fallback effect handles AUTO cleanup
     setMuted(true);
     dispatch({
       type: 'TRAILER_FAILED',
@@ -858,7 +924,7 @@ const HeroSection = () => {
         trailerActive={trailerActive}
         trailerLoading={trailerLoading}
         trailerFailed={trailerFailed}
-        trailerAvailable={heroBackgroundAvailable}
+        trailerAvailable={trailerDiscoverable}
         failureReason={machine.failureReason}
         onBook={navigateToMovie}
         onDetails={navigateToMovie}

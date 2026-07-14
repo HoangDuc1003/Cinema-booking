@@ -49,44 +49,41 @@ const verifyDesktopAndTrailerSection = async (browser) => {
   await waitForSettledHero(page);
   const hero = page.locator('.hero-section');
   const title = (await hero.locator('.hero-title').innerText()).replace(/\s+/g, ' ').trim();
-  const trailerButton = hero.getByRole('button', { name: 'Trailer', exact: true });
-  await trailerButton.waitFor({ state: 'visible' });
-
   const scrollBefore = await page.evaluate(() => window.scrollY);
-  let clickCount = 0;
-  await trailerButton.click();
-  clickCount += 1;
-  const scrollImmediatelyAfterClick = await page.evaluate(() => window.scrollY);
+
+  // --- Desktop auto-start: NO click ---
+  await hero.screenshot({ path: path.join(OUTPUT_DIR, 'hero-startup.png') });
+
+  // Poster should cover the player during startup
   const preStable = await page.evaluate(() => ({
     posterVisible: document.querySelector('.hero-poster-shell')?.classList.contains('is-visible') || false,
     videoVisible: document.querySelector('.hero-youtube-video')?.classList.contains('is-visible') || false,
   }));
+
+  await page.waitForTimeout(500);
+  await hero.screenshot({ path: path.join(OUTPUT_DIR, 'hero-500ms.png') });
+  await page.waitForTimeout(1_000);
+  await hero.screenshot({ path: path.join(OUTPUT_DIR, 'hero-1500ms.png') });
 
   await waitForHeroPlaying(page);
   const sampleA = await getHeroSnapshot(page);
   await page.waitForTimeout(2_500);
   const sampleB = await getHeroSnapshot(page);
 
-  assert(sampleA?.playerState === PLAYING, 'Hero did not reach YouTube PLAYING.');
+  assert(sampleA?.playerState === PLAYING, 'Hero did not reach YouTube PLAYING via auto-start.');
   assert(sampleB?.currentTime > sampleA?.currentTime, 'Hero currentTime did not advance.');
-  assert(clickCount === 1, 'Hero CTA click count was not exactly one.');
   assert(metadataRequests.length === 1, `Expected one metadata request, received ${metadataRequests.length}.`);
   const scrollAfterPlayback = await page.evaluate(() => window.scrollY);
-  assert(
-    scrollImmediatelyAfterClick === scrollBefore,
-    `Hero CTA changed scroll immediately (${scrollBefore} -> ${scrollImmediatelyAfterClick}).`,
-  );
   assert(
     scrollAfterPlayback === scrollBefore,
     `Hero playback changed scroll position (${scrollBefore} -> ${scrollAfterPlayback}).`,
   );
 
-  await page.waitForTimeout(2_500);
-  await hero.screenshot({ path: path.join(OUTPUT_DIR, 'hero-caption-05s.png') });
+  await hero.screenshot({ path: path.join(OUTPUT_DIR, 'hero-5s.png') });
   await page.waitForTimeout(5_000);
   await hero.screenshot({ path: path.join(OUTPUT_DIR, 'hero-desktop-playing.png') });
   await page.waitForTimeout(250);
-  await hero.screenshot({ path: path.join(OUTPUT_DIR, 'hero-caption-10s.png') });
+  await hero.screenshot({ path: path.join(OUTPUT_DIR, 'hero-10s.png') });
 
   const heroVideoId = await hero.locator('.hero-youtube-video').getAttribute('data-video-id');
   const heroPlayerCount = await hero.locator('.hero-youtube-video iframe').count();
@@ -100,6 +97,7 @@ const verifyDesktopAndTrailerSection = async (browser) => {
   const movieId = endpoint?.match(/\/movie\/(\d+)\/videos/)?.[1] || '';
   const heroMetadataRequestCount = metadataRequests.length;
 
+  // Switch to poster, then verify TrailerSection independently
   await hero.getByRole('button', { name: 'Poster', exact: true }).click();
 
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
@@ -133,7 +131,7 @@ const verifyDesktopAndTrailerSection = async (browser) => {
     movieId,
     videoId: heroVideoId,
     endpoint,
-    singleCtaClickCount: clickCount,
+    autoStarted: true,
     metadataRequestCount: heroMetadataRequestCount,
     youtubePlayerCount: heroPlayerCount,
     playbackState: sampleB.playerState,

@@ -11,7 +11,10 @@ import {
 const now = () => performance.now();
 
 const YOUTUBE_VIDEO_RATIO = 16 / 9;
-const YOUTUBE_OVERSCAN = 1.04;
+// Cinematic 2.39:1 content occupies only ~74.4% of YouTube's 16:9 frame.
+// Minimum overscan to hide both encoded black bars: 2.39 / (16/9) ≈ 1.345.
+// 1.38 adds ~3% safety margin without excessive content crop (~1.3% per edge).
+const YOUTUBE_OVERSCAN = 1.38;
 
 const calculateYouTubeCover = (containerW, containerH) => {
   if (containerW <= 0 || containerH <= 0) return null;

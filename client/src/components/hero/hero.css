@@ -222,8 +222,10 @@
   position: absolute;
   top: 50%;
   left: 50%;
-  width: max(102cqw, 181.34cqh);
-  height: max(102cqh, 57.38cqw);
+  /* Must match YOUTUBE_OVERSCAN (1.38) in HeroYouTubeVideo.jsx.
+     138 * 16/9 ≈ 245.33 ; 138 * 9/16 ≈ 77.63 */
+  width: max(138cqw, 245.33cqh);
+  height: max(138cqh, 77.63cqw);
   max-width: none;
   transform: translate(-50%, -50%);
   transform-origin: center;
