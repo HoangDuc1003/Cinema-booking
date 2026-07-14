@@ -205,10 +205,10 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
 
   return (
     <section id={sectionId} className="scroll-mt-20 px-6 md:px-16 lg:px-24 py-16 md:py-20 relative overflow-hidden min-h-screen md:min-h-[80vh]">
-      <BlurCircle top='80px' right='-60px' delay="0.5s" />
+      <BlurCircle top='220px' right='-60px' delay="0.5s" />
       <BlurCircle top='600px' left='-65px' delay="1s" />
       <BlurCircle top='800px' right='-100px' delay="1.5s" />
-      <BlurCircle top='0px' left='0' delay="2s" />
+      <BlurCircle top='240px' left='0' delay="2s" />
 
       <div className="ts-content-shell relative z-10">
       <div className="flex items-end justify-between max-w-[1248px] mx-auto mb-8 relative z-10">
