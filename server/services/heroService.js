@@ -9,7 +9,7 @@ const HERO_CONFIG_KEY = 'homeHero';
 const HERO_LIMIT = 5;
 const TMDB_DAILY_PAGE_WINDOW = 20;
 const VIETNAM_TIME_OFFSET_MS = 7 * 60 * 60 * 1000;
-const MOVIE_SELECT = '_id title overview poster_path backdrop_path release_date vote_average runtime genres updatedAt';
+const MOVIE_SELECT = '_id title overview poster_path backdrop_path release_date vote_average runtime genres heroVideoUrl heroVideoMimeType heroVideoPosterUrl heroVideoStatus heroVideoVersion updatedAt';
 
 const createHttpError = (status, message) => {
     const error = new Error(message);
@@ -65,6 +65,11 @@ export const normalizeHeroMovie = (movie) => {
         vote_average: Number.isFinite(Number(movie.vote_average)) ? Number(movie.vote_average) : null,
         runtime: Number.isFinite(Number(movie.runtime)) ? Number(movie.runtime) : null,
         genres: normalizeGenres(movie.genres),
+        heroVideoUrl: movie.heroVideoUrl || '',
+        heroVideoMimeType: movie.heroVideoMimeType || '',
+        heroVideoPosterUrl: movie.heroVideoPosterUrl || '',
+        heroVideoStatus: movie.heroVideoStatus || '',
+        heroVideoVersion: movie.heroVideoVersion || '',
     };
 };
 

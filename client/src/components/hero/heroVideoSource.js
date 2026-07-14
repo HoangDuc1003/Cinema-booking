@@ -150,9 +150,6 @@ export const canUseHeroBackgroundVideo = (movie, { mockEnabled = false } = {}) =
 export const canResolveHeroTrailer = (movie, { mockEnabled = false } = {}) => {
   if (!movie || typeof movie !== 'object') return false;
   if (mockEnabled) return true;
-  if (resolveConfiguredHeroVideoSource(movie)) return true;
-  const id = movie.id ?? movie._id;
-  const idStr = String(id || '').trim();
-  return /^\d+$/.test(idStr);
+  return Boolean(resolveConfiguredHeroVideoSource(movie));
 };
 

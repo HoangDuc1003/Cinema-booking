@@ -287,6 +287,15 @@ const HeroSection = () => {
     attemptLockRef.current = null;
   }, []);
 
+  const resetToPoster = useCallback((movieKey = machineRef.current.movieKey) => {
+    abortMetadataRequests();
+    clearPlaybackTimers();
+    setPlaybackIntent(HERO_PLAYBACK_INTENT.NONE);
+    setMuted(true);
+    const generation = nextGeneration();
+    dispatch({ type: 'POSTER_REQUESTED', generation, movieKey });
+  }, [abortMetadataRequests, clearPlaybackTimers, nextGeneration]);
+
   const loadHeroVideoSource = useCallback((targetMovie, targetKey, { force = false } = {}) => {
     if (force) {
       trailerCacheRef.current.delete(targetKey);
@@ -295,7 +304,7 @@ const HeroSection = () => {
     }
 
     const cachedSource = trailerCacheRef.current.get(targetKey);
-    if (cachedSource) return Promise.resolve(cachedSource);
+    if (cachedSource && cachedSource.kind === 'native') return Promise.resolve(cachedSource);
 
     const configuredSource = resolveConfiguredHeroVideoSource(targetMovie);
     if (configuredSource) {
@@ -303,36 +312,20 @@ const HeroSection = () => {
       return Promise.resolve(configuredSource);
     }
 
-    const inFlight = metadataRequestsRef.current.get(targetKey);
-    if (inFlight) return inFlight.promise;
+    if (heroTrailerMockEnabled) {
+      const mockSource = resolveHeroMockTrailers({
+        movieKey: targetKey,
+        movie: targetMovie,
+        fixtures: HERO_NATIVE_MOCK_FIXTURES,
+      }).map(resolveHeroVideoSource).find((s) => s && s.kind === 'native') || null;
 
-    const controller = new AbortController();
-    const request = (async () => {
-      let trailers = [];
-      try {
-        trailers = await fetchMovieTrailers(targetMovie, { signal: controller.signal });
-      } catch (error) {
-        if (!heroTrailerMockEnabled || controller.signal.aborted) throw error;
+      if (mockSource) {
+        trailerCacheRef.current.set(targetKey, mockSource);
+        return Promise.resolve(mockSource);
       }
-      let resolvedSource = trailers.map(resolveHeroVideoSource).find(Boolean) || null;
+    }
 
-      if (!resolvedSource && heroTrailerMockEnabled) {
-        resolvedSource = resolveHeroMockTrailers({
-          movieKey: targetKey,
-          movie: targetMovie,
-          fixtures: HERO_NATIVE_MOCK_FIXTURES,
-        }).map(resolveHeroVideoSource).find(Boolean) || null;
-      }
-
-      if (resolvedSource) trailerCacheRef.current.set(targetKey, resolvedSource);
-      return resolvedSource;
-    })().finally(() => {
-      const currentRequest = metadataRequestsRef.current.get(targetKey);
-      if (currentRequest?.controller === controller) metadataRequestsRef.current.delete(targetKey);
-    });
-
-    metadataRequestsRef.current.set(targetKey, { controller, promise: request });
-    return request;
+    return Promise.resolve(null);
   }, [heroTrailerMockEnabled]);
 
   const startTrailerAttempt = useCallback(async ({ source = 'manual', forceMetadata = false } = {}) => {
@@ -385,7 +378,10 @@ const HeroSection = () => {
 
       if (!videoSource) {
         attemptLockRef.current = null;
-        // Intent not reset here — bounded fallback effect handles AUTO cleanup
+        if (source === 'auto') {
+          resetToPoster(targetKey);
+          return;
+        }
         dispatch({
           type: 'TRAILER_FAILED',
           generation,
@@ -400,7 +396,10 @@ const HeroSection = () => {
     } catch (error) {
       if (attemptLockRef.current?.generation === generation) attemptLockRef.current = null;
       if (error?.name === 'AbortError' || generation !== generationRef.current) return;
-      // Intent not reset here — bounded fallback effect handles AUTO cleanup
+      if (source === 'auto') {
+        resetToPoster(targetKey);
+        return;
+      }
       dispatch({
         type: 'TRAILER_FAILED',
         generation,
@@ -412,16 +411,7 @@ const HeroSection = () => {
         now: getNow(),
       });
     }
-  }, [loadHeroVideoSource, nextGeneration]);
-
-  const resetToPoster = useCallback((movieKey = machineRef.current.movieKey) => {
-    abortMetadataRequests();
-    clearPlaybackTimers();
-    setPlaybackIntent(HERO_PLAYBACK_INTENT.NONE);
-    setMuted(true);
-    const generation = nextGeneration();
-    dispatch({ type: 'POSTER_REQUESTED', generation, movieKey });
-  }, [abortMetadataRequests, clearPlaybackTimers, nextGeneration]);
+  }, [loadHeroVideoSource, nextGeneration, resetToPoster]);
 
   const switchMovie = useCallback((targetIndex, { animate = true, continueTrailer = false } = {}) => {
     const availableMovies = moviesRef.current;
@@ -753,6 +743,14 @@ const HeroSection = () => {
       return;
     }
 
+    if (!trailerDiscoverable) {
+      const targetSection = document.getElementById('trailers') || document.querySelector('.ts-content-shell');
+      if (targetSection) {
+        targetSection.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth' });
+      }
+      return;
+    }
+
     void startTrailerAttempt({
       source: 'manual',
       forceMetadata: machine.phase === HERO_PHASES.TRAILER_FAILED,
@@ -920,7 +918,7 @@ const HeroSection = () => {
         trailerActive={trailerActive}
         trailerLoading={trailerLoading}
         trailerFailed={trailerFailed}
-        trailerAvailable={trailerDiscoverable}
+        trailerAvailable={true}
         failureReason={machine.failureReason}
         onBook={navigateToMovie}
         onDetails={navigateToMovie}
@@ -940,6 +938,7 @@ const HeroSection = () => {
         movies={movies}
         currentIndex={currentIndex}
         className={disclosure.isCompact ? 'is-compact' : ''}
+        hidden={disclosure.isCompact}
         getThumbnailUrls={(movie) => buildHeroImageCandidates([
           movie.heroImageUrl,
           movie.backdrop_path,
