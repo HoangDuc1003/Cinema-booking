@@ -4,7 +4,7 @@ const DEFAULT_TRAILER_TITLE = 'Movie Trailer';
 const DEFAULT_VIDEO_NAME = 'Mock Trailer';
 
 export {
-  canResolveHeroTrailer,
+  canUseNativeHeroVideo,
   canUseHeroBackgroundVideo,
   resolveConfiguredHeroVideoSource,
   resolveHeroVideoSource,

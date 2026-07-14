@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchHomeHero, fetchMovieTrailers } from '../services/tmdb';
+import { fetchHomeHero } from '../services/tmdb';
 import { dummyShowsData } from '../assets/assets';
 import Loading from './Loading';
 import HeroContent from './hero/HeroContent';
@@ -10,7 +10,7 @@ import HeroVideoRenderer from './hero/HeroVideoRenderer';
 import { buildHeroImageCandidates } from './hero/heroImages';
 import {
   HERO_NATIVE_MOCK_FIXTURES,
-  canResolveHeroTrailer,
+  canUseNativeHeroVideo,
   isHeroTrailerMockEnabled,
   resolveConfiguredHeroVideoSource,
   resolveHeroVideoSource,
@@ -196,15 +196,7 @@ const HeroSection = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [playbackIntent, setPlaybackIntent] = useState(HERO_PLAYBACK_INTENT.NONE);
-  const [muted, setMuted] = useState(() => {
-    try {
-      const stored = localStorage.getItem('nitrocine:hero-sound');
-      // Default unmuted (sound on) when no preference exists, unless user stored 'muted'
-      return stored === null ? false : stored === 'muted';
-    } catch {
-      return false;
-    }
-  });
+  const [muted, setMuted] = useState(true);
   const [heroVisible, setHeroVisible] = useState(() => typeof IntersectionObserver === 'undefined');
   const [documentVisible, setDocumentVisible] = useState(() => !document.hidden);
 
@@ -266,6 +258,7 @@ const HeroSection = () => {
     generationRef.current = Math.max(generationRef.current, machine.generation);
   }, [currentIndex, machine, movies]);
 
+
   const nextGeneration = useCallback(() => {
     generationRef.current += 1;
     return generationRef.current;
@@ -295,6 +288,10 @@ const HeroSection = () => {
     const generation = nextGeneration();
     dispatch({ type: 'POSTER_REQUESTED', generation, movieKey });
   }, [abortMetadataRequests, clearPlaybackTimers, nextGeneration]);
+
+  useEffect(() => {
+    resetToPoster(currentMovieKey);
+  }, [currentMovieKey, resetToPoster]);
 
   const loadHeroVideoSource = useCallback((targetMovie, targetKey, { force = false } = {}) => {
     if (force) {
@@ -351,15 +348,20 @@ const HeroSection = () => {
         : HERO_PLAYBACK_INTENT.AUTO;
     setPlaybackIntent(intentValue);
 
-    // Audio: default unmuted (sound on) when no preference exists, unless user stored 'muted'
     let preferMuted;
     try {
       const stored = localStorage.getItem('nitrocine:hero-sound');
-      preferMuted = stored === null ? false : stored === 'muted';
+      if (source === 'manual') {
+        preferMuted = stored !== 'on';
+      } else if (source === 'continuation') {
+        preferMuted = muted;
+      } else {
+        preferMuted = true;
+      }
     } catch {
-      preferMuted = false;
+      preferMuted = true;
     }
-    setMuted(preferMuted);
+    setMuted(source === 'continuation' ? muted : preferMuted);
 
     const generation = nextGeneration();
     attemptLockRef.current = { generation, movieKey: targetKey };
@@ -411,7 +413,7 @@ const HeroSection = () => {
         now: getNow(),
       });
     }
-  }, [loadHeroVideoSource, nextGeneration, resetToPoster]);
+  }, [loadHeroVideoSource, muted, nextGeneration, resetToPoster]);
 
   const switchMovie = useCallback((targetIndex, { animate = true, continueTrailer = false } = {}) => {
     const availableMovies = moviesRef.current;
@@ -540,7 +542,7 @@ const HeroSection = () => {
     resetToPoster(getHeroMovieKey(moviesRef.current[currentIndexRef.current], currentIndexRef.current));
   }, [isUserInitiated, reducedMotion, resetToPoster, saveData]);
 
-  const trailerDiscoverable = canResolveHeroTrailer(currentMovie, { mockEnabled: heroTrailerMockEnabled });
+  const trailerDiscoverable = canUseNativeHeroVideo(currentMovie, { mockEnabled: heroTrailerMockEnabled });
   const isPlaybackIntended = playbackIntent !== HERO_PLAYBACK_INTENT.NONE;
   const playerEnabled = Boolean(
     machine.videoSource

@@ -121,6 +121,7 @@ export const resolveHeroVideoSource = (trailer) => (
 
 export const resolveConfiguredHeroVideoSource = (movie) => {
   if (!movie || typeof movie !== 'object') return null;
+  if (movie.heroVideoStatus && movie.heroVideoStatus !== 'ready') return null;
 
   const videoUrl = movie.heroVideoUrl
     || movie.backgroundVideoUrl
@@ -142,12 +143,9 @@ export const canUseHeroBackgroundVideo = (movie, { mockEnabled = false } = {}) =
 
 /**
  * Returns true when the movie can potentially resolve a Hero trailer, either
- * because it already has a configured native source or because it has a
- * TMDB-compatible numeric id that can be used to fetch YouTube trailers
- * asynchronously.  When `mockEnabled` is true the dev mock fixture is always
- * considered available.
+ * because it already has a configured native source or because mock is enabled.
  */
-export const canResolveHeroTrailer = (movie, { mockEnabled = false } = {}) => {
+export const canUseNativeHeroVideo = (movie, { mockEnabled = false } = {}) => {
   if (!movie || typeof movie !== 'object') return false;
   if (mockEnabled) return true;
   return Boolean(resolveConfiguredHeroVideoSource(movie));

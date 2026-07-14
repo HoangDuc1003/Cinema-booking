@@ -14,6 +14,7 @@ const movieSchema = new mongoose.Schema(
         casts:{type:Array,required:true},
         vote_average:{type:Number,required:true},
         runtime:{type:Number,required:true},
+        heroVideoId: { type: String, default: "" },
         heroVideoUrl: { type: String, default: "" },
         heroVideoMimeType: { type: String, default: "" },
         heroVideoPosterUrl: { type: String, default: "" },

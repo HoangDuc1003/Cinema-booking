@@ -9,7 +9,7 @@ const HERO_CONFIG_KEY = 'homeHero';
 const HERO_LIMIT = 5;
 const TMDB_DAILY_PAGE_WINDOW = 20;
 const VIETNAM_TIME_OFFSET_MS = 7 * 60 * 60 * 1000;
-const MOVIE_SELECT = '_id title overview poster_path backdrop_path release_date vote_average runtime genres heroVideoUrl heroVideoMimeType heroVideoPosterUrl heroVideoStatus heroVideoVersion updatedAt';
+const MOVIE_SELECT = '_id title overview poster_path backdrop_path release_date vote_average runtime genres heroVideoId heroVideoUrl heroVideoMimeType heroVideoPosterUrl heroVideoStatus heroVideoVersion updatedAt';
 
 const createHttpError = (status, message) => {
     const error = new Error(message);
@@ -120,7 +120,12 @@ const fetchTmdbPopularMovies = async (page = getDailyTmdbPage()) => {
 const loadAutoHeroMovies = async () => {
     const movies = new Map();
 
-    const [tmdbMovies, activeShows, recentMovies] = await Promise.all([
+    const [nativeMovies, tmdbMovies, activeShows, recentMovies] = await Promise.all([
+        Movie.find({ heroVideoStatus: 'ready' })
+            .select(MOVIE_SELECT)
+            .sort({ heroVideoVersion: -1 })
+            .limit(24)
+            .lean(),
         fetchTmdbPopularMovies(),
         Show.find({ showDateTime: { $gte: new Date() } })
             .populate({ path: 'movie', select: MOVIE_SELECT })
@@ -133,6 +138,11 @@ const loadAutoHeroMovies = async () => {
             .limit(24)
             .lean(),
     ]);
+
+    for (const movie of rotateByDailySeed(nativeMovies)) {
+        addUniqueMovie(movies, movie);
+        if (movies.size >= HERO_LIMIT) return [...movies.values()];
+    }
 
     for (const movie of tmdbMovies) {
         addUniqueMovie(movies, movie);

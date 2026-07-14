@@ -10,6 +10,9 @@ import adminRouter from '../routes/adminRoutes.js';
 import userRouter from '../routes/userRoutes.js';
 import { stripeWebhooks } from '../controllers/stripeWebhooks.js';
 import { getPaymentConfigStatus } from '../configs/runtimeConfig.js';
+import { connectCloudinary } from '../configs/cloudinary.js';
+
+connectCloudinary();
 
 process.on('unhandledRejection', (reason) => {
     console.error('[Unhandled rejection]', reason);

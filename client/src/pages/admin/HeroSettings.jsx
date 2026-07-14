@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import Loading from '../../components/Loading';
 import Title from '../../components/admin/Title';
 import { useAppContext } from '../../context/AppContext';
+import HeroVideoUploader from './HeroVideoUploader';
 
 const MAX_HERO_MOVIES = 5;
 
@@ -186,6 +187,7 @@ const HeroSettings = () => {
                   <div className="min-w-0">
                     <p className="font-medium truncate">{index + 1}. {movie.title}</p>
                     <p className="text-xs text-gray-500">{movie.release_date?.slice(0, 4) || 'N/A'}</p>
+                    <HeroVideoUploader movie={movie} onUpdated={fetchHeroSettings} />
                   </div>
                   <div className="flex items-center gap-1">
                     <button
@@ -259,6 +261,9 @@ const HeroSettings = () => {
                     <div className="absolute inset-x-0 bottom-0 p-2 bg-linear-to-t from-black via-black/80 to-transparent">
                       <p className="text-sm font-medium truncate">{movie.title}</p>
                       <p className="text-xs text-gray-400">{movie.release_date?.slice(0, 4) || 'N/A'}</p>
+                      <div onClick={(e) => e.stopPropagation()}>
+                        <HeroVideoUploader movie={movie} onUpdated={fetchHeroSettings} />
+                      </div>
                     </div>
                     {isSelected && (
                       <span className="absolute top-2 right-2 flex items-center justify-center w-7 h-7 rounded-md bg-primary text-white">

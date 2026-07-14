@@ -2,6 +2,7 @@ import { Inngest } from 'inngest';
 import connectDB from '../configs/db.js';
 import User from '../models/User.js';
 import { importTrendingMoviesLogic } from '../services/movieService.js';
+import { reconcileHeroAssets } from '../services/heroVideoService.js';
 
 // Gracefully handle missing Inngest keys (avoids crashing on Vercel)
 let inngest;
@@ -81,12 +82,23 @@ try {
         }
     );
 
+    // Background job: Reconcile Hero native assets twice daily (00:00 and 12:00)
+    const reconcileHeroAssetsJob = inngest.createFunction(
+        { id: "reconcile-hero-assets", cron: "0 0,12 * * *" },
+        async () => {
+            await connectDB();
+            const result = await reconcileHeroAssets();
+            return result;
+        }
+    );
+
     // Export all functions for the Inngest serve handler
     functions = [
         syncUserCreation,
         syncUserDeletion,
         syncUserUpdation,
-        dailyTrendingImport
+        dailyTrendingImport,
+        reconcileHeroAssetsJob
     ];
 } catch (error) {
     console.warn('[Inngest] Initialization skipped — missing config:', error.message);

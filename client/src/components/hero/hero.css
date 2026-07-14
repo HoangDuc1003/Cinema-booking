@@ -100,11 +100,7 @@
   --hero-safe-left: max(calc(env(safe-area-inset-left) + 1rem), clamp(2rem, 6vw, 6rem));
   --hero-content-bottom: calc(var(--hero-safe-bottom) + 8rem);
   --hero-rail-block-height: 6.15rem;
-  --hero-content-compact-bottom: calc(
-    var(--hero-safe-bottom)
-    + var(--hero-rail-block-height)
-    + 0.9rem
-  );
+  --hero-content-compact-bottom: calc(var(--hero-safe-bottom) + 0.35rem);
   position: relative;
   isolation: isolate;
   width: 100%;
@@ -355,12 +351,18 @@
   top: auto;
   bottom: var(--hero-content-compact-bottom);
   width: fit-content;
-  max-width: min(72vw, 30rem);
+  max-width: min(70vw, 26rem);
   min-height: 0;
-  padding: 0.65rem 0.9rem;
+  padding: 0.4rem 0.65rem;
   margin: 0;
-  border-radius: 0.85rem;
-  background: linear-gradient(90deg, rgba(8, 9, 12, 0.88) 0%, rgba(8, 9, 12, 0.45) 100%);
+  border-radius: 0.55rem;
+  background:
+    linear-gradient(
+      90deg,
+      rgba(4, 5, 8, 0.62),
+      rgba(4, 5, 8, 0.18),
+      transparent
+    );
 }
 
 .hero-content-zone.is-compact .hero-title,
@@ -373,8 +375,8 @@
 .hero-content-zone.is-compact .hero-title,
 .hero-content-zone.is-compacting .hero-title {
   margin: 0;
-  font-size: clamp(1.35rem, 2.1vw, 2rem);
-  line-height: 1;
+  font-size: clamp(1.05rem, 1.55vw, 1.45rem);
+  line-height: 1.1;
   transform: none;
   white-space: nowrap;
   overflow: hidden;
@@ -384,7 +386,7 @@
 .hero-content-zone.is-compact .hero-title__word,
 .hero-content-zone.is-compacting .hero-title__word {
   display: inline;
-  white-space: normal;
+  white-space: nowrap;
 }
 
 .hero-content-zone.is-compact:not(.is-overview-revealed) .hero-content-details,
