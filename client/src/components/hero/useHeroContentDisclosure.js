@@ -23,7 +23,9 @@ export const useHeroContentDisclosure = ({
 
   const timersRef = useRef(new Set());
   const stateRef = useRef(disclosureState);
-  stateRef.current = disclosureState;
+  useEffect(() => {
+    stateRef.current = disclosureState;
+  }, [disclosureState]);
 
   const clearAllTimers = useCallback(() => {
     timersRef.current.forEach((timerId) => window.clearTimeout(timerId));
@@ -42,6 +44,7 @@ export const useHeroContentDisclosure = ({
   // Reset to expanded immediately whenever movie changes or when reverting to poster
   useEffect(() => {
     clearAllTimers();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDisclosureState('expanded');
     setIsPointerActive(false);
     setIsFocusActive(false);
@@ -91,6 +94,7 @@ export const useHeroContentDisclosure = ({
       if (stateRef.current === 'compact' || stateRef.current === 'compacting') {
         // If playback pauses/buffers while compact, expand to show full details
         if (playbackStatus === HERO_PLAYBACK_STATUS.PAUSED || !visualReady || posterVisible) {
+          // eslint-disable-next-line react-hooks/set-state-in-effect
           expand({ animate: false });
         }
       }
@@ -105,7 +109,8 @@ export const useHeroContentDisclosure = ({
 
     return () => {
       window.clearTimeout(timerId);
-      timersRef.current.delete(timerId);
+      const timers = timersRef.current;
+      timers.delete(timerId);
     };
   }, [
     compact,

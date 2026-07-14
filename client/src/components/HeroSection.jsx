@@ -31,7 +31,7 @@ const VIDEO_ENTER_DURATION_MS = 850;
 const HERO_POSTER_SWAP_DELAY_MS = 400;
 const HERO_POSTER_TRANSITION_MS = 1_200;
 const HERO_AUTO_CAROUSEL_MS = 9_000;
-const HERO_MAX_MOVIES = 2;
+const HERO_MAX_MOVIES = 5;
 
 const HERO_PLAYBACK_INTENT = Object.freeze({
   NONE: 'none',
@@ -362,7 +362,7 @@ const HeroSection = () => {
     if (source === 'auto') {
       setMuted(true);
     } else {
-      let preferMuted = true;
+      let preferMuted;
       try {
         const stored = localStorage.getItem('nitrocine:hero-sound');
         preferMuted = stored === null ? true : stored === 'muted';

@@ -35,8 +35,6 @@ const calculateYouTubeCover = (containerW, containerH) => {
   return {
     width: frameW,
     height: frameH,
-    left: (containerW - frameW) / 2,
-    top: (containerH - frameH) / 2,
   };
 };
 
@@ -72,6 +70,8 @@ const HeroYouTubeVideo = ({
   const latestRef = useRef({ enabled, active, videoId, generation });
   const shellRef = useRef(null);
   const [coverLayout, setCoverLayout] = useState(null);
+  const coverLayoutRef = useRef(null);
+  const quarantineCompletedRef = useRef(null);
   const playingTimerRef = useRef(null);
   const visualTimerRef = useRef(null);
   const bufferingTimerRef = useRef(null);
@@ -112,6 +112,7 @@ const HeroYouTubeVideo = ({
     clearBufferingTimers();
     window.clearTimeout(startupTimerRef.current);
     startupTimerRef.current = null;
+    quarantineCompletedRef.current = null;
   }, [clearBufferingTimers, clearVerificationTimers]);
 
   const fail = useCallback((reason, detail, targetGeneration, targetVideoId = videoId) => {
@@ -168,12 +169,25 @@ const HeroYouTubeVideo = ({
       visualTimerRef.current = window.setTimeout(() => {
         visualTimerRef.current = null;
         const visualTime = Number(player?.getCurrentTime?.());
+        const layout = coverLayoutRef.current;
+        const shell = shellRef.current;
         if (
           !isCurrent(targetGeneration, targetVideoId)
           || player?.getPlayerState?.() !== playingState
           || !Number.isFinite(visualTime)
           || visualTime <= currentTime
         ) return;
+
+        if (
+          !layout
+          || !shell
+          || layout.width < shell.clientWidth - 1
+          || layout.height < shell.clientHeight - 1
+        ) {
+          quarantineCompletedRef.current = { generation: targetGeneration, videoId: targetVideoId, minTime: currentTime };
+          return;
+        }
+
         onVisualReady?.({ generation: targetGeneration, now: now(), currentTime: visualTime });
       }, HERO_VISUAL_READY_CONFIRM_MS);
     }, HERO_PLAYING_HYSTERESIS_MS);
@@ -302,8 +316,30 @@ const HeroYouTubeVideo = ({
     const shell = shellRef.current;
     if (!shell) return;
     const nextLayout = calculateYouTubeCover(shell.clientWidth, shell.clientHeight);
-    if (nextLayout) setCoverLayout(nextLayout);
-  }, []);
+    if (nextLayout) {
+      coverLayoutRef.current = { ...nextLayout, containerWidth: shell.clientWidth, containerHeight: shell.clientHeight };
+      setCoverLayout(nextLayout);
+      const pending = quarantineCompletedRef.current;
+      if (
+        pending
+        && pending.generation === generation
+        && isCurrent(generation, videoId)
+        && nextLayout.width >= shell.clientWidth - 1
+        && nextLayout.height >= shell.clientHeight - 1
+      ) {
+        const visualTime = Number(player?.getCurrentTime?.());
+        const playingState = window.YT?.PlayerState?.PLAYING;
+        if (
+          player?.getPlayerState?.() === playingState
+          && Number.isFinite(visualTime)
+          && visualTime > pending.minTime
+        ) {
+          quarantineCompletedRef.current = null;
+          onVisualReady?.({ generation, now: now(), currentTime: visualTime });
+        }
+      }
+    }
+  }, [generation, isCurrent, onVisualReady, player, videoId]);
 
   useEffect(() => {
     const shell = shellRef.current;
@@ -353,8 +389,9 @@ const HeroYouTubeVideo = ({
     position: 'absolute',
     width: `${coverLayout.width}px`,
     height: `${coverLayout.height}px`,
-    left: `${coverLayout.left}px`,
-    top: `${coverLayout.top}px`,
+    left: '50%',
+    top: '50%',
+    transform: 'translate(-50%, -50%)',
     maxWidth: 'none',
     pointerEvents: 'none',
     backfaceVisibility: 'hidden',
