@@ -20,7 +20,7 @@ const HeroMedia = ({
 
   return (
     <div className={`hero-media ${videoVisible ? 'is-video-visible' : ''}`}>
-      <div className={`hero-poster-shell ${currentSource ? '' : 'is-fallback'}`}>
+      <div className={`hero-poster-shell ${currentSource ? '' : 'is-fallback'} ${posterVisible ? 'is-visible' : 'is-hidden'}`}>
         {currentSource && (
           <img
             key={`${candidateKey}-${candidateIndex}`}
@@ -31,7 +31,7 @@ const HeroMedia = ({
             sizes="100vw"
             onLoad={() => setImageReady(true)}
             onError={handleImageError}
-            className={`hero-poster ${imageReady ? 'is-ready' : 'is-loading'} ${posterVisible ? 'is-visible' : 'is-dimmed'}`}
+            className={`hero-poster ${imageReady ? 'is-ready' : 'is-loading'}`}
           />
         )}
       </div>

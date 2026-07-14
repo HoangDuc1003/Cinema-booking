@@ -3,10 +3,24 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 const YOUTUBE_API_SRC = 'https://www.youtube.com/iframe_api';
 const YOUTUBE_API_TIMEOUT_MS = 12_000;
 
+export const LOCKED_YOUTUBE_PLAYER_VARS = Object.freeze({
+  autoplay: 0,
+  controls: 0,
+  disablekb: 1,
+  fs: 0,
+  iv_load_policy: 3,
+  playsinline: 1,
+  rel: 0,
+  enablejsapi: 1,
+  cc_load_policy: 0,
+});
+
+const LOCKED_PLAYER_VAR_KEYS = new Set(Object.keys(LOCKED_YOUTUBE_PLAYER_VARS));
+
 let youtubeApiPromise = null;
 
 const warnInDevelopment = (...args) => {
-  if (import.meta.env.DEV) console.warn(...args);
+  if (import.meta.env?.DEV) console.warn(...args);
 };
 
 const loadYouTubeApi = () => {
@@ -101,11 +115,45 @@ const loadYouTubeApi = () => {
   return youtubeApiPromise;
 };
 
-const getSafePlayerVars = (playerVars) => {
-  const safePlayerVars = { ...playerVars };
-  delete safePlayerVars.modestbranding;
-  delete safePlayerVars.showinfo;
-  return safePlayerVars;
+export const getSafePlayerVars = (playerVars = {}) => {
+  const safePlayerVars = {};
+
+  Object.entries(playerVars).forEach(([key, value]) => {
+    if (
+      LOCKED_PLAYER_VAR_KEYS.has(key)
+      || key === 'cc_lang_pref'
+      || key === 'modestbranding'
+      || key === 'showinfo'
+    ) return;
+
+    safePlayerVars[key] = value;
+  });
+
+  return {
+    ...safePlayerVars,
+    ...LOCKED_YOUTUBE_PLAYER_VARS,
+  };
+};
+
+export const disableCaptionsBestEffort = (player) => {
+  try {
+    const modules = player?.getOptions?.() || [];
+
+    if (modules.includes?.('captions')) {
+      player.setOption?.('captions', 'track', {});
+    }
+  } catch {
+    // YouTube caption APIs differ between player versions. Playback must continue.
+  }
+};
+
+const applyMutedStateBestEffort = (player, muted) => {
+  try {
+    if (muted) player?.mute?.();
+    else player?.unMute?.();
+  } catch (error) {
+    warnInDevelopment('[YouTube Player] Audio state update failed:', error);
+  }
 };
 
 export const useYouTubePlayer = ({
@@ -113,8 +161,10 @@ export const useYouTubePlayer = ({
   startSeconds = 0,
   enabled = true,
   active = true,
+  muted = true,
   requestGeneration,
   onReady,
+  onApiChange,
   onStateChange,
   onAutoplayBlocked,
   onPlaybackRequest,
@@ -132,13 +182,15 @@ export const useYouTubePlayer = ({
   const loadedRequestRef = useRef(null);
   const lastCommandKeyRef = useRef('');
   const playerVarsRef = useRef(playerVars);
-  const requestRef = useRef({ enabled, active, videoId, startSeconds, requestGeneration });
+  const firstPlayingCaptionKeyRef = useRef('');
+  const requestRef = useRef({ enabled, active, muted, videoId, startSeconds, requestGeneration });
 
   const [player, setPlayer] = useState(null);
   const [isReady, setIsReady] = useState(false);
   const [loadError, setLoadError] = useState(null);
 
   const onReadyRef = useRef(onReady);
+  const onApiChangeRef = useRef(onApiChange);
   const onStateChangeRef = useRef(onStateChange);
   const onAutoplayBlockedRef = useRef(onAutoplayBlocked);
   const onPlaybackRequestRef = useRef(onPlaybackRequest);
@@ -147,13 +199,14 @@ export const useYouTubePlayer = ({
 
   useEffect(() => {
     onReadyRef.current = onReady;
+    onApiChangeRef.current = onApiChange;
     onStateChangeRef.current = onStateChange;
     onAutoplayBlockedRef.current = onAutoplayBlocked;
     onPlaybackRequestRef.current = onPlaybackRequest;
     onErrorRef.current = onError;
     onEndedRef.current = onEnded;
     playerVarsRef.current = playerVars;
-    requestRef.current = { enabled, active, videoId, startSeconds, requestGeneration };
+    requestRef.current = { enabled, active, muted, videoId, startSeconds, requestGeneration };
   });
 
   const destroyPlayer = useCallback(() => {
@@ -161,6 +214,7 @@ export const useYouTubePlayer = ({
     activeRequestRef.current = null;
     loadedRequestRef.current = null;
     lastCommandKeyRef.current = '';
+    firstPlayingCaptionKeyRef.current = '';
     readyRef.current = false;
 
     const activePlayer = playerRef.current;
@@ -175,6 +229,92 @@ export const useYouTubePlayer = ({
     if (mountedRef.current) {
       setPlayer(null);
       setIsReady(false);
+    }
+  }, []);
+
+  const syncPlaybackRequest = useCallback((targetPlayer = playerRef.current) => {
+    if (!targetPlayer || !readyRef.current) return;
+
+    const currentRequest = requestRef.current;
+    if (!currentRequest.enabled) return;
+
+    const implicitKey = `${currentRequest.active ? 1 : 0}:${currentRequest.videoId || ''}:${currentRequest.startSeconds}`;
+    if (currentRequest.requestGeneration == null && implicitRequestRef.current.key !== implicitKey) {
+      implicitRequestRef.current = {
+        key: implicitKey,
+        generation: implicitRequestRef.current.generation + 1,
+      };
+    }
+
+    const generation = currentRequest.requestGeneration ?? implicitRequestRef.current.generation;
+    const commandKey = `${generation}:${implicitKey}`;
+    if (lastCommandKeyRef.current === commandKey) return;
+    lastCommandKeyRef.current = commandKey;
+
+    if (!currentRequest.active || !currentRequest.videoId) {
+      activeRequestRef.current = null;
+      try {
+        targetPlayer.mute?.();
+        targetPlayer.pauseVideo?.();
+      } catch (error) {
+        warnInDevelopment('[YouTube Player] Pause failed:', error);
+      }
+      return;
+    }
+
+    const previousRequest = loadedRequestRef.current;
+    const isResume = Boolean(
+      previousRequest
+      && previousRequest.generation === generation
+      && previousRequest.videoId === currentRequest.videoId
+      && previousRequest.startSeconds === currentRequest.startSeconds
+    );
+    const meta = {
+      generation,
+      videoId: currentRequest.videoId,
+      startSeconds: currentRequest.startSeconds,
+      isResume,
+    };
+    activeRequestRef.current = meta;
+
+    try {
+      // Every playback attempt begins muted so the originating CTA is sufficient.
+      targetPlayer.mute?.();
+      disableCaptionsBestEffort(targetPlayer);
+
+      if (!isResume) {
+        if (typeof targetPlayer.loadVideoById === 'function') {
+          targetPlayer.loadVideoById({
+            videoId: currentRequest.videoId,
+            startSeconds: currentRequest.startSeconds,
+          });
+        } else if (typeof targetPlayer.playVideo === 'function') {
+          targetPlayer.playVideo();
+        } else {
+          throw new Error('YouTube player has no playback command.');
+        }
+        loadedRequestRef.current = {
+          generation,
+          videoId: currentRequest.videoId,
+          startSeconds: currentRequest.startSeconds,
+        };
+      } else if (typeof targetPlayer.playVideo === 'function') {
+        targetPlayer.playVideo();
+      } else {
+        throw new Error('YouTube player cannot resume playback.');
+      }
+
+      disableCaptionsBestEffort(targetPlayer);
+      applyMutedStateBestEffort(targetPlayer, currentRequest.muted);
+
+      try {
+        onPlaybackRequestRef.current?.(targetPlayer, meta);
+      } catch (error) {
+        warnInDevelopment('[YouTube Player] Playback callback failed:', error);
+      }
+    } catch (error) {
+      warnInDevelopment('[YouTube Player] Playback request failed:', error);
+      onErrorRef.current?.({ data: 'playback-request-failed', error, target: targetPlayer }, meta);
     }
   }, []);
 
@@ -218,30 +358,24 @@ export const useYouTubePlayer = ({
         const safePlayerVars = getSafePlayerVars(playerVarsRef.current);
         const origin = /^https?:/.test(window.location.origin) ? window.location.origin : undefined;
 
-        const createdPlayer = new window.YT.Player(element, {
+        let createdPlayer = null;
+        createdPlayer = new window.YT.Player(element, {
           width: '100%',
           height: '100%',
           playerVars: {
-            autoplay: 0,
-            controls: 0,
-            rel: 0,
-            enablejsapi: 1,
-            disablekb: 1,
-            fs: 0,
-            iv_load_policy: 3,
-            playsinline: 1,
-            ...(origin ? { origin } : {}),
             ...safePlayerVars,
+            ...(origin ? { origin } : {}),
           },
           events: {
             onReady: (event) => {
-              if (!mountedRef.current || playerRef.current !== createdPlayer) return;
+              if (
+                !mountedRef.current
+                || creationGeneration !== creationGenerationRef.current
+                || (playerRef.current && playerRef.current !== event.target)
+              ) return;
 
-              try {
-                event.target.mute?.();
-              } catch (error) {
-                warnInDevelopment('[YouTube Player] Initial mute failed:', error);
-              }
+              playerRef.current = event.target;
+              disableCaptionsBestEffort(event.target);
 
               const iframe = event.target.getIframe?.();
               if (iframe) {
@@ -249,17 +383,45 @@ export const useYouTubePlayer = ({
                 iframe.style.height = '100%';
                 iframe.style.border = '0';
                 iframe.style.display = 'block';
+                iframe.style.pointerEvents = 'none';
+                iframe.setAttribute('aria-hidden', 'true');
+                iframe.setAttribute('tabindex', '-1');
               }
 
               readyRef.current = true;
               setPlayer(event.target);
               setIsReady(true);
-              onReadyRef.current?.(event.target, activeRequestRef.current);
+              try {
+                onReadyRef.current?.(event.target, activeRequestRef.current);
+              } catch (error) {
+                warnInDevelopment('[YouTube Player] Ready callback failed:', error);
+              }
+              syncPlaybackRequest(event.target);
+            },
+            onApiChange: (event) => {
+              if (!mountedRef.current || playerRef.current !== createdPlayer) return;
+              disableCaptionsBestEffort(event.target);
+              try {
+                onApiChangeRef.current?.(event, activeRequestRef.current);
+              } catch (error) {
+                warnInDevelopment('[YouTube Player] API change callback failed:', error);
+              }
             },
             onStateChange: (event) => {
               if (!mountedRef.current || playerRef.current !== createdPlayer) return;
-              if (!requestRef.current.active) return;
               const meta = activeRequestRef.current;
+              const playingState = window.YT?.PlayerState?.PLAYING ?? 1;
+              if (event.data === playingState) {
+                const captionKey = meta
+                  ? `${meta.generation}:${meta.videoId}`
+                  : `unknown:${event.target.getVideoData?.().video_id || ''}`;
+                if (firstPlayingCaptionKeyRef.current !== captionKey) {
+                  firstPlayingCaptionKeyRef.current = captionKey;
+                  disableCaptionsBestEffort(event.target);
+                }
+              }
+
+              if (!requestRef.current.active) return;
               if (!meta) return;
               const eventVideoId = event.target.getVideoData?.().video_id;
               if (eventVideoId && eventVideoId !== meta.videoId) return;
@@ -287,7 +449,7 @@ export const useYouTubePlayer = ({
           },
         });
 
-        playerRef.current = createdPlayer;
+        if (!playerRef.current) playerRef.current = createdPlayer;
       } catch (error) {
         if (cancelled || !mountedRef.current || creationGeneration !== creationGenerationRef.current) return;
         setLoadError(error);
@@ -309,59 +471,22 @@ export const useYouTubePlayer = ({
     return () => {
       cancelled = true;
     };
-  }, [destroyPlayer, enabled]);
+  }, [destroyPlayer, enabled, requestGeneration, syncPlaybackRequest, videoId]);
 
   useEffect(() => {
     if (!enabled || !player || !isReady || !readyRef.current) return;
+    disableCaptionsBestEffort(player);
+  }, [enabled, isReady, player, videoId]);
 
-    const implicitKey = `${active ? 1 : 0}:${videoId || ''}:${startSeconds}`;
-    if (requestGeneration == null && implicitRequestRef.current.key !== implicitKey) {
-      implicitRequestRef.current = {
-        key: implicitKey,
-        generation: implicitRequestRef.current.generation + 1,
-      };
-    }
+  useEffect(() => {
+    if (!enabled || !player || !isReady || !readyRef.current) return;
+    applyMutedStateBestEffort(player, active ? muted : true);
+  }, [active, enabled, isReady, muted, player]);
 
-    const generation = requestGeneration ?? implicitRequestRef.current.generation;
-    const commandKey = `${generation}:${implicitKey}`;
-    if (lastCommandKeyRef.current === commandKey) return;
-    lastCommandKeyRef.current = commandKey;
-
-    if (!active || !videoId) {
-      try {
-        player.mute?.();
-        player.pauseVideo?.();
-      } catch (error) {
-        warnInDevelopment('[YouTube Player] Pause failed:', error);
-      }
-      return;
-    }
-
-    const previousRequest = loadedRequestRef.current;
-    const isResume = Boolean(
-      previousRequest
-      && previousRequest.generation === generation
-      && previousRequest.videoId === videoId
-      && previousRequest.startSeconds === startSeconds
-    );
-    const meta = { generation, videoId, startSeconds, isResume };
-    activeRequestRef.current = meta;
-
-    try {
-      player.mute?.();
-      if (!isResume) {
-        player.loadVideoById?.({ videoId, startSeconds });
-        loadedRequestRef.current = { generation, videoId, startSeconds };
-      } else {
-        player.playVideo?.();
-      }
-      player.mute?.();
-      onPlaybackRequestRef.current?.(player, meta);
-    } catch (error) {
-      warnInDevelopment('[YouTube Player] Playback request failed:', error);
-      onErrorRef.current?.({ data: 'playback-request-failed', error, target: player }, meta);
-    }
-  }, [active, enabled, isReady, player, requestGeneration, startSeconds, videoId]);
+  useEffect(() => {
+    if (!enabled || !player || !isReady || !readyRef.current) return;
+    syncPlaybackRequest(player);
+  }, [active, enabled, isReady, player, requestGeneration, startSeconds, syncPlaybackRequest, videoId]);
 
   return { containerRef, player, isReady, loadError };
 };

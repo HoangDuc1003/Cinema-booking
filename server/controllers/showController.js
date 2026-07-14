@@ -178,25 +178,28 @@ export const getTmdbMovie = async (req, res) => {
     }
 };
 
-export const getTmdbVideos = async (req, res) => {
+export const createGetTmdbVideosHandler = ({
+    fetchJson = fetchTmdbJson,
+    sendResponse = sendTmdbResponse,
+    videosKey = redisKeys.tmdbVideos,
+    ttl = redisTtl.movie,
+} = {}) => async (req, res) => {
     try {
         const movieId = String(req.params.movieId || '');
         if (!validMovieId(movieId)) return res.status(400).json({ success: false, message: 'Invalid movie ID.' });
-        return await sendTmdbResponse(
+        return await sendResponse(
             res,
-            redisKeys.tmdbVideos(movieId),
-            redisTtl.movie,
-            () => withMovieFallback(
-                'getTmdbVideos',
-                () => fetchTmdbJson(`/movie/${movieId}/videos`, { language: 'en-US' }),
-                async () => ({ id: movieId, results: [] }),
-            ),
+            videosKey(movieId),
+            ttl,
+            () => fetchJson(`/movie/${movieId}/videos`, { language: 'en-US' }),
         );
     } catch (error) {
         console.error('[getTmdbVideos]', error.message);
         return res.status(502).json({ success: false, message: 'Unable to load movie videos.' });
     }
 };
+
+export const getTmdbVideos = createGetTmdbVideosHandler();
 
 export const searchTmdbMovies = async (req, res) => {
     try {

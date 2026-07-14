@@ -1,10 +1,15 @@
+import { inferNativeVideoMimeType } from './heroVideoSource.js';
+
 const DEFAULT_TRAILER_TITLE = 'Movie Trailer';
 const DEFAULT_VIDEO_NAME = 'Mock Trailer';
-const NATIVE_VIDEO_MIME_TYPES = Object.freeze({
-  mp4: 'video/mp4',
-  webm: 'video/webm',
-  ogg: 'video/ogg',
-});
+
+export {
+  canUseHeroBackgroundVideo,
+  resolveConfiguredHeroVideoSource,
+  resolveHeroVideoSource,
+  resolveNativeHeroVideoSource,
+  resolveYouTubeHeroVideoSource,
+} from './heroVideoSource.js';
 
 export const HERO_NATIVE_MOCK_FIXTURE = Object.freeze({
   id: 'hero-native-mock',
@@ -38,77 +43,6 @@ export const isHeroTrailerMockEnabled = (search, isDev) => (
   Boolean(isDev) && getSearchParams(search).get('heroMock') === '1'
 );
 
-const isIframeVideoUrl = (source) => {
-  try {
-    const url = new URL(source, 'https://hero-mock.local');
-    const hostname = url.hostname.toLowerCase();
-    const isKnownIframeHost = hostname === 'youtu.be'
-      || hostname.endsWith('.youtu.be')
-      || hostname === 'youtube.com'
-      || hostname.endsWith('.youtube.com')
-      || hostname === 'youtube-nocookie.com'
-      || hostname.endsWith('.youtube-nocookie.com')
-      || hostname === 'player.vimeo.com';
-    const hasEmbedPath = /\/(?:embed|iframe)(?:\/|$)/i.test(url.pathname);
-
-    return isKnownIframeHost || hasEmbedPath;
-  } catch {
-    return true;
-  }
-};
-
-const inferNativeMimeType = (source) => {
-  const match = String(source).match(/\.([a-z0-9]+)(?:[?#].*)?$/i);
-  return match ? NATIVE_VIDEO_MIME_TYPES[match[1].toLowerCase()] || '' : '';
-};
-
-export const resolveNativeHeroVideoSource = (trailer) => {
-  if (!trailer || typeof trailer !== 'object' || trailer.embedUrl) return null;
-
-  const src = typeof trailer.videoUrl === 'string'
-    ? trailer.videoUrl.trim()
-    : typeof trailer.src === 'string'
-      ? trailer.src.trim()
-      : '';
-  if (!src || isIframeVideoUrl(src)) return null;
-
-  const explicitType = typeof trailer.mimeType === 'string'
-    ? trailer.mimeType.trim()
-    : typeof trailer.type === 'string'
-      ? trailer.type.trim()
-      : '';
-  const inferredType = inferNativeMimeType(src);
-  const hasVideoMime = /^video\/[a-z0-9][a-z0-9.+-]*(?:\s*;.*)?$/i.test(explicitType);
-
-  if (!inferredType && !hasVideoMime) return null;
-
-  return {
-    src,
-    type: hasVideoMime ? explicitType : inferredType,
-  };
-};
-
-export const resolveConfiguredHeroVideoSource = (movie) => {
-  if (!movie || typeof movie !== 'object') return null;
-
-  const videoUrl = movie.heroVideoUrl
-    || movie.backgroundVideoUrl
-    || movie.hero_video_url
-    || movie.background_video_url
-    || '';
-  const mimeType = movie.heroVideoMimeType
-    || movie.backgroundVideoMimeType
-    || movie.hero_video_mime_type
-    || movie.background_video_mime_type
-    || '';
-
-  return resolveNativeHeroVideoSource({ videoUrl, mimeType });
-};
-
-export const canUseHeroBackgroundVideo = (movie, { mockEnabled = false } = {}) => (
-  Boolean(mockEnabled) || Boolean(resolveConfiguredHeroVideoSource(movie))
-);
-
 export const resolveHeroMockTrailers = ({ movieKey, movie, fixtures } = {}) => {
   if (!Array.isArray(fixtures) || fixtures.length === 0) return [];
 
@@ -127,7 +61,7 @@ export const resolveHeroMockTrailers = ({ movieKey, movie, fixtures } = {}) => {
     release_date: fixture.release_date || movie?.release_date || '',
     vote_average: fixture.vote_average ?? movie?.vote_average,
     videoUrl,
-    mimeType: fixture.mimeType || fixture.type || inferNativeMimeType(videoUrl),
+    mimeType: fixture.mimeType || fixture.type || inferNativeVideoMimeType(videoUrl),
     thumbnail,
     videoName: fixture.videoName || DEFAULT_VIDEO_NAME,
     qualityLabel: fixture.qualityLabel || '1080p',

@@ -1,5 +1,6 @@
 import React from 'react';
-import { CalendarIcon, ClockIcon, Info, Play, Star, Ticket } from 'lucide-react';
+import { CalendarIcon, ClockIcon, Info, LoaderCircle, Play, Star, Ticket } from 'lucide-react';
+import HeroControls from './HeroControls';
 
 const HeroContent = ({
   movie,
@@ -11,28 +12,26 @@ const HeroContent = ({
   trailerActive,
   trailerLoading,
   trailerFailed,
-  retryExhausted,
   failureReason,
   onBook,
   onDetails,
   onToggleTrailer,
-  onWatchTrailer,
+  showVolumeControl,
+  muted,
+  onToggleMuted,
   onReveal,
   onScheduleRecompact,
   onCancelRecompact,
 }) => {
   const title = movie.title || movie.name || '';
   const overviewHidden = compact && !overviewRevealed;
-  const controlsBackgroundTrailer = !onWatchTrailer;
-  const trailerLabel = controlsBackgroundTrailer
-    ? trailerLoading
-      ? 'Trailer'
-      : trailerActive
-        ? 'Poster'
-        : trailerFailed
-          ? retryExhausted ? 'Unavailable' : 'Retry'
-          : 'Trailer'
-    : 'Trailer';
+  const trailerLabel = trailerLoading
+    ? 'Loading\u2026'
+    : trailerActive
+      ? 'Poster'
+      : trailerFailed
+        ? 'Retry'
+        : 'Trailer';
 
   const handleBlur = (event) => {
     if (!event.currentTarget.contains(event.relatedTarget)) {
@@ -82,27 +81,33 @@ const HeroContent = ({
 
         {trailerFailed && (
           <p className="hero-trailer-status" role="status">
-            {retryExhausted
-              ? `Trailer unavailable (${failureReason}).`
-              : `Trailer unavailable (${failureReason}). You can retry manually.`}
+            {`Trailer unavailable (${failureReason}). You can retry.`}
           </p>
         )}
 
-        <div className="hero-actions">
+        <div className={`hero-actions ${showVolumeControl ? 'has-volume-control' : ''}`}>
           <button type="button" onClick={onBook} className="hero-action hero-action--primary">
             <Ticket aria-hidden="true" />
             <span>Book Now</span>
           </button>
           <button
             type="button"
-            onClick={onWatchTrailer || onToggleTrailer}
-            disabled={controlsBackgroundTrailer && (trailerLoading || retryExhausted)}
-            aria-busy={controlsBackgroundTrailer && trailerLoading}
+            onClick={onToggleTrailer}
+            disabled={trailerLoading}
+            aria-busy={trailerLoading}
             className="hero-action hero-action--secondary"
           >
-            <Play aria-hidden="true" />
+            {trailerLoading
+              ? <LoaderCircle className="hero-action__spinner" aria-hidden="true" />
+              : <Play aria-hidden="true" />}
             <span>{trailerLabel}</span>
           </button>
+          {showVolumeControl && (
+            <HeroControls
+              muted={muted}
+              onToggleMuted={onToggleMuted}
+            />
+          )}
           <button type="button" onClick={onDetails} className="hero-action hero-action--details">
             <Info aria-hidden="true" />
             <span>Details</span>

@@ -7,12 +7,39 @@ export const HERO_PHASES = Object.freeze({
   TRAILER_FAILED: 'trailerFailed',
 });
 
+export const HERO_METADATA_STATUS = Object.freeze({
+  IDLE: 'idle',
+  REQUESTING: 'requesting',
+  RESOLVED: 'resolved',
+  MISSING: 'missing',
+  FAILED: 'failed',
+});
+
+export const HERO_PLAYER_STATUS = Object.freeze({
+  DISABLED: 'disabled',
+  INITIALIZING: 'initializing',
+  READY: 'ready',
+});
+
+export const HERO_PLAYBACK_STATUS = Object.freeze({
+  IDLE: 'idle',
+  REQUESTED: 'requested',
+  PLAYING: 'playing',
+  STABLE: 'stable',
+  PAUSED: 'paused',
+  FAILED: 'failed',
+});
+
 export const HERO_FAILURE_REASONS = Object.freeze({
   AUTOPLAY_BLOCKED: 'autoplay-blocked',
   TIMEOUT: 'timeout',
   VIDEO_ERROR: 'video-error',
   UNSAFE_VIDEO_FRAME: 'unsafe-video-frame',
-  YOUTUBE_ERROR: 'youtube-error',
+  YOUTUBE_API_ERROR: 'youtube-api-error',
+  YOUTUBE_INVALID_PARAMETER: 'youtube-invalid-parameter',
+  YOUTUBE_HTML5_ERROR: 'youtube-html5-error',
+  YOUTUBE_NOT_FOUND: 'youtube-not-found',
+  YOUTUBE_EMBEDDING_BLOCKED: 'youtube-embedding-blocked',
   MISSING_VIDEO: 'missing-video',
 });
 
@@ -20,7 +47,9 @@ export const HERO_COMPACT_PLAYBACK_MS = 3_000;
 export const HERO_PREVIEW_PLAYBACK_MS = 20_000;
 export const HERO_BUFFERING_HYSTERESIS_MS = 450;
 export const HERO_PLAYING_HYSTERESIS_MS = 250;
-export const HERO_VISUAL_READY_CONFIRM_MS = 350;
+// YouTube may briefly render its own center feedback after programmatic playback.
+// Keep the poster above the player until that transient chrome has settled.
+export const HERO_VISUAL_READY_CONFIRM_MS = 3_000;
 export const HERO_PLAYBACK_TIMEOUT_MS = 8_000;
 
 export const createInitialHeroState = ({ movieKey = '', generation = 0 } = {}) => ({
@@ -28,6 +57,10 @@ export const createInitialHeroState = ({ movieKey = '', generation = 0 } = {}) =
   generation,
   movieKey,
   videoSource: null,
+  metadataStatus: HERO_METADATA_STATUS.IDLE,
+  playerStatus: HERO_PLAYER_STATUS.DISABLED,
+  playbackStatus: HERO_PLAYBACK_STATUS.IDLE,
+  visualReady: false,
   failureReason: null,
   failureDetail: null,
   retryCount: 0,
@@ -102,6 +135,13 @@ export const hasAdvancedPlayback = ({
   && currentTime > previousTime
 );
 
+const isPlaybackPhase = (phase) => [
+  HERO_PHASES.TRAILER_LOADING,
+  HERO_PHASES.TRAILER_ENTERING,
+  HERO_PHASES.TRAILER_EXPANDED,
+  HERO_PHASES.TRAILER_COMPACT,
+].includes(phase);
+
 export const heroReducer = (state, action) => {
   switch (action.type) {
     case 'MOVIE_CHANGED':
@@ -120,20 +160,43 @@ export const heroReducer = (state, action) => {
           generation: action.generation ?? state.generation + 1,
         }),
         phase: HERO_PHASES.TRAILER_LOADING,
+        metadataStatus: HERO_METADATA_STATUS.REQUESTING,
         retryCount: action.retryCount ?? state.retryCount,
       };
 
     case 'TRAILER_METADATA_RESOLVED':
-      if (isStale(state, action)) return state;
+      if (isStale(state, action) || state.phase !== HERO_PHASES.TRAILER_LOADING) return state;
       return {
         ...state,
         videoSource: action.videoSource,
+        metadataStatus: HERO_METADATA_STATUS.RESOLVED,
         failureReason: null,
         failureDetail: null,
       };
 
-    case 'PLAYBACK_STABLE': {
+    case 'PLAYER_INITIALIZING':
+      if (isStale(state, action) || !state.videoSource || !isPlaybackPhase(state.phase)) return state;
+      return { ...state, playerStatus: HERO_PLAYER_STATUS.INITIALIZING };
+
+    case 'PLAYER_DISABLED':
+      if (isStale(state, action) || !isPlaybackPhase(state.phase)) return state;
+      return { ...state, playerStatus: HERO_PLAYER_STATUS.DISABLED };
+
+    case 'PLAYER_READY':
+      if (isStale(state, action) || !state.videoSource || !isPlaybackPhase(state.phase)) return state;
+      return { ...state, playerStatus: HERO_PLAYER_STATUS.READY };
+
+    case 'PLAYBACK_REQUESTED':
+      if (isStale(state, action) || !state.videoSource || !isPlaybackPhase(state.phase)) return state;
+      return { ...state, playbackStatus: HERO_PLAYBACK_STATUS.REQUESTED };
+
+    case 'PLAYBACK_PLAYING':
+    case 'PLAYBACK_RESUMED':
       if (isStale(state, action) || state.phase === HERO_PHASES.TRAILER_FAILED) return state;
+      return { ...state, playbackStatus: HERO_PLAYBACK_STATUS.PLAYING };
+
+    case 'PLAYBACK_STABLE': {
+      if (isStale(state, action) || state.phase === HERO_PHASES.TRAILER_FAILED || !Number.isFinite(action.now)) return state;
       const isFirstConfirmation = ![
         HERO_PHASES.TRAILER_ENTERING,
         HERO_PHASES.TRAILER_EXPANDED,
@@ -143,6 +206,7 @@ export const heroReducer = (state, action) => {
       return {
         ...state,
         phase: isFirstConfirmation ? HERO_PHASES.TRAILER_ENTERING : state.phase,
+        playbackStatus: HERO_PLAYBACK_STATUS.STABLE,
         playbackStartedAt: state.playbackStartedAt ?? action.now,
       };
     }
@@ -151,41 +215,52 @@ export const heroReducer = (state, action) => {
       if (
         isStale(state, action)
         || state.phase === HERO_PHASES.TRAILER_FAILED
+        || state.playbackStatus !== HERO_PLAYBACK_STATUS.STABLE
         || ![
           HERO_PHASES.TRAILER_ENTERING,
           HERO_PHASES.TRAILER_EXPANDED,
           HERO_PHASES.TRAILER_COMPACT,
         ].includes(state.phase)
       ) return state;
-      return { ...state, posterVisible: false };
+      return { ...state, visualReady: true, posterVisible: false };
 
     case 'VISUAL_HIDDEN':
-      if (isStale(state, action) || state.posterVisible) return state;
-      return { ...state, posterVisible: true };
+      if (isStale(state, action) || (state.posterVisible && !state.visualReady)) return state;
+      return { ...state, visualReady: false, posterVisible: true };
 
-    case 'PLAYBACK_RESUMED':
-      if (
-        isStale(state, action)
-        || state.phase === HERO_PHASES.TRAILER_FAILED
-        || state.playbackStartedAt != null
-        || !Number.isFinite(action.now)
-      ) return state;
-      return { ...state, playbackStartedAt: action.now };
+    case 'PLAYBACK_PAUSED': {
+      if (isStale(state, action)) return state;
+      const spent = spendPlayback(state, action.now);
+      return {
+        ...spent,
+        playbackStatus: HERO_PLAYBACK_STATUS.PAUSED,
+        visualReady: false,
+        posterVisible: true,
+      };
+    }
+
+    case 'BUFFERING_SUSTAINED': {
+      if (isStale(state, action)) return state;
+      const spent = spendPlayback(state, action.now);
+      return {
+        ...spent,
+        playbackStatus: HERO_PLAYBACK_STATUS.PAUSED,
+        visualReady: false,
+        posterVisible: true,
+      };
+    }
 
     case 'VIDEO_ENTERED':
       if (isStale(state, action) || state.phase !== HERO_PHASES.TRAILER_ENTERING) return state;
       return { ...state, phase: HERO_PHASES.TRAILER_EXPANDED };
 
-    case 'PLAYBACK_PAUSED':
-      if (isStale(state, action)) return state;
-      return spendPlayback(state, action.now);
-
-    case 'BUFFERING_SUSTAINED':
-      if (isStale(state, action)) return state;
-      return { ...state, posterVisible: true };
-
     case 'COMPACT_ELAPSED': {
-      if (isStale(state, action)) return state;
+      if (
+        isStale(state, action)
+        || state.playbackStatus !== HERO_PLAYBACK_STATUS.STABLE
+        || state.playbackStartedAt == null
+        || !isPlaybackPhase(state.phase)
+      ) return state;
       const spent = spendPlayback(state, action.now);
       return {
         ...spent,
@@ -193,17 +268,22 @@ export const heroReducer = (state, action) => {
         compactRemainingMs: 0,
         overviewRevealed: false,
         hasCompacted: true,
-        playbackStartedAt: state.playbackStartedAt == null ? null : action.now,
+        playbackStartedAt: action.now,
       };
     }
 
     case 'PREVIEW_ELAPSED': {
-      if (isStale(state, action)) return state;
+      if (
+        isStale(state, action)
+        || state.playbackStatus !== HERO_PLAYBACK_STATUS.STABLE
+        || state.playbackStartedAt == null
+        || !isPlaybackPhase(state.phase)
+      ) return state;
       const spent = spendPlayback(state, action.now);
       return {
         ...spent,
         previewRemainingMs: 0,
-        playbackStartedAt: state.playbackStartedAt == null ? null : action.now,
+        playbackStartedAt: action.now,
       };
     }
 
@@ -221,6 +301,14 @@ export const heroReducer = (state, action) => {
       return {
         ...spent,
         phase: HERO_PHASES.TRAILER_FAILED,
+        metadataStatus: action.reason === HERO_FAILURE_REASONS.MISSING_VIDEO
+          ? HERO_METADATA_STATUS.MISSING
+          : state.videoSource
+            ? state.metadataStatus
+            : HERO_METADATA_STATUS.FAILED,
+        playerStatus: HERO_PLAYER_STATUS.DISABLED,
+        playbackStatus: HERO_PLAYBACK_STATUS.FAILED,
+        visualReady: false,
         failureReason: action.reason,
         failureDetail: action.detail ?? null,
         retryCount: action.retryCount ?? state.retryCount,

@@ -4,10 +4,11 @@ import { fetchLatestTrailers, fetchMovieTrailers } from '../services/tmdb';
 import Loading from './Loading';
 import BlurCircle from './BlurCircle';
 import CinematicTrailerPlayer from './CinematicTrailerPlayer';
+import { extractYouTubeVideoId } from './hero/heroVideoSource';
 
 const CARD_SLIDE_INTERVAL = 4000;
 
-const getTrailerKey = (trailer) => trailer?.videoUrl || trailer?.embedUrl || trailer?.id;
+const getTrailerKey = (trailer) => trailer?.videoId || trailer?.videoUrl || trailer?.embedUrl || trailer?.id;
 
 const mergeTrailerLists = (...lists) => {
   const seen = new Set();
@@ -23,20 +24,9 @@ const mergeTrailerLists = (...lists) => {
   return merged;
 };
 
-const extractVideoId = (url) => {
-  if (!url) return null;
-  try {
-    const urlObj = new URL(url);
-    if (urlObj.hostname.includes('youtube.com')) {
-      return urlObj.searchParams.get('v') || urlObj.pathname.split('/').pop();
-    }
-    if (urlObj.hostname.includes('youtu.be')) {
-      return urlObj.pathname.substring(1);
-    }
-    return url;
-  } catch {
-    return url;
-  }
+const getTrailerVideoId = (trailer) => {
+  const candidates = [trailer?.videoId, trailer?.embedUrl, trailer?.videoUrl];
+  return candidates.map(extractYouTubeVideoId).find(Boolean) || null;
 };
 
 const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnly = false }) => {
@@ -194,7 +184,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
         <div className="ts-content-shell">
           {currentTrailer && (
             <CinematicTrailerPlayer
-              videoId={extractVideoId(currentTrailer.embedUrl || currentTrailer.videoUrl)}
+              videoId={getTrailerVideoId(currentTrailer)}
               movieTitle={currentTrailer.videoName || currentTrailer.title}
               rating={currentTrailer.vote_average}
               year={currentTrailer.release_date?.substring(0, 4)}
@@ -228,7 +218,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
       {currentTrailer && (
         <div className="relative z-10 w-full">
           <CinematicTrailerPlayer
-            videoId={extractVideoId(currentTrailer.embedUrl || currentTrailer.videoUrl)}
+            videoId={getTrailerVideoId(currentTrailer)}
             movieTitle={currentTrailer.title}
             rating={currentTrailer.vote_average}
             year={currentTrailer.release_date?.substring(0, 4)}

@@ -1,5 +1,7 @@
 // Service: TMDB API helpers
 import { dummyShowsData } from '../assets/assets';
+import { extractYouTubeVideoId } from '../components/hero/heroVideoSource.js';
+import { fetchWithTimeout as requestWithTimeout } from './fetchWithTimeout.js';
 
 const API_BASE = (import.meta.env.VITE_BASE_URL || '').replace(/\/$/, '');
 const IMAGE_BASE = 'https://image.tmdb.org/t/p';
@@ -40,22 +42,7 @@ const getTmdbMovieId = (movie) => {
 };
 
 const fetchWithTimeout = async (url, options = {}) => {
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), API_TIMEOUT_MS);
-    const externalSignal = options.signal;
-
-    const abortFromExternal = () => controller.abort();
-    if (externalSignal) {
-        if (externalSignal.aborted) controller.abort();
-        else externalSignal.addEventListener('abort', abortFromExternal, { once: true });
-    }
-
-    try {
-        return await fetch(url, { ...options, signal: controller.signal });
-    } finally {
-        window.clearTimeout(timeoutId);
-        externalSignal?.removeEventListener?.('abort', abortFromExternal);
-    }
+    return requestWithTimeout(url, options, { timeoutMs: API_TIMEOUT_MS });
 };
 
 const fetchBackendJson = async (path, options = {}) => {
@@ -114,7 +101,9 @@ export const fetchMovieTrailers = async (movie, { signal } = {}) => {
     const videos = Array.isArray(data.results) ? data.results : [];
 
     return videos
-        .filter((video) => video.site?.toLowerCase() === 'youtube' && video.key)
+        .filter((video) => video.site?.toLowerCase() === 'youtube')
+        .map((video) => ({ ...video, videoId: extractYouTubeVideoId(video.key) }))
+        .filter((video) => video.videoId)
         .sort((a, b) => {
             const score = (video) => {
                 const name = `${video.name || ''} ${video.type || ''}`.toLowerCase();
@@ -123,12 +112,13 @@ export const fetchMovieTrailers = async (movie, { signal } = {}) => {
             return score(b) - score(a);
         })
         .map((video) => ({
-            id: `${movieId}_${video.key}`,
+            id: `${movieId}_${video.videoId}`,
             title: movie?.title || movie?.name || data.title || 'Movie Trailer',
             release_date: movie?.release_date || '',
             vote_average: movie?.vote_average,
-            videoUrl: `https://www.youtube.com/embed/${video.key}`,
-            thumbnail: `https://img.youtube.com/vi/${video.key}/hqdefault.jpg`,
+            videoId: video.videoId,
+            videoUrl: `https://www.youtube.com/embed/${video.videoId}`,
+            thumbnail: `https://img.youtube.com/vi/${video.videoId}/hqdefault.jpg`,
             videoName: video.name || 'Official Trailer',
             qualityLabel: '1080p',
             isRequestedTrailer: true,

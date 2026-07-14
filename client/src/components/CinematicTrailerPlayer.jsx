@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Star, ChevronLeft, ChevronRight, Play, Pause, Volume2, VolumeX } from 'lucide-react';
+import { Star, ChevronLeft, ChevronRight, Volume2, VolumeX } from 'lucide-react';
 import useYouTubePlayer from '../hooks/useYouTubePlayer';
 
 const CinematicTrailerPlayer = ({
@@ -14,14 +14,15 @@ const CinematicTrailerPlayer = ({
   onPrevious,
   className = '',
 }) => {
-  const [isPaused, setIsPaused] = useState(false);
-  const [isMuted, setIsMuted] = useState(true);
+  const [audioState, setAudioState] = useState(() => ({ videoId, muted: true }));
   const [isTransitioning, setIsTransitioning] = useState(false);
   const prevVideoIdRef = useRef(videoId);
+  const isMuted = audioState.videoId === videoId ? audioState.muted : true;
   
   useEffect(() => {
     if (videoId !== prevVideoIdRef.current) {
       setIsTransitioning(true);
+      setAudioState({ videoId, muted: true });
       const timer = setTimeout(() => {
         setIsTransitioning(false);
       }, 500); 
@@ -29,19 +30,6 @@ const CinematicTrailerPlayer = ({
       return () => clearTimeout(timer);
     }
   }, [videoId]);
-
-  const handleReady = (player) => {
-    player.mute();
-    setIsMuted(true);
-  };
-
-  const handleStateChange = (event) => {
-    if (event.data === window.YT.PlayerState.PLAYING) {
-      setIsPaused(false);
-    } else if (event.data === window.YT.PlayerState.PAUSED) {
-      setIsPaused(true);
-    }
-  };
 
   const handleEnded = () => {
     if (onNext) onNext();
@@ -54,34 +42,51 @@ const CinematicTrailerPlayer = ({
 
   const { containerRef, player } = useYouTubePlayer({
     videoId,
-    onReady: handleReady,
-    onStateChange: handleStateChange,
+    muted: isMuted,
     onEnded: handleEnded,
     onError: handleError,
-    playerVars: {
-      mute: 1, 
-    }
   });
-
-  const togglePause = () => {
-    if (!player) return;
-    if (isPaused) {
-      player.playVideo();
-    } else {
-      player.pauseVideo();
-    }
-  };
 
   const toggleMute = () => {
     if (!player) return;
     if (isMuted) {
       player.unMute();
-      setIsMuted(false);
+      setAudioState({ videoId, muted: false });
     } else {
       player.mute();
-      setIsMuted(true);
+      setAudioState({ videoId, muted: true });
     }
   };
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || !player) return undefined;
+    const diagnostic = {
+      getSnapshot: () => {
+        let captionModules = [];
+        let captionTracks = [];
+        try {
+          captionModules = player.getOptions?.() || [];
+          captionTracks = player.getOption?.('captions', 'tracklist') || [];
+        } catch {
+          // Diagnostics must remain best-effort like the shared caption control.
+        }
+        return {
+          kind: 'youtube',
+          videoId: player.getVideoData?.()?.video_id || videoId,
+          playerState: player.getPlayerState?.(),
+          currentTime: Number(player.getCurrentTime?.()) || 0,
+          captionModuleAvailable: captionModules.includes?.('captions') || false,
+          captionTrackCount: Array.isArray(captionTracks) ? captionTracks.length : 0,
+        };
+      },
+    };
+    window.__NITROCINE_TRAILER_PLAYER_DIAGNOSTICS__ = diagnostic;
+    return () => {
+      if (window.__NITROCINE_TRAILER_PLAYER_DIAGNOSTICS__ === diagnostic) {
+        delete window.__NITROCINE_TRAILER_PLAYER_DIAGNOSTICS__;
+      }
+    };
+  }, [player, videoId]);
 
   useEffect(() => {
     const s = document.createElement('style');
@@ -169,28 +174,6 @@ const CinematicTrailerPlayer = ({
       .cinematic-fade-overlay.active {
         opacity: 1;
       }
-      .cinematic-center-btn {
-        position: absolute;
-        top: 50%; left: 50%;
-        transform: translate(-50%, -50%);
-        z-index: 20;
-        width: 64px; height: 64px;
-        border-radius: 50%;
-        background: rgba(0,0,0,0.4);
-        backdrop-filter: blur(12px);
-        border: 2px solid rgba(255,255,255,0.18);
-        display: flex; align-items: center; justify-content: center;
-        cursor: pointer;
-        transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
-        opacity: 0;
-      }
-      .cinematic-player-viewport:hover .cinematic-center-btn { opacity: 1; }
-      .cinematic-center-btn:hover {
-        background: rgba(248,69,101,0.55);
-        border-color: rgba(248,69,101,0.8);
-        transform: translate(-50%, -50%) scale(1.1);
-        box-shadow: 0 0 28px rgba(248,69,101,0.4);
-      }
       .cinematic-mute-btn {
         position: absolute;
         bottom: 24px; right: 24px;
@@ -252,15 +235,6 @@ const CinematicTrailerPlayer = ({
           <div className={`cinematic-fade-overlay ${isTransitioning ? 'active' : ''}`} />
           
           <div className="cinematic-player-frame" ref={containerRef} />
-          
-          <button 
-            className="cinematic-center-btn" 
-            onClick={togglePause} 
-            aria-label={isPaused ? 'Play' : 'Pause'}
-            aria-pressed={!isPaused}
-          >
-            {isPaused ? <Play className="w-6 h-6 text-white ml-1" /> : <Pause className="w-5 h-5 text-white" />}
-          </button>
           
           <button 
             className={`cinematic-mute-btn ${isMuted ? 'is-muted' : ''}`} 

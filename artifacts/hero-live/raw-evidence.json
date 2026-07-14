@@ -1,0 +1,47 @@
+{
+  "capturedAt": "2026-07-14T04:48:46.707Z",
+  "browser": "Google Chrome (headed)",
+  "context": "fresh contexts without cookies, localStorage, storageState, or YouTube account",
+  "hero": {
+    "title": "In the Lost Lands",
+    "movieId": "324544",
+    "videoId": "CMyrp5Vk3mU",
+    "youtubeWatchMetadataContainsCaptionTracks": true,
+    "endpoint": "http://127.0.0.1:3000/api/show/tmdb/movie/324544/videos",
+    "singleCtaClickCount": 1,
+    "metadataRequestCount": 1,
+    "youtubePlayerCount": 1,
+    "playbackState": 1,
+    "currentTimeSampleA": 3.4829789771118165,
+    "currentTimeSampleB": 5.992156870300293,
+    "centerPlayPauseButtonCount": 0,
+    "heroInternalButtonCount": 0,
+    "iframePointerEvents": "none",
+    "preStable": {
+      "posterVisible": true,
+      "videoVisible": false
+    },
+    "trailerSection": {
+      "videoId": "gMC8kkwbIQQ",
+      "youtubeWatchMetadataContainsCaptionTracks": true,
+      "playbackState": 1,
+      "currentTimeSampleA": 0.10746608010864259,
+      "currentTimeSampleB": 10.376347093460083,
+      "centerPlayPauseButtonCount": 0
+    }
+  },
+  "mobile": {
+    "generation": 2,
+    "kind": "youtube",
+    "videoId": "CMyrp5Vk3mU",
+    "playerState": 1,
+    "currentTime": 4.478312984741211,
+    "captionModuleAvailable": true,
+    "captionTrackCount": 0
+  },
+  "visualReview": {
+    "heroCaptionVisible": false,
+    "trailerSectionCaptionVisible": false,
+    "youtubeCenterOverlayVisible": false
+  }
+}

@@ -3,6 +3,10 @@
   to { transform: scale(1.08) translate3d(1.5%, 0, 0); }
 }
 
+@keyframes hero-spin {
+  to { transform: rotate(360deg); }
+}
+
 @keyframes hero-word-enter {
   from { opacity: 0; transform: translate3d(-1rem, 0.35rem, 0); }
   to { opacity: 1; transform: translate3d(0, 0, 0); }
@@ -58,6 +62,12 @@
 }
 
 .hero-media {
+  /*
+   * YouTube commonly delivers cinematic trailers letterboxed inside a 16:9
+   * stream. A uniform, centre-origin overscan removes those encoded bars. It
+   * crops every edge equally; it is not a bottom-only caption mask.
+   */
+  --hero-youtube-cinematic-overscan: 1.32;
   position: absolute;
   inset: 0;
   z-index: 0;
@@ -76,12 +86,23 @@
 }
 
 .hero-poster-shell {
+  z-index: 2;
   overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 850ms cubic-bezier(0.22, 1, 0.36, 1);
   background:
     radial-gradient(circle at 72% 28%, rgba(248, 69, 101, 0.24), transparent 30%),
     radial-gradient(circle at 20% 75%, rgba(57, 74, 171, 0.22), transparent 34%),
     linear-gradient(145deg, #11131a, #07080c 62%, #160910);
 }
+
+.hero-poster-shell.is-visible {
+  opacity: 1;
+  transition: none;
+}
+
+.hero-poster-shell.is-hidden { opacity: 0; }
 
 .hero-poster {
   object-fit: cover;
@@ -93,8 +114,7 @@
   will-change: transform, opacity;
 }
 
-.hero-poster.is-ready.is-visible { opacity: 1; }
-.hero-poster.is-ready.is-dimmed { opacity: 0.12; }
+.hero-poster.is-ready { opacity: 1; }
 .hero-poster.is-loading { opacity: 0; }
 
 .hero-video-shell {
@@ -135,11 +155,56 @@
   user-select: none;
 }
 
+.hero-youtube-video,
+.hero-youtube-video iframe {
+  pointer-events: none !important;
+}
+
+/*
+ * Keep the cross-origin surface composited and advancing behind the opaque
+ * poster. Fading the iframe itself from opacity: 0 can make Chromium defer its
+ * first paint until reveal, which exposes YouTube's transient centre bezel.
+ * The state machine still owns visual safety: until `.is-visible` is applied,
+ * the z-index-2 poster completely masks this z-index-1 layer.
+ */
+.hero-video-shell.hero-youtube-video,
+.hero-video-shell.hero-youtube-video.is-visible {
+  opacity: 1;
+  transition: none;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  will-change: transform;
+}
+
+.hero-youtube-video__mount {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(102vw, 181.34vh);
+  height: max(102vh, 57.38vw);
+  width: max(102cqw, 181.34cqh);
+  height: max(102cqh, 57.38cqw);
+  max-width: none;
+  transform: translate(-50%, -50%) scale(var(--hero-youtube-cinematic-overscan));
+  transform-origin: center;
+  backface-visibility: hidden;
+  will-change: transform;
+  pointer-events: none;
+}
+
+.hero-youtube-video__mount iframe {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  border: 0;
+  backface-visibility: hidden;
+}
+
 .hero-media__breath,
 .hero-media__gradient {
   position: absolute;
   inset: 0;
-  z-index: 2;
+  z-index: 3;
   pointer-events: none;
 }
 
@@ -343,6 +408,8 @@
 .hero-action svg,
 .hero-control svg { width: 1rem; height: 1rem; }
 
+.hero-action__spinner { animation: hero-spin 800ms linear infinite; }
+
 .hero-action--primary {
   border-color: rgba(248, 69, 101, 0.5);
   background: linear-gradient(135deg, #f84565, #d52f50);
@@ -362,16 +429,6 @@
 .hero-control:disabled {
   cursor: wait;
   opacity: 0.62;
-}
-
-.hero-controls {
-  position: absolute;
-  z-index: 20;
-  right: var(--hero-safe-right);
-  bottom: var(--hero-safe-bottom);
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
 }
 
 .hero-control {
@@ -518,7 +575,6 @@
     width: min(35rem, calc(100% - var(--hero-safe-left) - var(--hero-safe-right)));
   }
 
-  .hero-controls,
   .hero-poster-rail { display: none; }
 
   .hero-action--details { display: inline-flex; }
@@ -575,6 +631,10 @@
     display: grid;
     grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr) 2.75rem;
     gap: 0.45rem;
+  }
+
+  .hero-actions.has-volume-control {
+    grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr) 2.75rem 2.75rem;
   }
 
   .hero-action {
@@ -636,8 +696,7 @@
     font-size: 0.72rem;
   }
 
-  .hero-poster-rail,
-  .hero-controls { display: none; }
+  .hero-poster-rail { display: none; }
 }
 
 @media (orientation: landscape) and (max-height: 440px) {

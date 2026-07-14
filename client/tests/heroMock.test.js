@@ -90,16 +90,19 @@ test('empty or missing fixture collections resolve to an empty trailer list', ()
 
 test('native source resolver accepts direct supported video extensions', () => {
   assert.deepEqual(resolveNativeHeroVideoSource({ videoUrl: '/video/trailer.mp4' }), {
+    kind: 'native',
     src: '/video/trailer.mp4',
-    type: 'video/mp4',
+    mimeType: 'video/mp4',
   });
   assert.deepEqual(resolveNativeHeroVideoSource({ videoUrl: '/video/trailer.WEBM?rev=2' }), {
+    kind: 'native',
     src: '/video/trailer.WEBM?rev=2',
-    type: 'video/webm',
+    mimeType: 'video/webm',
   });
   assert.deepEqual(resolveNativeHeroVideoSource({ src: 'https://cdn.test/trailer.ogg#start' }), {
+    kind: 'native',
     src: 'https://cdn.test/trailer.ogg#start',
-    type: 'video/ogg',
+    mimeType: 'video/ogg',
   });
 });
 
@@ -108,18 +111,19 @@ test('native source resolver accepts an explicit video MIME for extensionless so
     videoUrl: 'https://media.test/trailer',
     mimeType: 'video/x-custom',
   }), {
+    kind: 'native',
     src: 'https://media.test/trailer',
-    type: 'video/x-custom',
+    mimeType: 'video/x-custom',
   });
 });
 
 test('native source resolver rejects YouTube and iframe sources', () => {
   assert.equal(resolveNativeHeroVideoSource({
-    videoUrl: 'https://www.youtube.com/watch?v=abc',
+    videoUrl: 'https://www.youtube.com/watch?v=WpW36ldAqnM',
     mimeType: 'video/mp4',
   }), null);
   assert.equal(resolveNativeHeroVideoSource({
-    videoUrl: 'https://www.youtube-nocookie.com/embed/abc',
+    videoUrl: 'https://www.youtube-nocookie.com/embed/WpW36ldAqnM',
     mimeType: 'video/mp4',
   }), null);
   assert.equal(resolveNativeHeroVideoSource({
@@ -140,18 +144,20 @@ test('configured Hero source accepts first-party native fields and rejects ifram
   assert.deepEqual(resolveConfiguredHeroVideoSource({
     heroVideoUrl: 'https://cdn.test/hero.webm',
   }), {
+    kind: 'native',
     src: 'https://cdn.test/hero.webm',
-    type: 'video/webm',
+    mimeType: 'video/webm',
   });
   assert.deepEqual(resolveConfiguredHeroVideoSource({
     background_video_url: 'https://cdn.test/hero-stream',
     background_video_mime_type: 'video/mp4',
   }), {
+    kind: 'native',
     src: 'https://cdn.test/hero-stream',
-    type: 'video/mp4',
+    mimeType: 'video/mp4',
   });
   assert.equal(resolveConfiguredHeroVideoSource({
-    heroVideoUrl: 'https://www.youtube.com/watch?v=abc',
+    heroVideoUrl: 'https://www.youtube.com/watch?v=WpW36ldAqnM',
   }), null);
   assert.equal(resolveConfiguredHeroVideoSource({}), null);
 });
@@ -159,7 +165,7 @@ test('configured Hero source accepts first-party native fields and rejects ifram
 test('production Hero stays on poster when a movie has only an iframe trailer', () => {
   const youtubeOnlyMovie = {
     id: 42,
-    videoUrl: 'https://www.youtube.com/embed/abc',
+    videoUrl: 'https://www.youtube.com/embed/WpW36ldAqnM',
   };
 
   assert.equal(canUseHeroBackgroundVideo(youtubeOnlyMovie), false);

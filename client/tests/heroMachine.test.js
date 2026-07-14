@@ -2,7 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   HERO_FAILURE_REASONS,
+  HERO_METADATA_STATUS,
   HERO_PHASES,
+  HERO_PLAYBACK_STATUS,
+  HERO_PLAYER_STATUS,
   createInitialHeroState,
   getPlaybackRemaining,
   hasAdvancedPlayback,
@@ -31,15 +34,68 @@ test('stale generations cannot update a newer Hero attempt', () => {
   assert.equal(stale.phase, HERO_PHASES.TRAILER_LOADING);
 });
 
-test('repeated PLAYING does not restart the playback clock', () => {
+test('raw PLAYING never starts the playback clock and repeated stable confirmations do not restart it', () => {
   let state = requestTrailer(createInitialHeroState({ movieKey: 'movie-a' }), 1);
-  state = heroReducer(state, { type: 'PLAYBACK_RESUMED', generation: 1, now: 100 });
-  state = heroReducer(state, { type: 'PLAYBACK_STABLE', generation: 1, now: 350 });
-  state = heroReducer(state, { type: 'PLAYBACK_STABLE', generation: 1, now: 350 });
+  state = heroReducer(state, { type: 'PLAYBACK_PLAYING', generation: 1, now: 100 });
 
-  assert.equal(state.playbackStartedAt, 100);
+  assert.equal(state.playbackStatus, HERO_PLAYBACK_STATUS.PLAYING);
+  assert.equal(state.playbackStartedAt, null);
+  assert.equal(state.phase, HERO_PHASES.TRAILER_LOADING);
+
+  state = heroReducer(state, { type: 'PLAYBACK_STABLE', generation: 1, now: 350 });
+  state = heroReducer(state, { type: 'PLAYBACK_STABLE', generation: 1, now: 700 });
+
+  assert.equal(state.playbackStartedAt, 350);
+  assert.equal(state.playbackStatus, HERO_PLAYBACK_STATUS.STABLE);
   assert.equal(state.phase, HERO_PHASES.TRAILER_ENTERING);
   assert.equal(state.posterVisible, true);
+});
+
+test('metadata, player, playback, and visual readiness are separate lifecycle gates', () => {
+  const source = { kind: 'youtube', videoId: 'abcdefghijk' };
+  let state = requestTrailer(createInitialHeroState({ movieKey: 'movie-a' }), 9);
+
+  assert.equal(state.metadataStatus, HERO_METADATA_STATUS.REQUESTING);
+  assert.equal(state.playerStatus, HERO_PLAYER_STATUS.DISABLED);
+  assert.equal(state.playbackStatus, HERO_PLAYBACK_STATUS.IDLE);
+  assert.equal(state.posterVisible, true);
+
+  state = heroReducer(state, {
+    type: 'TRAILER_METADATA_RESOLVED',
+    generation: 9,
+    videoSource: source,
+  });
+  assert.equal(state.metadataStatus, HERO_METADATA_STATUS.RESOLVED);
+  assert.equal(state.posterVisible, true);
+
+  state = heroReducer(state, { type: 'PLAYER_INITIALIZING', generation: 9 });
+  assert.equal(state.playerStatus, HERO_PLAYER_STATUS.INITIALIZING);
+  assert.equal(state.posterVisible, true);
+
+  state = heroReducer(state, { type: 'PLAYER_READY', generation: 9 });
+  assert.equal(state.playerStatus, HERO_PLAYER_STATUS.READY);
+  assert.equal(state.posterVisible, true);
+
+  state = heroReducer(state, { type: 'PLAYBACK_REQUESTED', generation: 9 });
+  assert.equal(state.playbackStatus, HERO_PLAYBACK_STATUS.REQUESTED);
+  assert.equal(state.posterVisible, true);
+
+  state = heroReducer(state, { type: 'PLAYBACK_PLAYING', generation: 9, now: 100 });
+  assert.equal(state.playbackStatus, HERO_PLAYBACK_STATUS.PLAYING);
+  assert.equal(state.posterVisible, true);
+  assert.equal(state.playbackStartedAt, null);
+
+  const prematureVisual = heroReducer(state, { type: 'VISUAL_READY', generation: 9 });
+  assert.strictEqual(prematureVisual, state);
+
+  state = heroReducer(state, { type: 'PLAYBACK_STABLE', generation: 9, now: 350 });
+  assert.equal(state.playbackStatus, HERO_PLAYBACK_STATUS.STABLE);
+  assert.equal(state.posterVisible, true);
+  assert.equal(state.playbackStartedAt, 350);
+
+  state = heroReducer(state, { type: 'VISUAL_READY', generation: 9 });
+  assert.equal(state.visualReady, true);
+  assert.equal(state.posterVisible, false);
 });
 
 test('poster remains visible until visual readiness is confirmed for the current generation', () => {
@@ -59,14 +115,42 @@ test('poster remains visible until visual readiness is confirmed for the current
   assert.equal(state.posterVisible, true);
 });
 
-test('the 250ms playing hysteresis is included in the 3000ms playback budget', () => {
+test('the playback budget begins only after the 250ms stable-playing confirmation', () => {
   let state = requestTrailer(createInitialHeroState({ movieKey: 'movie-a' }), 1);
-  state = heroReducer(state, { type: 'PLAYBACK_RESUMED', generation: 1, now: 1_000 });
+  state = heroReducer(state, { type: 'PLAYBACK_PLAYING', generation: 1, now: 1_000 });
   state = heroReducer(state, { type: 'PLAYBACK_STABLE', generation: 1, now: 1_250 });
 
-  assert.equal(state.playbackStartedAt, 1_000);
-  assert.equal(getPlaybackRemaining(state, 3_999).compactRemainingMs, 1);
-  assert.equal(getPlaybackRemaining(state, 4_000).compactRemainingMs, 0);
+  assert.equal(state.playbackStartedAt, 1_250);
+  assert.equal(getPlaybackRemaining(state, 4_249).compactRemainingMs, 1);
+  assert.equal(getPlaybackRemaining(state, 4_250).compactRemainingMs, 0);
+});
+
+test('timer actions are ignored before stable playback and after a pause', () => {
+  let state = requestTrailer(createInitialHeroState({ movieKey: 'movie-a' }), 5);
+  state = heroReducer(state, { type: 'PLAYBACK_PLAYING', generation: 5, now: 100 });
+
+  assert.strictEqual(
+    heroReducer(state, { type: 'COMPACT_ELAPSED', generation: 5, now: 3_100 }),
+    state,
+  );
+  assert.strictEqual(
+    heroReducer(state, { type: 'PREVIEW_ELAPSED', generation: 5, now: 20_100 }),
+    state,
+  );
+
+  state = heroReducer(state, { type: 'PLAYBACK_STABLE', generation: 5, now: 350 });
+  state = heroReducer(state, { type: 'PLAYBACK_PAUSED', generation: 5, now: 850 });
+  assert.equal(state.playbackStatus, HERO_PLAYBACK_STATUS.PAUSED);
+  assert.equal(state.playbackStartedAt, null);
+
+  assert.strictEqual(
+    heroReducer(state, { type: 'COMPACT_ELAPSED', generation: 5, now: 3_350 }),
+    state,
+  );
+  assert.strictEqual(
+    heroReducer(state, { type: 'PREVIEW_ELAPSED', generation: 5, now: 20_350 }),
+    state,
+  );
 });
 
 test('compact budget accumulates exactly 3000ms across pause and resume', () => {
@@ -89,6 +173,37 @@ test('compact budget accumulates exactly 3000ms across pause and resume', () => 
   assert.equal(state.previewRemainingMs, 17_000);
   assert.equal(state.phase, HERO_PHASES.TRAILER_COMPACT);
   assert.equal(state.hasCompacted, true);
+});
+
+test('pause and sustained buffering immediately close the visual latch until playback is stable again', () => {
+  const makeVisibleState = () => {
+    let state = requestTrailer(createInitialHeroState({ movieKey: 'movie-a' }), 11);
+    state = heroReducer(state, { type: 'PLAYBACK_STABLE', generation: 11, now: 100 });
+    return heroReducer(state, { type: 'VISUAL_READY', generation: 11 });
+  };
+
+  for (const actionType of ['PLAYBACK_PAUSED', 'BUFFERING_SUSTAINED']) {
+    let state = makeVisibleState();
+    assert.equal(state.posterVisible, false);
+
+    state = heroReducer(state, { type: actionType, generation: 11, now: 600 });
+    assert.equal(state.posterVisible, true);
+    assert.equal(state.visualReady, false);
+    assert.equal(state.playbackStatus, HERO_PLAYBACK_STATUS.PAUSED);
+    assert.equal(state.playbackStartedAt, null);
+
+    const prematureVisual = heroReducer(state, { type: 'VISUAL_READY', generation: 11 });
+    assert.strictEqual(prematureVisual, state);
+
+    state = heroReducer(state, { type: 'PLAYBACK_PLAYING', generation: 11, now: 700 });
+    assert.equal(state.posterVisible, true);
+    assert.equal(state.playbackStartedAt, null);
+
+    state = heroReducer(state, { type: 'PLAYBACK_STABLE', generation: 11, now: 950 });
+    assert.equal(state.posterVisible, true);
+    state = heroReducer(state, { type: 'VISUAL_READY', generation: 11 });
+    assert.equal(state.posterVisible, false);
+  }
 });
 
 test('buffer and playing hysteresis thresholds are inclusive only at the threshold', () => {
