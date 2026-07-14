@@ -199,10 +199,10 @@ const HeroSection = () => {
   const [muted, setMuted] = useState(() => {
     try {
       const stored = localStorage.getItem('nitrocine:hero-sound');
-      // Default muted when no preference exists — required for reliable autoplay
-      return stored === null ? true : stored === 'muted';
+      // Default unmuted (sound on) when no preference exists, unless user stored 'muted'
+      return stored === null ? false : stored === 'muted';
     } catch {
-      return true;
+      return false;
     }
   });
   const [heroVisible, setHeroVisible] = useState(() => typeof IntersectionObserver === 'undefined');
@@ -358,19 +358,15 @@ const HeroSection = () => {
         : HERO_PLAYBACK_INTENT.AUTO;
     setPlaybackIntent(intentValue);
 
-    // Audio: auto always muted for reliable autoplay; manual reads preference (default muted)
-    if (source === 'auto') {
-      setMuted(true);
-    } else {
-      let preferMuted;
-      try {
-        const stored = localStorage.getItem('nitrocine:hero-sound');
-        preferMuted = stored === null ? true : stored === 'muted';
-      } catch {
-        preferMuted = true;
-      }
-      setMuted(preferMuted);
+    // Audio: default unmuted (sound on) when no preference exists, unless user stored 'muted'
+    let preferMuted;
+    try {
+      const stored = localStorage.getItem('nitrocine:hero-sound');
+      preferMuted = stored === null ? false : stored === 'muted';
+    } catch {
+      preferMuted = false;
     }
+    setMuted(preferMuted);
 
     const generation = nextGeneration();
     attemptLockRef.current = { generation, movieKey: targetKey };

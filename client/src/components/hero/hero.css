@@ -100,7 +100,11 @@
   --hero-safe-left: max(calc(env(safe-area-inset-left) + 1rem), clamp(2rem, 6vw, 6rem));
   --hero-content-bottom: calc(var(--hero-safe-bottom) + 8rem);
   --hero-rail-block-height: 6.15rem;
-  --hero-content-compact-bottom: calc(var(--hero-safe-bottom) + 1.1rem);
+  --hero-content-compact-bottom: calc(
+    var(--hero-safe-bottom)
+    + var(--hero-rail-block-height)
+    + 0.9rem
+  );
   position: relative;
   isolation: isolate;
   width: 100%;
@@ -348,11 +352,15 @@
 /* ─── Compact State Lifecycle & Transitions ─── */
 .hero-content-zone.is-compact,
 .hero-content-zone.is-compacting {
+  top: auto;
   bottom: var(--hero-content-compact-bottom);
+  width: fit-content;
+  max-width: min(72vw, 30rem);
   min-height: 0;
-  padding: 0.75rem 1rem;
-  margin: -0.75rem -1rem;
-  border-radius: 1rem;
+  padding: 0.65rem 0.9rem;
+  margin: 0;
+  border-radius: 0.85rem;
+  background: linear-gradient(90deg, rgba(8, 9, 12, 0.88) 0%, rgba(8, 9, 12, 0.45) 100%);
 }
 
 .hero-content-zone.is-compact .hero-title,
@@ -364,14 +372,26 @@
 
 .hero-content-zone.is-compact .hero-title,
 .hero-content-zone.is-compacting .hero-title {
-  transform: translate3d(0, 0, 0) scale(0.72);
-  margin-bottom: 0;
+  margin: 0;
+  font-size: clamp(1.35rem, 2.1vw, 2rem);
+  line-height: 1;
+  transform: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hero-content-zone.is-compact .hero-title__word,
+.hero-content-zone.is-compacting .hero-title__word {
+  display: inline;
+  white-space: normal;
 }
 
 .hero-content-zone.is-compact:not(.is-overview-revealed) .hero-content-details,
 .hero-content-zone.is-compacting:not(.is-overview-revealed) .hero-content-details {
   opacity: 0;
   max-height: 0;
+  max-width: 0;
   margin: 0;
   pointer-events: none;
   transform: translate3d(0, 0.75rem, 0);
@@ -521,9 +541,9 @@
 
 .hero-poster-rail.is-compact,
 .hero-poster-rail.is-compacting {
-  opacity: 0;
-  pointer-events: none;
-  transform: translate3d(0, 1rem, 0);
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
 }
 
 .hero-poster-rail__progress {

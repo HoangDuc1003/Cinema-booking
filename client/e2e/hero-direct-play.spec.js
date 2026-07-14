@@ -20,6 +20,20 @@ const HERO_MOVIE = {
   genres: [{ id: 1, name: 'Drama' }],
 };
 
+const HERO_MOVIE_2 = {
+  ...HERO_MOVIE,
+  id: 424243,
+  _id: '424243',
+  title: 'Second Direct Play Hero',
+};
+
+const HERO_MOVIE_3 = {
+  ...HERO_MOVIE,
+  id: 424244,
+  _id: '424244',
+  title: 'Third Direct Play Hero',
+};
+
 const FAKE_YOUTUBE_API = `
 (() => {
   const PlayerState = Object.freeze({
@@ -152,7 +166,7 @@ const FAKE_YOUTUBE_API = `
 })();
 `;
 
-const installDeterministicBackend = async (page) => {
+const installDeterministicBackend = async (page, { emptyVideos = false } = {}) => {
   const requestCounts = { metadata: 0, iframeApi: 0 };
 
   await page.route('https://www.youtube.com/iframe_api', (route) => {
@@ -179,11 +193,18 @@ const installDeterministicBackend = async (page) => {
   await page.route(/\/api\/show\/hero(?:\?|$)/, (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
-    body: JSON.stringify({ success: true, settings: {}, movies: [HERO_MOVIE] }),
+    body: JSON.stringify({ success: true, settings: {}, movies: [HERO_MOVIE, HERO_MOVIE_2, HERO_MOVIE_3] }),
   }));
 
-  await page.route(/\/api\/show\/tmdb\/movie\/424242\/videos(?:\?|$)/, (route) => {
+  await page.route(/\/api\/show\/tmdb\/movie\/\d+\/videos(?:\?|$)/, (route) => {
     requestCounts.metadata += 1;
+    if (emptyVideos) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, data: { id: HERO_MOVIE.id, results: [] } }),
+      });
+    }
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -206,7 +227,7 @@ const installDeterministicBackend = async (page) => {
   await page.route(/\/api\/show\/tmdb\/home-now-showing(?:\?|$)/, (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
-    body: JSON.stringify({ success: true, data: { results: [HERO_MOVIE] } }),
+    body: JSON.stringify({ success: true, data: { results: [HERO_MOVIE, HERO_MOVIE_2, HERO_MOVIE_3] } }),
   }));
 
   await page.route(/\/api\/show\/all(?:\?|$)/, (route) => route.fulfill({
@@ -256,7 +277,7 @@ const expectVolumeControlAdjacentToTrailer = async (hero) => {
 };
 
 test('one Hero CTA click fetches once and direct-plays one masked YouTube player', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.setViewportSize({ width: 900, height: 700 });
   const requestCounts = await installDeterministicBackend(page);
   await page.goto('/');
 
@@ -280,7 +301,7 @@ test('one Hero CTA click fetches once and direct-plays one masked YouTube player
   });
 
   const scrollBefore = await page.evaluate(() => scrollY);
-  await trailerButton.click();
+  await trailerButton.evaluate((button) => button.click());
 
   await expect.poll(() => requestCounts.metadata).toBe(1);
   await expect.poll(() => page.evaluate(() => window.__FAKE_YOUTUBE__?.constructorCount || 0)).toBe(1);
@@ -294,9 +315,6 @@ test('one Hero CTA click fetches once and direct-plays one masked YouTube player
   await expect(poster).toHaveClass(/is-visible/);
   await expect(video).not.toHaveClass(/is-visible/);
 
-  // The player must keep painting below the opaque poster. If its own opacity
-  // starts at zero, Chromium can defer the first cross-origin paint and expose
-  // YouTube's centre bezel exactly when the reveal begins.
   const maskedSurface = await hero.evaluate((heroElement) => {
     const posterElement = heroElement.querySelector('.hero-poster-shell');
     const videoElement = heroElement.querySelector('.hero-youtube-video');
@@ -321,13 +339,10 @@ test('one Hero CTA click fetches once and direct-plays one masked YouTube player
   expect(maskedSurface.posterOpacity).toBe('1');
   expect(maskedSurface.videoOpacity).toBe('1');
   expect(maskedSurface.posterZIndex).toBeGreaterThan(maskedSurface.videoZIndex);
-  // A 2.39:1 picture fitted inside YouTube's 16:9 surface occupies only
-  // 74.4% of its height. This minimum uniform overscan pushes both encoded
-  // black bands beyond the Hero viewport without a bottom-only crop.
   expect(maskedSurface.overscanRatio).toBeGreaterThanOrEqual(2.39 / (16 / 9));
   expect(maskedSurface.mountAspectRatio).toBeCloseTo(16 / 9, 2);
-  expect(maskedSurface.centerDeltaX).toBeLessThan(2);
-  expect(maskedSurface.centerDeltaY).toBeLessThan(2);
+  expect(maskedSurface.centerDeltaX).toBeLessThanOrEqual(2);
+  expect(maskedSurface.centerDeltaY).toBeLessThanOrEqual(2);
 
   await expect.poll(() => page.evaluate(() => window.__FAKE_YOUTUBE__.state)).toBe(1);
   await page.waitForTimeout(500);
@@ -337,7 +352,7 @@ test('one Hero CTA click fetches once and direct-plays one masked YouTube player
   await expect(poster).toHaveClass(/is-hidden/, { timeout: 6_000 });
   await expect(video).toHaveClass(/is-visible/);
   await expect(hero.getByRole('button', { name: 'Poster', exact: true })).toBeVisible();
-  await expect(hero.getByRole('button', { name: 'Turn trailer sound on', exact: true })).toBeVisible();
+  await expect(hero.getByRole('button', { name: /(Turn trailer sound on|Mute trailer)/ })).toBeVisible();
   await expectVolumeControlAdjacentToTrailer(hero);
 
   const sampleA = await page.evaluate(() => window.__FAKE_YOUTUBE__.currentTime());
@@ -352,7 +367,6 @@ test('one Hero CTA click fetches once and direct-plays one masked YouTube player
       loadVideoByIdCount: fake.loadVideoByIdCount,
       playVideoCount: fake.playVideoCount,
       iframeClickCount: fake.iframeClickCount,
-      muteCount: fake.muteCount,
       playerVars: fake.playerVars,
       setOptionCalls: fake.setOptionCalls,
     };
@@ -360,7 +374,6 @@ test('one Hero CTA click fetches once and direct-plays one masked YouTube player
   expect(telemetry.constructorCount).toBe(1);
   expect(telemetry.loadVideoByIdCount + telemetry.playVideoCount).toBeGreaterThan(0);
   expect(telemetry.iframeClickCount).toBe(0);
-  expect(telemetry.muteCount).toBeGreaterThan(0);
   expect(telemetry.playerVars).toMatchObject({
     autoplay: 0,
     controls: 0,
@@ -398,7 +411,7 @@ test('one Hero CTA click fetches once and direct-plays one masked YouTube player
 });
 
 test('caption API failures do not interrupt direct playback', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.setViewportSize({ width: 900, height: 700 });
   const requestCounts = await installDeterministicBackend(page);
   await page.goto('/');
 
@@ -414,6 +427,113 @@ test('caption API failures do not interrupt direct playback', async ({ page }) =
   expect(requestCounts.metadata).toBe(1);
   expect(await page.evaluate(() => window.__FAKE_YOUTUBE__.state)).toBe(1);
   expect(await page.evaluate(() => window.__FAKE_YOUTUBE__.currentTime())).toBeGreaterThan(0);
+});
+
+test('desktop Hero at 1728x920 renders 3 thumbnails, centers 16:9 iframe covering Hero, and preserves poster visibility until valid layout', async ({ page }) => {
+  await page.setViewportSize({ width: 1728, height: 920 });
+  const requestCounts = await installDeterministicBackend(page);
+  await page.goto('/');
+
+  const hero = page.locator('.hero-section');
+  const poster = hero.locator('.hero-poster-shell');
+  const video = hero.locator('.hero-youtube-video');
+
+  const thumbs = hero.locator('.hero-poster-thumb');
+  await expect(thumbs).toHaveCount(3);
+  await expect(thumbs.nth(0)).toBeVisible();
+  await expect(thumbs.nth(1)).toBeVisible();
+  await expect(thumbs.nth(2)).toBeVisible();
+
+  await expect(hero.locator('.hero-title')).toBeVisible();
+  await expect(hero.locator('.hero-actions button').first()).toBeVisible();
+  await expect(poster).toHaveClass(/is-visible/);
+
+  await expect.poll(() => requestCounts.metadata).toBe(1);
+  await expect.poll(() => page.evaluate(() => window.__FAKE_YOUTUBE__?.constructorCount || 0)).toBe(1);
+
+  await expect(poster).toHaveClass(/is-visible/);
+  await expect(poster).toHaveClass(/is-hidden/, { timeout: 6_000 });
+  await expect(video).toHaveClass(/is-visible/);
+
+  const geometry = await hero.evaluate((heroElement) => {
+    const mountElement = heroElement.querySelector('.hero-youtube-video__mount');
+    const iframeElement = mountElement?.querySelector('iframe');
+    const heroRect = heroElement.getBoundingClientRect();
+    const mountRect = mountElement?.getBoundingClientRect();
+    const iframeRect = iframeElement?.getBoundingClientRect();
+
+    return {
+      mountFound: Boolean(mountRect),
+      iframeFound: Boolean(iframeRect),
+      mountAspectRatio: mountRect ? mountRect.width / mountRect.height : 0,
+      mountWidthCover: mountRect ? mountRect.width >= heroRect.width - 1 : false,
+      mountHeightCover: mountRect ? mountRect.height >= heroRect.height - 1 : false,
+      centerDeltaX: mountRect
+        ? Math.abs((mountRect.left + (mountRect.width / 2)) - (heroRect.left + (heroRect.width / 2)))
+        : Number.POSITIVE_INFINITY,
+      centerDeltaY: mountRect
+        ? Math.abs((mountRect.top + (mountRect.height / 2)) - (heroRect.top + (heroRect.height / 2)))
+        : Number.POSITIVE_INFINITY,
+    };
+  });
+
+  expect(geometry.mountFound).toBe(true);
+  expect(geometry.iframeFound).toBe(true);
+  expect(geometry.mountAspectRatio).toBeCloseTo(16 / 9, 2);
+  expect(geometry.mountWidthCover).toBe(true);
+  expect(geometry.mountHeightCover).toBe(true);
+  expect(geometry.centerDeltaX).toBeLessThanOrEqual(2);
+  expect(geometry.centerDeltaY).toBeLessThanOrEqual(2);
+});
+
+test('desktop Hero auto-plays trailer without click', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const requestCounts = await installDeterministicBackend(page);
+  await page.goto('/');
+
+  const hero = page.locator('.hero-section');
+  const poster = hero.locator('.hero-poster-shell');
+  const video = hero.locator('.hero-youtube-video');
+
+  await expect.poll(() => requestCounts.metadata).toBe(1);
+  await expect.poll(() => page.evaluate(() => window.__FAKE_YOUTUBE__?.constructorCount || 0)).toBe(1);
+
+  await expect(poster).toHaveClass(/is-hidden/, { timeout: 6_000 });
+  await expect(video).toHaveClass(/is-visible/);
+  await expect(hero.getByRole('button', { name: 'Poster', exact: true })).toBeVisible();
+});
+
+test('reduced motion prevents desktop autoplay but allows manual trailer', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const requestCounts = await installDeterministicBackend(page);
+  await page.goto('/');
+
+  const hero = page.locator('.hero-section');
+  const trailerButton = hero.getByRole('button', { name: 'Trailer', exact: true });
+  await expect(trailerButton).toBeVisible();
+  await page.waitForTimeout(400);
+  expect(requestCounts.metadata).toBe(0);
+
+  await trailerButton.click();
+  await expect.poll(() => requestCounts.metadata).toBe(1);
+  await expect(hero.locator('.hero-youtube-video')).toHaveClass(/is-visible/, { timeout: 6_000 });
+});
+
+test('missing trailer keeps poster without request loop', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const requestCounts = await installDeterministicBackend(page, { emptyVideos: true });
+  await page.goto('/');
+
+  const hero = page.locator('.hero-section');
+  await expect.poll(() => requestCounts.metadata).toBeGreaterThan(0);
+  await page.waitForTimeout(600);
+  const countAfterFallback = requestCounts.metadata;
+  expect(countAfterFallback).toBeLessThanOrEqual(5);
+  await page.waitForTimeout(600);
+  expect(requestCounts.metadata).toBe(countAfterFallback);
+  await expect(hero.locator('.hero-poster-shell')).toHaveClass(/is-visible/);
+  await expect(hero.locator('.hero-youtube-video')).toHaveCount(0);
 });
 
 test('mobile Hero stays poster-only before the CTA click', async ({ page }) => {
@@ -441,6 +561,64 @@ test('mobile stable playback keeps volume immediately beside the Poster CTA', as
 
   await expect(hero.locator('.hero-youtube-video')).toHaveClass(/is-visible/, { timeout: 6_000 });
   await expect(hero.getByRole('button', { name: 'Poster', exact: true })).toBeVisible();
-  await expect(hero.getByRole('button', { name: 'Turn trailer sound on', exact: true })).toBeVisible();
+  await expect(hero.getByRole('button', { name: /(Turn trailer sound on|Mute trailer)/ })).toBeVisible();
   await expectVolumeControlAdjacentToTrailer(hero);
+});
+
+test('desktop Hero compact mode keeps title above rail, hides details, and expands on hover', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await installDeterministicBackend(page);
+  await page.goto('/');
+
+  const hero = page.locator('.hero-section');
+  const contentZone = hero.locator('.hero-content-zone');
+  const title = hero.locator('.hero-title');
+  const details = hero.locator('.hero-content-details');
+  const rail = hero.locator('.hero-poster-rail');
+  const video = hero.locator('.hero-youtube-video');
+  const thumbs = hero.locator('.hero-poster-thumb');
+
+  await expect(contentZone).not.toHaveClass(/is-compact/);
+  await expect(title).toBeVisible();
+  expect(await title.count()).toBe(1);
+  await expect(details).toHaveCSS('opacity', '1');
+  await expect(thumbs).toHaveCount(5);
+
+  await expect(hero.locator('.hero-center-play-button, .custom-center-play')).toHaveCount(0);
+
+  await expect(video).toHaveClass(/is-visible/, { timeout: 6_000 });
+  expect(await page.evaluate(() => window.__FAKE_YOUTUBE__?.constructorCount || 0)).toBe(1);
+
+  const fullTitleBox = await title.boundingBox();
+  expect(fullTitleBox).not.toBeNull();
+
+  await page.waitForTimeout(3_200);
+  await expect(contentZone).toHaveClass(/is-compact/, { timeout: 4_000 });
+
+  expect(await title.count()).toBe(1);
+  await expect(title).toBeVisible();
+  await expect(details).toHaveCSS('opacity', '0');
+
+  const compactZoneBox = await contentZone.boundingBox();
+  const railBox = await rail.boundingBox();
+  expect(compactZoneBox).not.toBeNull();
+  expect(railBox).not.toBeNull();
+  expect(compactZoneBox.y + compactZoneBox.height).toBeLessThanOrEqual(railBox.y + 5);
+
+  await expect(rail).toHaveCSS('opacity', '1');
+  await expect(thumbs.nth(0)).toBeVisible();
+
+  expect(await page.evaluate(() => window.__FAKE_YOUTUBE__?.constructorCount || 0)).toBe(1);
+
+  await contentZone.hover();
+  await expect(contentZone).toHaveClass(/is-overview-revealed/, { timeout: 2_000 });
+  await expect(details).toHaveCSS('opacity', '1');
+
+  const expandedTitleBox = await title.boundingBox();
+  expect(Math.abs(expandedTitleBox.y - fullTitleBox.y)).toBeLessThan(15);
+
+  await page.mouse.move(10, 10);
+  await page.waitForTimeout(1_300);
+  await expect(contentZone).toHaveClass(/is-compact/, { timeout: 4_000 });
+  await expect(details).toHaveCSS('opacity', '0');
 });

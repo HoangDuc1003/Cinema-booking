@@ -103,13 +103,13 @@ export const useHeroContentDisclosure = ({
 
     if (stateRef.current !== 'expanded') return undefined;
 
+    const timers = timersRef.current;
     const timerId = scheduleTimer(() => {
       compact({ animate: true });
     }, HERO_COMPACT_PLAYBACK_MS);
 
     return () => {
       window.clearTimeout(timerId);
-      const timers = timersRef.current;
       timers.delete(timerId);
     };
   }, [
