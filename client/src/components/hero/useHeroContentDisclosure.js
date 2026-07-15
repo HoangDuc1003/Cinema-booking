@@ -2,10 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { HERO_PHASES, HERO_PLAYBACK_STATUS } from './heroMachine';
 
 export const HERO_COMPACT_PLAYBACK_MS = 3_000;
-const COMPACTING_TRANSITION_MS = 360;
-const EXPANDING_TRANSITION_MS = 750;
+const COMPACTING_TRANSITION_MS = 520;
+const EXPANDING_TRANSITION_MS = 650;
 const POINTER_ENTER_DELAY_MS = 100;
-const POINTER_LEAVE_DELAY_MS = 1000;
+export const HERO_POINTER_HOLD_MS = 3_000;
 const MOBILE_AUTO_COLLAPSE_MS = 6_000;
 
 export const useHeroContentDisclosure = ({
@@ -22,6 +22,7 @@ export const useHeroContentDisclosure = ({
   const [ctaActive, setCtaActive] = useState(false);
 
   const timersRef = useRef(new Set());
+  const pointerLeaveTimerRef = useRef(null);
   const stateRef = useRef(disclosureState);
   useEffect(() => {
     stateRef.current = disclosureState;
@@ -30,6 +31,15 @@ export const useHeroContentDisclosure = ({
   const clearAllTimers = useCallback(() => {
     timersRef.current.forEach((timerId) => window.clearTimeout(timerId));
     timersRef.current.clear();
+    pointerLeaveTimerRef.current = null;
+  }, []);
+
+  const clearPointerLeaveTimer = useCallback(() => {
+    const timerId = pointerLeaveTimerRef.current;
+    if (timerId == null) return;
+    window.clearTimeout(timerId);
+    timersRef.current.delete(timerId);
+    pointerLeaveTimerRef.current = null;
   }, []);
 
   const scheduleTimer = useCallback((fn, delayMs) => {
@@ -128,16 +138,18 @@ export const useHeroContentDisclosure = ({
 
   // Handle pointer hover intent (80-120ms enter, 900-1300ms leave)
   const handlePointerEnter = useCallback(() => {
+    clearPointerLeaveTimer();
     setIsPointerActive(true);
     if (stateRef.current === 'compact' || stateRef.current === 'compacting') {
       scheduleTimer(() => {
         expand({ animate: true });
       }, POINTER_ENTER_DELAY_MS);
     }
-  }, [expand, scheduleTimer]);
+  }, [clearPointerLeaveTimer, expand, scheduleTimer]);
 
   const handlePointerLeave = useCallback(() => {
     setIsPointerActive(false);
+    clearPointerLeaveTimer();
     if (
       !reducedMotion
       && phase !== HERO_PHASES.POSTER
@@ -147,21 +159,24 @@ export const useHeroContentDisclosure = ({
       && !isFocusActive
       && !ctaActive
     ) {
-      scheduleTimer(() => {
+      pointerLeaveTimerRef.current = scheduleTimer(() => {
+        pointerLeaveTimerRef.current = null;
         compact({ animate: true });
-      }, POINTER_LEAVE_DELAY_MS);
+      }, HERO_POINTER_HOLD_MS);
     }
-  }, [compact, ctaActive, isFocusActive, phase, playbackStatus, posterVisible, reducedMotion, scheduleTimer, visualReady]);
+  }, [clearPointerLeaveTimer, compact, ctaActive, isFocusActive, phase, playbackStatus, posterVisible, reducedMotion, scheduleTimer, visualReady]);
 
   const handleFocusCapture = useCallback(() => {
+    clearPointerLeaveTimer();
     setIsFocusActive(true);
     if (stateRef.current !== 'expanded') expand({ animate: true });
-  }, [expand]);
+  }, [clearPointerLeaveTimer, expand]);
 
   const handleBlurCapture = useCallback((event) => {
     const nextTarget = event.relatedTarget;
     if (event.currentTarget && nextTarget && event.currentTarget.contains(nextTarget)) return;
     setIsFocusActive(false);
+    clearPointerLeaveTimer();
     if (
       !reducedMotion
       && phase !== HERO_PHASES.POSTER
@@ -171,11 +186,12 @@ export const useHeroContentDisclosure = ({
       && !isPointerActive
       && !ctaActive
     ) {
-      scheduleTimer(() => {
+      pointerLeaveTimerRef.current = scheduleTimer(() => {
+        pointerLeaveTimerRef.current = null;
         compact({ animate: true });
-      }, POINTER_LEAVE_DELAY_MS);
+      }, HERO_POINTER_HOLD_MS);
     }
-  }, [compact, ctaActive, isPointerActive, phase, playbackStatus, posterVisible, reducedMotion, scheduleTimer, visualReady]);
+  }, [clearPointerLeaveTimer, compact, ctaActive, isPointerActive, phase, playbackStatus, posterVisible, reducedMotion, scheduleTimer, visualReady]);
 
   // Touch / mobile tap title to toggle or expand
   const handleCompactTitleClick = useCallback(() => {

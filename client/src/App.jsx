@@ -7,6 +7,7 @@ import Footer from './components/Footer'
 import ErrorBoundary from './components/ErrorBoundary'
 import { useAppContext } from './context/AppContext';
 import Loading from './components/Loading';
+import HomeBootLoader from './components/HomeBootLoader';
 
 const Home = lazy(() => import('./pages/Home'));
 const Movies = lazy(() => import('./pages/Movies'));
@@ -26,15 +27,8 @@ const ListShows = lazy(() => import('./pages/admin/ListShows'));
 const ListBookings = lazy(() => import('./pages/admin/ListBookings'));
 const HeroSettings = lazy(() => import('./pages/admin/HeroSettings'));
 
-// Suspense fallback — lightweight skeleton instead of text
-const PageFallback = () => (
-  <div className="min-h-[60vh] flex items-center justify-center">
-    <div className="flex flex-col items-center gap-4">
-      <div className="w-12 h-12 rounded-full border-2 border-t-primary border-white/10 animate-spin" />
-      <p className="text-gray-500 text-sm font-medium tracking-wide">Loading...</p>
-    </div>
-  </div>
-);
+// Keep the cinematic loading surface consistent while route chunks resolve.
+const PageFallback = () => <HomeBootLoader fadeMs={0} />;
 
 const App = () => {
   // Hide navbar/footer on admin routes

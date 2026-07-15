@@ -1,5 +1,4 @@
 import express from 'express';
-import cors from 'cors';
 import 'dotenv/config';
 import { clerkMiddleware } from '@clerk/express';
 import connectDB from '../configs/db.js';
@@ -11,6 +10,7 @@ import userRouter from '../routes/userRoutes.js';
 import { stripeWebhooks } from '../controllers/stripeWebhooks.js';
 import { getPaymentConfigStatus } from '../configs/runtimeConfig.js';
 import { connectCloudinary } from '../configs/cloudinary.js';
+import { createCorsMiddleware, handleCorsError } from '../middleware/corsPolicy.js';
 
 connectCloudinary();
 
@@ -25,14 +25,15 @@ process.on('uncaughtException', (error) => {
 
 const app = express();
 
+// CORS and preflight must complete before body parsing, Clerk and database work.
+// The policy uses a normalized explicit allowlist and never combines `*` with credentials.
+app.use(createCorsMiddleware());
+app.use(handleCorsError);
+
 // Stripe signature verification requires the untouched request bytes.
 app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), stripeWebhooks);
 
 app.use(express.json({ limit: '1mb' }));
-app.use(cors({
-    origin: process.env.CLIENT_URL || true,
-    credentials: true,
-}));
 
 app.get('/', (req, res) => res.send('Server is live!'));
 app.get('/api/health', async (req, res) => {

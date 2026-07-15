@@ -59,7 +59,7 @@ export const HERO_PLAYING_HYSTERESIS_MS = 250;
 // YouTube may briefly render transient center bezels after programmatic playback;
 // the poster stays above the player until this quarantine has elapsed AND samples
 // show continuous currentTime advancement without buffering.
-export const HERO_VISUAL_READY_CONFIRM_MS = 1_200;
+export const HERO_VISUAL_READY_CONFIRM_MS = 2_000;
 export const HERO_PLAYBACK_TIMEOUT_MS = 8_000;
 
 export const createInitialHeroState = ({ movieKey = '', generation = 0, audioPreference = HERO_AUDIO_STATUS.PREFERRED_ON } = {}) => ({

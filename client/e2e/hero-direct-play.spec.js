@@ -64,6 +64,14 @@ const installDeterministicBackend = async (page, {
 } = {}) => {
   const requestCounts = { iframeApi: 0, nativeVideo: 0 };
 
+  await page.addInitScript(() => {
+    window.__NITROCINE_HOME_TIMINGS__ = {
+      loaderMs: 0,
+      fadeMs: 0,
+      posterWarmupMs: 0,
+    };
+  });
+
   await page.route('https://www.youtube.com/iframe_api', (route) => {
     requestCounts.iframeApi += 1;
     return route.fulfill({
@@ -107,6 +115,12 @@ const installDeterministicBackend = async (page, {
     status: 200,
     contentType: 'application/json',
     body: JSON.stringify({ success: true, data: { results: finalMoviesList } }),
+  }));
+
+  await page.route(/\/api\/show\/tmdb\/movie\/[^/]+\/videos(?:\?|$)/, (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, data: { results: [] } }),
   }));
 
   await page.route(/\/api\/show\/all(?:\?|$)/, (route) => route.fulfill({
@@ -293,8 +307,13 @@ test.describe('Native Hero Lifecycle', () => {
 
     // Wait for compact state
     await page.waitForTimeout(3500); // Wait out 3s stable compact
-    // the layout logic requires visual gate, let's force the state manually if test is flaky
-    await contentZone.evaluate(el => el.classList.add('is-compact'));
+    // The dummy MP4 intentionally never reaches the visual gate, so exercise
+    // the compact CSS contract with a complete deterministic class snapshot.
+    await contentZone.evaluate((el) => {
+      el.classList.add('is-compact');
+      el.classList.remove('is-overview-revealed', 'is-expanded', 'is-expanding');
+    });
+    await rail.evaluate(el => el.classList.add('is-hidden'));
 
     await expect(title).toBeVisible();
     await expect(details).toHaveCSS('display', 'none');

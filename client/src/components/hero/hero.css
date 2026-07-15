@@ -318,7 +318,9 @@
   width: clamp(29rem, 42vw, 38.75rem);
   min-height: 0;
   outline: none;
-  transition: bottom 650ms cubic-bezier(0.22, 1, 0.36, 1), min-height 650ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition:
+    bottom 650ms cubic-bezier(0.22, 1, 0.36, 1),
+    min-height 650ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .hero-title {
@@ -329,7 +331,11 @@
   line-height: 1.02;
   letter-spacing: -0.045em;
   transform-origin: left bottom;
-  transition: transform 650ms cubic-bezier(0.22, 1, 0.36, 1), margin 650ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition:
+    transform 650ms cubic-bezier(0.22, 1, 0.36, 1),
+    margin 650ms cubic-bezier(0.22, 1, 0.36, 1),
+    font-size 650ms cubic-bezier(0.22, 1, 0.36, 1),
+    line-height 650ms cubic-bezier(0.22, 1, 0.36, 1);
   text-wrap: balance;
 }
 
@@ -350,19 +356,12 @@
 .hero-content-zone.is-compacting {
   top: auto;
   bottom: var(--hero-content-compact-bottom);
-  width: fit-content;
-  max-width: min(70vw, 26rem);
   min-height: 0;
-  padding: 0.4rem 0.65rem;
+  padding: 0;
   margin: 0;
-  border-radius: 0.55rem;
-  background:
-    linear-gradient(
-      90deg,
-      rgba(4, 5, 8, 0.62),
-      rgba(4, 5, 8, 0.18),
-      transparent
-    );
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .hero-content-zone.is-compact .hero-title,
@@ -374,9 +373,9 @@
 
 .hero-content-zone.is-compact .hero-title,
 .hero-content-zone.is-compacting .hero-title {
-  margin: 0;
-  font-size: clamp(1.05rem, 1.55vw, 1.45rem);
-  line-height: 1.1;
+  margin: 0 0 0.65rem;
+  font-size: clamp(2rem, 3.4vw, 3rem);
+  line-height: 1.02;
   transform: none;
   white-space: nowrap;
   overflow: hidden;
@@ -386,23 +385,31 @@
 .hero-content-zone.is-compact .hero-title__word,
 .hero-content-zone.is-compacting .hero-title__word {
   display: inline;
+  opacity: 1;
   white-space: nowrap;
 }
 
-.hero-content-zone.is-compact:not(.is-overview-revealed) .hero-content-details,
-.hero-content-zone.is-compacting:not(.is-overview-revealed) .hero-content-details {
-  display: none;
+.hero-content-zone.is-compact:not(.is-overview-revealed) .hero-overview,
+.hero-content-zone.is-compacting:not(.is-overview-revealed) .hero-overview {
   opacity: 0;
   max-height: 0;
-  max-width: 0;
   margin: 0;
   pointer-events: none;
-  transform: translate3d(0, 0.75rem, 0);
-  overflow: hidden;
+  transform: translate3d(0, 0.65rem, 0);
 }
 
 .hero-content-zone.is-expanding {
-  animation: hero-content-spring-open 750ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: none;
+}
+
+.hero-content-zone.is-compact .hero-genres,
+.hero-content-zone.is-compacting .hero-genres {
+  margin-bottom: 0.55rem;
+}
+
+.hero-content-zone.is-compact .hero-meta,
+.hero-content-zone.is-compacting .hero-meta {
+  margin-bottom: 0.75rem;
 }
 
 .hero-content-zone.is-compact:focus-visible {
@@ -817,7 +824,6 @@
   .hero-media__breath { opacity: 0.03 !important; }
   .hero-transition-flare { opacity: 0 !important; }
 }
-
 
 
 

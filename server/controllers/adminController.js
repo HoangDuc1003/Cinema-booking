@@ -62,16 +62,6 @@ export const getHeroSettings = async (req,res) =>{
     }
 }
 
-export const getHeroSettings = async (req,res) =>{
-    try {
-        const hero = await getAdminHomeHero();
-        res.json({success:true,hero});
-    } catch (error) {
-        console.log(error);
-        return res.status(500).json({ success: false, message: error.message });
-    }
-}
-
 export const updateHeroSettings = async (req,res) =>{
     try {
         const settings = await updateHomeHero(req.body || {});

@@ -309,6 +309,30 @@ const HeroYouTubeVideo = ({
     return undefined;
   }, [active, clearAllTimers, enabled, generation, onPlaybackPaused, onVisualHidden]);
 
+  useEffect(() => {
+    if (!player || !active || !visible || muted) return undefined;
+
+    try {
+      player.setVolume?.(Math.max(0, Math.min(100, Number(volume) || 60)));
+      player.unMute?.();
+    } catch {
+      handleMutedFallback({ generation, videoId });
+      return undefined;
+    }
+
+    const verificationTimer = window.setTimeout(() => {
+      try {
+        if (player.isMuted?.() === true) {
+          handleMutedFallback({ generation, videoId });
+        }
+      } catch {
+        // Audio verification is best-effort across YouTube player versions.
+      }
+    }, 300);
+
+    return () => window.clearTimeout(verificationTimer);
+  }, [active, generation, handleMutedFallback, muted, player, videoId, visible, volume]);
+
   useEffect(() => () => clearAllTimers(), [clearAllTimers]);
 
   // Dynamic cover geometry via ResizeObserver
