@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useEffect, useState } from 'react'
+import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import HeroSection from '../components/HeroSection'
 
 const FeatureSection = lazy(() => import('../components/FeatureSection'))
@@ -39,30 +39,24 @@ const TrailerSkeleton = () => (
 
 const Home = () => {
   const [ready, setReady] = useState({ hero: false, feature: false, trailer: false })
-  const [loadingPhase, setLoadingPhase] = useState(true)
-
-  const allReady = ready.hero && ready.feature && ready.trailer
-
-  useEffect(() => {
-    if (allReady && loadingPhase) {
-      setLoadingPhase(false)
-    }
-  }, [allReady, loadingPhase])
+  const [timedOut, setTimedOut] = useState(false)
+  const timedOutRef = useRef(false)
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      setLoadingPhase(false)
+      timedOutRef.current = true
+      setTimedOut(true)
     }, 5000)
     return () => clearTimeout(timer)
   }, [])
 
-  const handleLoaded = (section) => {
+  const handleLoaded = useCallback((section) => {
     setReady((prev) => ({ ...prev, [section]: true }))
-  }
+  }, [])
 
-  const showHero = !loadingPhase || ready.hero
-  const showFeature = !loadingPhase || ready.feature
-  const showTrailer = !loadingPhase || ready.trailer
+  const showHero = timedOut || ready.hero
+  const showFeature = timedOut || ready.feature
+  const showTrailer = timedOut || ready.trailer
 
   return (
     <>
