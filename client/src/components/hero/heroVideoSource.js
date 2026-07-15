@@ -121,21 +121,30 @@ export const resolveHeroVideoSource = (trailer) => (
 
 export const resolveConfiguredHeroVideoSource = (movie) => {
   if (!movie || typeof movie !== 'object') return null;
-  if (movie.heroVideoStatus && movie.heroVideoStatus !== 'ready') return null;
 
-  const videoUrl = movie.heroVideoUrl
-    || movie.backgroundVideoUrl
-    || movie.hero_video_url
-    || movie.background_video_url
-    || '';
-  const mimeType = movie.heroVideoMimeType
-    || movie.backgroundVideoMimeType
-    || movie.hero_video_mime_type
-    || movie.background_video_mime_type
-    || '';
+  const src = typeof movie.heroVideoUrl === 'string'
+    ? movie.heroVideoUrl.trim()
+    : typeof movie.background_video_url === 'string'
+      ? movie.background_video_url.trim()
+      : '';
+  if (!src || isIframeVideoUrl(src)) return null;
 
-  return resolveNativeHeroVideoSource({ videoUrl, mimeType });
+  if (movie.heroVideoStatus !== undefined && movie.heroVideoStatus !== 'ready') {
+    return null;
+  }
+
+  const explicitMimeType = getExplicitVideoMimeType(movie.heroVideoMimeType)
+    || getExplicitVideoMimeType(movie.background_video_mime_type);
+  const mimeType = explicitMimeType || inferNativeVideoMimeType(src);
+  if (!mimeType) return null;
+
+  return {
+    kind: 'native',
+    src,
+    mimeType,
+  };
 };
+
 
 export const canUseHeroBackgroundVideo = (movie, { mockEnabled = false } = {}) => (
   Boolean(mockEnabled) || Boolean(resolveConfiguredHeroVideoSource(movie))

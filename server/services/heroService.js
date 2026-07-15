@@ -4,6 +4,7 @@ import Show from '../models/Show.js';
 import SiteConfig from '../models/SiteConfig.js';
 import { deleteKeys, rememberJson } from './cacheService.js';
 import { redisKeys, redisTtl } from './redisKeys.js';
+import { getPublicHomePayload } from './catalogRefreshService.js';
 
 const HERO_CONFIG_KEY = 'homeHero';
 const HERO_LIMIT = 5;
@@ -172,14 +173,22 @@ const buildHomeHeroPayload = async () => {
         if (movies.length) effectiveMode = 'manual';
     }
 
-    if (!movies.length) movies = await loadAutoHeroMovies();
+    if (!movies.length) {
+        try {
+            const payload = await getPublicHomePayload(5, 'US', new Date());
+            movies = payload.hero || [];
+        } catch (error) {
+            console.error('[heroService] Failed to load hero movies from weekly catalog:', error);
+            movies = await loadAutoHeroMovies();
+        }
+    }
 
     return {
         settings: {
             mode: config.mode,
             effectiveMode,
             movieIds: config.movieIds,
-            dailyPage: getDailyTmdbPage(),
+            dailyPage: 1,
             updatedAt: config.updatedAt,
         },
         movies,

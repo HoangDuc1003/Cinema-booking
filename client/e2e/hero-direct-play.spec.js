@@ -302,7 +302,7 @@ test.describe('Native Hero Lifecycle', () => {
     const hero = page.locator('.hero-section');
     const contentZone = hero.locator('.hero-content-zone');
     const title = hero.locator('.hero-title');
-    const details = hero.locator('.hero-content-details');
+    const details = hero.locator('.hero-overview');
     const rail = hero.locator('.hero-poster-rail');
 
     // Wait for compact state
@@ -316,13 +316,13 @@ test.describe('Native Hero Lifecycle', () => {
     await rail.evaluate(el => el.classList.add('is-hidden'));
 
     await expect(title).toBeVisible();
-    await expect(details).toHaveCSS('display', 'none');
+    await expect(details).toHaveCSS('max-height', '0px');
     await expect(rail).toHaveClass(/is-hidden/);
 
     // Hover
     await contentZone.hover();
     await contentZone.evaluate(el => el.classList.remove('is-compact'));
-    await expect(details).not.toHaveCSS('display', 'none');
+    await expect(details).not.toHaveCSS('max-height', '0px');
   });
 
   test('TEST J — FIVE MOVIES, ONE VIDEO', async ({ page }) => {

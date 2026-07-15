@@ -3,6 +3,7 @@ import connectDB from '../configs/db.js';
 import Movie from '../models/Movie.js';
 import { getJson, setJson } from './cacheService.js';
 import { redisKeys, redisTtl } from './redisKeys.js';
+import { getPublicHomePayload } from './catalogRefreshService.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_LIMIT = 10;
@@ -337,99 +338,39 @@ export const getPublicHomeNowShowing = async ({
 } = {}) => {
     const limit = parseHomeNowShowingLimit(rawLimit);
     const region = normalizeHomeNowShowingRegion(rawRegion);
-    const cacheKey = redisKeys.homeNowShowing(limit, region);
-    const lastGoodKey = redisKeys.homeNowShowingLastGood(limit, region);
-    const cached = await getJson(cacheKey);
-    if (hasMovies(cached)) return { value: cached, cache: 'hit' };
-
-    let remoteSources;
     try {
-        remoteSources = await fetchTmdbHomeNowShowingSources({ region });
+        const payload = await getPublicHomePayload(limit, region, now);
+        const results = (payload.nowShowing || []).slice(0, limit);
+        return {
+            value: {
+                results,
+                meta: {
+                    region,
+                    limit,
+                    source: 'weekly-catalog',
+                    partial: false,
+                    generatedAt: now.toISOString(),
+                },
+            },
+            cache: 'hit',
+        };
     } catch (error) {
-        console.warn('[homeNowShowing] TMDB sources unavailable:', error.message);
-        remoteSources = {
-            nowPlayingPages: [[], []],
-            trendingMovies: [],
-            failures: ['now-playing-page-1', 'now-playing-page-2', 'trending-week'],
-            sources: {
-                nowPlaying: { requested: 2, succeeded: 0 },
-                trending: { requested: 1, succeeded: 0 },
+        console.error('[homeNowShowingService] Failed to load from weekly catalog:', error);
+        return {
+            value: {
+                results: [],
+                meta: {
+                    region,
+                    limit,
+                    source: 'empty',
+                    partial: true,
+                    failures: [error.message],
+                    generatedAt: now.toISOString(),
+                },
             },
+            cache: 'bypass',
         };
     }
-
-    const remoteMovies = rankHomeNowShowingMovies({
-        nowPlayingPages: remoteSources.nowPlayingPages,
-        trendingMovies: remoteSources.trendingMovies,
-        limit,
-        now,
-    });
-    if (remoteMovies.length) {
-        const payload = buildPayload({
-            results: remoteMovies,
-            region,
-            limit,
-            source: 'tmdb',
-            partial: remoteSources.failures.length > 0,
-            sources: remoteSources.sources,
-            failures: remoteSources.failures,
-            now,
-        });
-        await Promise.all([
-            setJson(cacheKey, payload, redisTtl.movies),
-            setJson(lastGoodKey, payload, redisTtl.homeNowShowingLastGood),
-        ]);
-        return { value: payload, cache: 'miss' };
-    }
-
-    const lastGood = await getJson(lastGoodKey);
-    if (hasMovies(lastGood)) {
-        const payload = {
-            ...lastGood,
-            results: lastGood.results.slice(0, limit),
-            meta: {
-                ...lastGood.meta,
-                region,
-                limit,
-                source: 'last-good',
-                partial: true,
-                stale: true,
-                failures: remoteSources.failures,
-                servedAt: now.toISOString(),
-            },
-        };
-        return { value: payload, cache: 'stale' };
-    }
-
-    const mongoMovies = await loadMongoFallbackMovies({ limit, now });
-    if (mongoMovies.length) {
-        const payload = buildPayload({
-            results: mongoMovies,
-            region,
-            limit,
-            source: 'mongodb',
-            partial: true,
-            sources: remoteSources.sources,
-            failures: remoteSources.failures,
-            now,
-        });
-        await setJson(cacheKey, payload, redisTtl.movies);
-        return { value: payload, cache: 'fallback' };
-    }
-
-    return {
-        value: buildPayload({
-            results: [],
-            region,
-            limit,
-            source: 'empty',
-            partial: true,
-            sources: remoteSources.sources,
-            failures: remoteSources.failures,
-            now,
-        }),
-        cache: 'bypass',
-    };
 };
 
 export default getPublicHomeNowShowing;

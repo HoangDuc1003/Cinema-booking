@@ -8,6 +8,7 @@ import { redisKeys, redisTtl } from '../services/redisKeys.js';
 import { getPublicHomeHero } from '../services/heroService.js';
 import { getPublicHomeNowShowing } from '../services/homeNowShowingService.js';
 import { fetchTmdbImage } from '../services/tmdbImageService.js';
+import { getPublicHomePayload } from '../services/catalogRefreshService.js';
 
 const tmdbHeaders = () => ({ Authorization: `Bearer ${process.env.TMDB_API_KEY}` });
 const setCacheHeader = (res, cache) => res.set('X-Cache', cache);
@@ -379,9 +380,10 @@ export const getShows = async (req, res) => {
 
             if (uniqueMovies.length < 10) {
                 try {
-                    const data = await fetchTmdbJson('/movie/now_playing', { language: 'en-US', page: 1 });
-                    for (const movie of data.results || []) {
-                        const movieId = String(movie.id);
+                    const payload = await getPublicHomePayload(10, 'US', new Date());
+                    const catalogMovies = payload.nowShowing || [];
+                    for (const movie of catalogMovies) {
+                        const movieId = String(movie._id || movie.id);
                         if (seenIds.has(movieId)) continue;
                         uniqueMovies.push({
                             _id: movieId,
@@ -395,7 +397,7 @@ export const getShows = async (req, res) => {
                         seenIds.add(movieId);
                     }
                 } catch (error) {
-                    console.warn('[getShows] TMDB unavailable, continuing with MongoDB:', error.message);
+                    console.warn('[getShows] Catalog payload unavailable, continuing with MongoDB:', error.message);
                 }
             }
 

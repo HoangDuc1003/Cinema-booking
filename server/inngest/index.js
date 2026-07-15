@@ -1,8 +1,8 @@
 import { Inngest } from 'inngest';
 import connectDB from '../configs/db.js';
 import User from '../models/User.js';
-import { importTrendingMoviesLogic } from '../services/movieService.js';
 import { reconcileHeroAssets } from '../services/heroVideoService.js';
+import { getISOWeekKey, buildWeeklyCatalogBatch, activateCatalogBatch, rotateActiveCatalogSlot } from '../services/catalogRefreshService.js';
 
 // Gracefully handle missing Inngest keys (avoids crashing on Vercel)
 let inngest;
@@ -12,13 +12,25 @@ try {
     // Create Inngest client
     inngest = new Inngest({ id: "Cinema-booking" });
 
-    // Background job: Daily trending movie import
-    const dailyTrendingImport = inngest.createFunction(
-        { id: "daily-trending-import", cron: "0 0 * * *" },
+    // Background job: Weekly catalog refresh
+    const weeklyCatalogRefresh = inngest.createFunction(
+        { id: "weekly-catalog-refresh", cron: "TZ=Asia/Ho_Chi_Minh 0 3 * * 1" },
         async () => {
             await connectDB();
-            const result = await importTrendingMoviesLogic();
-            return { success: true, count: result.count };
+            const weekKey = getISOWeekKey(new Date());
+            const { batch, movies } = await buildWeeklyCatalogBatch(weekKey);
+            await activateCatalogBatch(batch._id, movies);
+            return { success: true, batchId: batch._id };
+        }
+    );
+
+    // Background job: Rotate active catalog slot
+    const rotateActiveCatalogSlotJob = inngest.createFunction(
+        { id: "rotate-active-catalog-slot", cron: "TZ=Asia/Ho_Chi_Minh 0 8,20 * * *" },
+        async () => {
+            await connectDB();
+            await rotateActiveCatalogSlot();
+            return { success: true };
         }
     );
 
@@ -97,7 +109,8 @@ try {
         syncUserCreation,
         syncUserDeletion,
         syncUserUpdation,
-        dailyTrendingImport,
+        weeklyCatalogRefresh,
+        rotateActiveCatalogSlotJob,
         reconcileHeroAssetsJob
     ];
 } catch (error) {

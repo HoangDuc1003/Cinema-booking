@@ -7,6 +7,13 @@ const siteConfigSchema = new mongoose.Schema(
             mode: { type: String, enum: ['auto', 'manual'], default: 'auto' },
             movieIds: { type: [String], default: [] },
         },
+        catalog: {
+            activeBatchId: { type: mongoose.Schema.Types.ObjectId, ref: 'CatalogBatch' },
+            refreshing: { type: Boolean },
+            activeSlot: { type: Number },
+            lastRotationAt: { type: Date },
+            lastSuccessfulRefreshAt: { type: Date },
+        },
     },
     { timestamps: true },
 );

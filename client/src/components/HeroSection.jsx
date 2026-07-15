@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchHomeHero, fetchMovieTrailers } from '../services/tmdb';
+import { fetchHomeHero } from '../services/tmdb';
 import { dummyShowsData } from '../assets/assets';
 import Loading from './Loading';
 import HeroContent from './hero/HeroContent';
@@ -8,13 +8,7 @@ import HeroMedia from './hero/HeroMedia';
 import HeroPosterRail from './hero/HeroPosterRail';
 import HeroVideoRenderer from './hero/HeroVideoRenderer';
 import { buildHeroImageCandidates } from './hero/heroImages';
-import {
-  HERO_NATIVE_MOCK_FIXTURES,
-  isHeroTrailerMockEnabled,
-  resolveConfiguredHeroVideoSource,
-  resolveHeroVideoSource,
-  resolveHeroMockTrailers,
-} from './hero/heroMock';
+import { resolveConfiguredHeroVideoSource } from './hero/heroMock';
 import {
   HERO_FAILURE_REASONS,
   HERO_PHASES,
@@ -206,6 +200,10 @@ const HeroSection = ({
   const [posterWarmupComplete, setPosterWarmupComplete] = useState(() => (
     !autoPreview || (introComplete && posterWarmupMs <= 0)
   ));
+  const [catalogSource, setCatalogSource] = useState(() => {
+    const isMock = new URLSearchParams(window.location.search).get('heroMock') === '1';
+    return isMock ? 'mock' : 'fallback';
+  });
   const [revealedGeneration, setRevealedGeneration] = useState(null);
   const [heroVisible, setHeroVisible] = useState(() => typeof IntersectionObserver === 'undefined');
   const [documentVisible, setDocumentVisible] = useState(() => !document.hidden);
@@ -225,7 +223,6 @@ const HeroSection = ({
   const generationRef = useRef(machine.generation);
   const trailerCacheRef = useRef(new Map());
   const metadataRequestsRef = useRef(new Map());
-  const trailerPrefetchAttemptedRef = useRef(new Set());
   const attemptLockRef = useRef(null);
   const autoAttemptedKeysRef = useRef(new Set());
   const transitionLockRef = useRef(false);
@@ -241,7 +238,6 @@ const HeroSection = ({
   const automaticPreviewEligible = !reducedMotion
     && !saveData
     && (autoPreview ? !isMobileScreen : isLargeScreen);
-  const heroTrailerMockEnabled = isHeroTrailerMockEnabled(window.location.search, import.meta.env.DEV);
 
   const currentMovie = movies[currentIndex] || movies[0];
   const currentMovieKey = getHeroMovieKey(currentMovie, currentIndex);
@@ -319,12 +315,10 @@ const HeroSection = ({
   const loadHeroVideoSource = useCallback((
     targetMovie,
     targetKey,
-    { force = false, prefetch = false } = {},
+    { force = false } = {},
   ) => {
     if (force) {
       trailerCacheRef.current.delete(targetKey);
-      metadataRequestsRef.current.get(targetKey)?.controller.abort();
-      metadataRequestsRef.current.delete(targetKey);
     }
 
     const cachedSource = trailerCacheRef.current.get(targetKey);
@@ -336,58 +330,8 @@ const HeroSection = ({
       return Promise.resolve(configuredSource);
     }
 
-    const inFlight = metadataRequestsRef.current.get(targetKey);
-    if (inFlight) return inFlight.promise;
-
-    const controller = new AbortController();
-    const request = (async () => {
-      let trailers = [];
-      try {
-        trailers = await fetchMovieTrailers(targetMovie, { signal: controller.signal });
-      } catch (error) {
-        if (!heroTrailerMockEnabled || controller.signal.aborted) throw error;
-      }
-
-      let resolvedSource = trailers.map(resolveHeroVideoSource).find(Boolean) || null;
-      if (!resolvedSource && heroTrailerMockEnabled) {
-        resolvedSource = resolveHeroMockTrailers({
-          movieKey: targetKey,
-          movie: targetMovie,
-          fixtures: HERO_NATIVE_MOCK_FIXTURES,
-        }).map(resolveHeroVideoSource).find(Boolean) || null;
-      }
-
-      if (resolvedSource) trailerCacheRef.current.set(targetKey, resolvedSource);
-      return resolvedSource;
-    })().finally(() => {
-      const currentRequest = metadataRequestsRef.current.get(targetKey);
-      if (currentRequest?.controller === controller) metadataRequestsRef.current.delete(targetKey);
-    });
-
-    metadataRequestsRef.current.set(targetKey, { controller, promise: request, prefetch });
-    return request;
-  }, [heroTrailerMockEnabled]);
-
-  const preloadRemainingTrailerSources = useCallback((activeMovieKey) => {
-    if (reducedMotion || saveData || !heroVisible || !documentVisible) return;
-
-    moviesRef.current.forEach((movie, index) => {
-      const movieKey = getHeroMovieKey(movie, index);
-      if (
-        movieKey === activeMovieKey
-        || trailerCacheRef.current.has(movieKey)
-        || trailerPrefetchAttemptedRef.current.has(movieKey)
-      ) return;
-
-      trailerPrefetchAttemptedRef.current.add(movieKey);
-
-      void loadHeroVideoSource(movie, movieKey, { prefetch: true }).catch((error) => {
-        if (error?.name !== 'AbortError' && import.meta.env.DEV) {
-          console.warn(`Hero trailer prefetch failed for ${movieKey}:`, error.message);
-        }
-      });
-    });
-  }, [documentVisible, heroVisible, loadHeroVideoSource, reducedMotion, saveData]);
+    return Promise.resolve(null);
+  }, []);
 
   const startTrailerAttempt = useCallback(async ({ source = 'manual', forceMetadata = false } = {}) => {
     if (attemptLockRef.current) return;
@@ -432,17 +376,7 @@ const HeroSection = ({
 
       if (!videoSource) {
         attemptLockRef.current = null;
-        if (source === 'auto') {
-          resetToPoster(targetKey);
-          return;
-        }
-        dispatch({
-          type: 'TRAILER_FAILED',
-          generation,
-          reason: HERO_FAILURE_REASONS.MISSING_VIDEO,
-          retryCount,
-          now: getNow(),
-        });
+        resetToPoster(targetKey);
         return;
       }
 
@@ -543,13 +477,29 @@ const HeroSection = ({
       try {
         const data = await fetchHomeHero({ signal: controller.signal });
         if (controller.signal.aborted) return;
+
+        const isMock = new URLSearchParams(window.location.search).get('heroMock') === '1';
+        if (data && Array.isArray(data.movies) && data.movies.length) {
+          setCatalogSource(isMock ? 'mock' : 'server');
+        } else {
+          setCatalogSource(isMock ? 'mock' : 'fallback');
+        }
+
         const rawMovies = Array.isArray(data.movies) && data.movies.length ? data.movies : dummyShowsData;
-        const bestMovies = selectBestHeroMovies(rawMovies);
-        const validMovies = await validateMovieCandidates(bestMovies, controller.signal);
+        const orderedMovies = rawMovies.slice(0, HERO_MAX_MOVIES);
+
+        const validMovies = await validateMovieCandidates(orderedMovies, controller.signal);
         if (!controller.signal.aborted && validMovies.length) applyMovies(validMovies);
       } catch (error) {
         if (error?.name !== 'AbortError' && import.meta.env.DEV) {
           console.warn('Hero load error:', error.message);
+        }
+        if (!controller.signal.aborted) {
+          const isMock = new URLSearchParams(window.location.search).get('heroMock') === '1';
+          setCatalogSource(isMock ? 'mock' : 'fallback');
+          const fallbackMovies = selectBestHeroMovies(dummyShowsData);
+          const validMovies = await validateMovieCandidates(fallbackMovies, controller.signal);
+          if (validMovies.length) applyMovies(validMovies);
         }
       } finally {
         if (!controller.signal.aborted) {
@@ -863,38 +813,23 @@ const HeroSection = ({
   const handlePlaybackStable = useCallback(({ generation, now }) => {
     if (generation === generationRef.current) {
       attemptLockRef.current = null;
-      preloadRemainingTrailerSources(machineRef.current.movieKey);
     }
     dispatch({ type: 'PLAYBACK_STABLE', generation, now });
-  }, [preloadRemainingTrailerSources]);
+  }, []);
 
   const revealVerifiedVideo = useCallback(({ generation }) => {
     if (generation !== generationRef.current) return;
     pendingVisualReadyRef.current = null;
     setRevealedGeneration(generation);
     dispatch({ type: 'VISUAL_READY', generation });
-    setMuted(!(soundPreferred && !autoplaySoundBlocked));
-  }, [autoplaySoundBlocked, soundPreferred]);
+    setMuted(true);
+  }, []);
 
   const handleVisualReady = useCallback((payload) => {
-    if (!posterWarmupComplete) {
-      pendingVisualReadyRef.current = payload;
-      return;
-    }
     revealVerifiedVideo(payload);
-  }, [posterWarmupComplete, revealVerifiedVideo]);
+  }, [revealVerifiedVideo]);
 
-  useEffect(() => {
-    if (!posterWarmupComplete) return;
-    const pending = pendingVisualReadyRef.current;
-    const currentMachine = machineRef.current;
-    if (
-      !pending
-      || pending.generation !== currentMachine.generation
-      || currentMachine.playbackStatus !== HERO_PLAYBACK_STATUS.STABLE
-    ) return;
-    revealVerifiedVideo(pending);
-  }, [posterWarmupComplete, revealVerifiedVideo]);
+
 
   const handleVisualHidden = useCallback(({ generation }) => {
     pendingVisualReadyRef.current = null;
@@ -976,6 +911,7 @@ const HeroSection = ({
       data-intro-complete={introComplete ? 'true' : 'false'}
       data-poster-warmup-complete={posterWarmupComplete ? 'true' : 'false'}
       data-video-visible={videoVisible ? 'true' : 'false'}
+      data-catalog-source={catalogSource}
     >
       <HeroMedia
         key={`media-${currentMovieKey}-${posterCandidates.join('|')}`}

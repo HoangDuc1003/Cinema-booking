@@ -77,16 +77,20 @@ body {
 }
 
 .ambient-glow--page {
-  inset: 0 0 auto;
-  height: 32rem;
+  inset: 0;
 }
 
 .ambient-glow--page::before {
-  inset: -35% -12% -10%;
+  inset: -10%;
   background:
-    radial-gradient(circle at 86% 4%, rgba(248, 69, 101, 0.7), transparent 31%),
-    radial-gradient(circle at 8% 66%, rgba(90, 22, 55, 0.72), transparent 38%),
-    radial-gradient(circle at 50% 18%, rgba(61, 79, 190, 0.35), transparent 34%);
+    radial-gradient(circle at 15% 5%, rgba(248, 69, 101, 0.6), transparent 25%),
+    radial-gradient(circle at 85% 10%, rgba(90, 22, 55, 0.6), transparent 30%),
+    radial-gradient(circle at 45% 25%, rgba(61, 79, 190, 0.3), transparent 35%),
+    radial-gradient(circle at 10% 45%, rgba(248, 69, 101, 0.4), transparent 25%),
+    radial-gradient(circle at 75% 55%, rgba(90, 22, 55, 0.5), transparent 30%),
+    radial-gradient(circle at 30% 75%, rgba(61, 79, 190, 0.4), transparent 35%),
+    radial-gradient(circle at 90% 85%, rgba(248, 69, 101, 0.5), transparent 25%),
+    radial-gradient(circle at 50% 95%, rgba(90, 22, 55, 0.6), transparent 30%);
 }
 
 .ambient-glow--header::before {
@@ -98,7 +102,7 @@ body {
 }
 
 .catalog-page-shell {
-  background: linear-gradient(180deg, rgba(11, 25, 49, 0.58), rgba(6, 7, 12, 0) 28rem);
+  background: linear-gradient(180deg, rgba(11, 25, 49, 0.58) 0%, rgba(11, 25, 49, 0.2) 100%);
 }
 
 .catalog-header {
