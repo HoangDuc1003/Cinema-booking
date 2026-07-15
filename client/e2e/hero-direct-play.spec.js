@@ -64,14 +64,6 @@ const installDeterministicBackend = async (page, {
 } = {}) => {
   const requestCounts = { iframeApi: 0, nativeVideo: 0 };
 
-  await page.addInitScript(() => {
-    window.__NITROCINE_HOME_TIMINGS__ = {
-      loaderMs: 0,
-      fadeMs: 0,
-      posterWarmupMs: 0,
-    };
-  });
-
   await page.route('https://www.youtube.com/iframe_api', (route) => {
     requestCounts.iframeApi += 1;
     return route.fulfill({

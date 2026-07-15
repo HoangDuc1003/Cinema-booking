@@ -22,6 +22,31 @@ const HeroSettings = () => {
   const [selectedIds, setSelectedIds] = useState([]);
   const [availableMovies, setAvailableMovies] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
+  
+  const [dryRun, setDryRun] = useState(false);
+  const [refreshingCatalog, setRefreshingCatalog] = useState(false);
+  const [refreshStatus, setRefreshStatus] = useState('');
+
+  const handleCatalogRefresh = async () => {
+    try {
+      setRefreshingCatalog(true);
+      setRefreshStatus('Refreshing...');
+      const { data } = await axios.post('/api/admin/catalog/refresh', { dryRun });
+      if (data.success) {
+        setRefreshStatus('Success');
+        toast.success(data.dryRun ? 'Dry run completed successfully.' : 'Catalog refreshed successfully.');
+      } else {
+        setRefreshStatus('Failed');
+        toast.error(data.message || 'Catalog refresh failed.');
+      }
+    } catch (error) {
+      setRefreshStatus('Failed');
+      toast.error(error.response?.data?.message || error.message || 'Catalog refresh failed.');
+    } finally {
+      setRefreshingCatalog(false);
+    }
+  };
+
 
   const movieById = useMemo(() => {
     return new Map(availableMovies.map((movie) => [String(movie._id || movie.id), movie]));
@@ -150,6 +175,46 @@ const HeroSettings = () => {
               <SaveIcon className="w-4 h-4" />
               {saving ? 'Saving' : 'Save'}
             </button>
+          </div>
+        </div>
+
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-4 bg-white/[0.04] border border-white/10 rounded-lg">
+          <div>
+            <p className="text-sm uppercase tracking-widest text-gray-400">Weekly Catalog Pool</p>
+            <p className="text-gray-300 mt-1">Manually trigger a weekly catalog refresh. This will rebuild the catalog pool from TMDB.</p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+            <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={dryRun}
+                onChange={(e) => setDryRun(e.target.checked)}
+                className="rounded border-white/10 bg-black/30 text-primary focus:ring-0 w-4 h-4"
+              />
+              Dry Run
+            </label>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={handleCatalogRefresh}
+                disabled={refreshingCatalog}
+                className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary hover:bg-primary-dull disabled:opacity-60 transition"
+              >
+                {refreshingCatalog ? 'Refreshing...' : 'Refresh Catalog'}
+              </button>
+
+              {refreshStatus && (
+                <span className={`text-sm font-medium ${
+                  refreshStatus === 'Success' ? 'text-green-500' :
+                  refreshStatus === 'Failed' ? 'text-red-500' :
+                  'text-gray-400'
+                }`}>
+                  {refreshStatus}
+                </span>
+              )}
+            </div>
           </div>
         </div>
 

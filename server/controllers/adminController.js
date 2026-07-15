@@ -3,6 +3,8 @@ import Show from "../models/Show.js"
 import User from "../models/User.js"
 import { getAdminHomeHero, updateHomeHero } from "../services/heroService.js"
 import { getUploadSignature, commitHeroVideo, removeHeroVideo } from "../services/heroVideoService.js"
+import { refreshWeeklyCatalog } from "../services/catalogRefreshService.js"
+
 export const isAdmin = async (req,res) => {
     res.json({success:true, isAdmin:true})
 }
@@ -105,3 +107,15 @@ export const removeHeroVideoAction = async (req, res) => {
         return res.status(500).json({ success: false, message: error.message });
     }
 }
+
+export const refreshCatalogAction = async (req, res) => {
+    try {
+        const { dryRun } = req.body;
+        const result = await refreshWeeklyCatalog({ dryRun: !!dryRun });
+        res.json({ success: true, ...result });
+    } catch (error) {
+        console.log(error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+}
+

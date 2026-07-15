@@ -6,7 +6,7 @@ import { fetchHomeNowShowing } from '../services/tmdb'
 import MovieGrid from './MovieGrid'
 import Loading from './Loading'
 
-const FeatureSection = () => {
+const FeatureSection = ({ onDataLoaded }) => {
   const navigate = useNavigate();
   const [movies, setMovies] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -23,7 +23,10 @@ const FeatureSection = () => {
       } catch (e) {
         console.error('FeatureSection load error', e);
       } finally {
-        if (mounted) setIsLoading(false);
+        if (mounted) {
+          setIsLoading(false);
+          if (onDataLoaded) onDataLoaded();
+        }
       }
     };
 

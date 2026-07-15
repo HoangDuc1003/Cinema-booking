@@ -7,7 +7,6 @@ import Footer from './components/Footer'
 import ErrorBoundary from './components/ErrorBoundary'
 import { useAppContext } from './context/AppContext';
 import Loading from './components/Loading';
-import HomeBootLoader from './components/HomeBootLoader';
 
 const Home = lazy(() => import('./pages/Home'));
 const Movies = lazy(() => import('./pages/Movies'));
@@ -28,7 +27,7 @@ const ListBookings = lazy(() => import('./pages/admin/ListBookings'));
 const HeroSettings = lazy(() => import('./pages/admin/HeroSettings'));
 
 // Keep the cinematic loading surface consistent while route chunks resolve.
-const PageFallback = () => <HomeBootLoader fadeMs={0} />;
+const PageFallback = () => <Loading />;
 
 const App = () => {
   // Hide navbar/footer on admin routes

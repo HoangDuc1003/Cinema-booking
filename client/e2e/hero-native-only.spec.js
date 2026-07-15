@@ -264,15 +264,6 @@ test.describe('Hero Component Invariants', () => {
   });
 
   test('Migrated - Entry loader', async ({ page }) => {
-    // Configure timings so that the loader stays visible for 1.5 seconds, then exits
-    await page.addInitScript(() => {
-      window.__NITROCINE_HOME_TIMINGS__ = {
-        loaderMs: 1500,
-        fadeMs: 200,
-        posterWarmupMs: 0, // reveal immediately
-      };
-    });
-
     const tracker = await setupHeroTest(page, [HERO_NATIVE_MOVIE]);
     await page.goto('/');
 
@@ -281,38 +272,28 @@ test.describe('Hero Component Invariants', () => {
     const video = hero.locator('video').first();
     const videoShell = hero.locator('.hero-video-shell').first();
 
-    // Verify loader displays initially
-    await expect(loader).toBeVisible();
-    await expect(loader.locator('.home-boot-loader__spinner')).toHaveCount(1);
-    await expect(loader.locator('.home-boot-loader__message')).toHaveText('Loading');
+    // Verify HomeBootLoader is not rendered
+    await expect(loader).toHaveCount(0);
+
+    // Verify home content is not inert
+    await expect(page.locator('[inert]')).toHaveCount(0);
 
     // Verify native video exists and is muted
     await expect(video).toHaveCount(1);
     expect(await video.evaluate((el) => el.muted)).toBe(true);
 
-    // Verify native video starts loading/playing behind the loader
+    // Verify video starts playing / is revealed immediately
     await expect.poll(() => video.evaluate((el) => el.readyState)).toBeGreaterThanOrEqual(2);
     const timeA = await video.evaluate((el) => el.currentTime);
     await page.waitForTimeout(200);
     const timeB = await video.evaluate((el) => el.currentTime);
     expect(timeB).toBeGreaterThan(timeA);
 
-    // Verify loader exits
-    await expect(loader).toHaveCount(0);
-
-    // Once loader finishes, verify video is revealed immediately (is-visible and data-video-safe="true")
     await expect(videoShell).toHaveClass(/is-visible/);
     await expect(videoShell).toHaveAttribute('data-video-safe', 'true');
   });
 
   test('Migrated - Poster safety (Buffering / Pause remask)', async ({ page }) => {
-    await page.addInitScript(() => {
-      window.__NITROCINE_HOME_TIMINGS__ = {
-        loaderMs: 0,
-        fadeMs: 0,
-        posterWarmupMs: 0,
-      };
-    });
 
     const tracker = await setupHeroTest(page, [HERO_NATIVE_MOVIE]);
     await page.goto('/');
@@ -380,13 +361,6 @@ test.describe('Hero Component Invariants', () => {
   });
 
   test('Migrated - Movie switching', async ({ page }) => {
-    await page.addInitScript(() => {
-      window.__NITROCINE_HOME_TIMINGS__ = {
-        loaderMs: 0,
-        fadeMs: 0,
-        posterWarmupMs: 0,
-      };
-    });
 
     const HERO_NATIVE_MOVIE_2 = {
       ...HERO_NATIVE_MOVIE,
@@ -427,13 +401,6 @@ test.describe('Hero Component Invariants', () => {
   });
 
   test('Migrated - Compact UI', async ({ page }) => {
-    await page.addInitScript(() => {
-      window.__NITROCINE_HOME_TIMINGS__ = {
-        loaderMs: 0,
-        fadeMs: 0,
-        posterWarmupMs: 0,
-      };
-    });
 
     const tracker = await setupHeroTest(page, [HERO_NATIVE_MOVIE]);
     await page.goto('/');

@@ -185,6 +185,7 @@ const HeroSection = ({
   autoPreview = false,
   introComplete = true,
   posterWarmupMs = 0,
+  onDataLoaded,
 }) => {
   const navigate = useNavigate();
   const initialBestMovies = selectBestHeroMovies(dummyShowsData);
@@ -505,6 +506,7 @@ const HeroSection = ({
         if (!controller.signal.aborted) {
           setIsLoading(false);
           setHeroCatalogSettled(true);
+          if (onDataLoaded) onDataLoaded();
         }
       }
     };

@@ -29,7 +29,7 @@ const getTrailerVideoId = (trailer) => {
   return candidates.map(extractYouTubeVideoId).find(Boolean) || null;
 };
 
-const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnly = false }) => {
+const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnly = false, onDataLoaded }) => {
   const [trailers, setTrailers]         = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading]       = useState(true);
@@ -136,7 +136,10 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
         console.error('Failed to load trailers:', e);
         setHasError(true);
       } finally {
-        if (mounted) setIsLoading(false);
+        if (mounted) {
+          setIsLoading(false);
+          if (onDataLoaded) onDataLoaded();
+        }
       }
     };
     load();
@@ -163,6 +166,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
         if (movieOnly && mounted) setHasError(true);
       } finally {
         if (movieOnly && mounted) setIsLoading(false);
+        if (mounted && onDataLoaded) onDataLoaded();
       }
     };
     load();

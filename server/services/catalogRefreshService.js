@@ -690,3 +690,18 @@ export async function getPublicHomePayload(limit = 10, region = 'US', now = new 
     
     return payload;
 }
+
+export async function refreshWeeklyCatalog(options = {}) {
+    const weekKey = getISOWeekKey(new Date());
+    if (options.dryRun) {
+        const { batch, movies } = await buildWeeklyCatalogBatch(weekKey);
+        const mongoose = (await import('mongoose')).default;
+        await mongoose.connection.collection('catalogbatches').deleteOne({ _id: batch._id });
+        return { success: true, dryRun: true, batchId: batch._id, movieCount: movies.length };
+    } else {
+        const { batch, movies } = await buildWeeklyCatalogBatch(weekKey);
+        await activateCatalogBatch(batch._id, movies);
+        return { success: true, batchId: batch._id, movieCount: movies.length };
+    }
+}
+
