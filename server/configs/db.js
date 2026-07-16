@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import ensureCriticalIndexes from './indexes.js';
 
 // Vercel serverless: reuse connection across warm invocations
 let cached = global._mongooseConnection;
@@ -30,7 +31,8 @@ const connectDB = async () => {
         socketTimeoutMS: Number(process.env.MONGODB_SOCKET_TIMEOUT_MS) || 15000,
         maxPoolSize: 10,
         family: 4
-    }).then((m) => {
+    }).then(async (m) => {
+        await ensureCriticalIndexes();
         console.log('[DB] MongoDB Connected ✔');
         return m;
     }).catch((err) => {

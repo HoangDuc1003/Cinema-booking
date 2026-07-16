@@ -3,7 +3,13 @@ import Show from "../models/Show.js"
 import User from "../models/User.js"
 import { getAdminHomeHero, updateHomeHero } from "../services/heroService.js"
 import { getUploadSignature, commitHeroVideo, removeHeroVideo } from "../services/heroVideoService.js"
-import { refreshWeeklyCatalog } from "../services/catalogRefreshService.js"
+import { randomUUID } from 'node:crypto';
+import { inngest } from '../inngest/index.js';
+import {
+    failQueuedCatalogRefreshRun,
+    getCatalogRefreshRun,
+    queueCatalogRefreshRun,
+} from "../services/catalogRefreshService.js"
 
 export const isAdmin = async (req,res) => {
     res.json({success:true, isAdmin:true})
@@ -109,13 +115,41 @@ export const removeHeroVideoAction = async (req, res) => {
 }
 
 export const refreshCatalogAction = async (req, res) => {
+    const runId = randomUUID();
     try {
         const { dryRun } = req.body;
-        const result = await refreshWeeklyCatalog({ dryRun: !!dryRun });
-        res.json({ success: true, ...result });
+        if (typeof dryRun !== 'undefined' && typeof dryRun !== 'boolean') {
+            return res.status(400).json({ success: false, message: 'dryRun must be a boolean.' });
+        }
+        if (typeof inngest?.send !== 'function') {
+            return res.status(503).json({ success: false, message: 'Catalog refresh queue is unavailable.' });
+        }
+        const requestedBy = req.auth()?.userId || 'admin';
+        await queueCatalogRefreshRun({ runId, source: 'admin', requestedBy, dryRun: Boolean(dryRun) });
+        await inngest.send({
+            id: runId,
+            name: 'catalog/refresh.requested',
+            data: { runId, dryRun: Boolean(dryRun), requestedBy },
+        });
+        return res.status(202).json({ success: true, jobId: runId, status: 'queued' });
     } catch (error) {
         console.log(error);
-        return res.status(500).json({ success: false, message: error.message });
+        await failQueuedCatalogRefreshRun(runId, error).catch(() => undefined);
+        return res.status(503).json({ success: false, message: 'Unable to queue catalog refresh.' });
     }
 }
 
+export const getCatalogRefreshStatusAction = async (req, res) => {
+    try {
+        const runId = String(req.params.runId || '').trim();
+        if (!/^[a-zA-Z0-9:_-]{8,160}$/.test(runId)) {
+            return res.status(400).json({ success: false, message: 'Invalid catalog refresh job ID.' });
+        }
+        const run = await getCatalogRefreshRun(runId);
+        if (!run) return res.status(404).json({ success: false, message: 'Catalog refresh job not found.' });
+        return res.json({ success: true, job: run });
+    } catch (error) {
+        console.log(error);
+        return res.status(500).json({ success: false, message: 'Unable to read catalog refresh status.' });
+    }
+}

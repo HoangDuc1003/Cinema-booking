@@ -1,707 +1,980 @@
+import { randomUUID } from 'node:crypto';
 import axios from 'axios';
+import mongoose from 'mongoose';
 import Movie from '../models/Movie.js';
 import CatalogBatch from '../models/CatalogBatch.js';
+import CatalogRefreshRun from '../models/CatalogRefreshRun.js';
 import SiteConfig from '../models/SiteConfig.js';
-import { acquireLock, releaseLock } from './lockService.js';
-import { getJson, setJson, deleteByPattern, deleteKeys } from './cacheService.js';
-import { redisKeys } from './redisKeys.js';
-import { invalidateMovieCatalog } from './cacheInvalidationService.js';
+import { verifyCatalogV2Indexes } from '../configs/indexes.js';
+import {
+    acquireFencedLock,
+    releaseFencedLock,
+    renewFencedLock,
+    verifyFencedLock,
+} from './lockService.js';
+import {
+    deleteByPattern,
+    deleteKeys,
+    getJson,
+    setJson,
+    setRequiredJson,
+} from './cacheService.js';
+import { redisKeys, redisTtl } from './redisKeys.js';
 
-// Seeded random helper
-function hashCode(str) {
+const BUCKET_SIZE = 50;
+const DETAIL_CONCURRENCY = 5;
+const MAX_TMDB_ATTEMPTS = 600;
+const MAX_REQUEST_ATTEMPTS = 3;
+const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+const TERMINAL_RUN_STATUSES = new Set(['succeeded', 'failed']);
+const CLEAR_REFRESH_STATE_SCRIPT = `
+local value = redis.call('GET', KEYS[1])
+if not value then return 0 end
+local ok, state = pcall(cjson.decode, value)
+if not ok or tostring(state.fencingToken) ~= ARGV[1] then return 0 end
+return redis.call('DEL', KEYS[1])
+`;
+
+export class CatalogRefreshError extends Error {
+    constructor(code, message, { transient = false, cause } = {}) {
+        super(message, { cause });
+        this.name = 'CatalogRefreshError';
+        this.code = code;
+        this.transient = transient;
+    }
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function hashCode(value) {
     let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-        const char = str.charCodeAt(i);
-        hash = (hash << 5) - hash + char;
-        hash |= 0; // Convert to 32bit integer
+    for (let index = 0; index < value.length; index += 1) {
+        hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
     }
     return hash >>> 0;
 }
 
-function mulberry32(a) {
-    return function() {
-        let t = a += 0x6D2B79F5;
-        t = Math.imul(t ^ (t >>> 15), t | 1);
-        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+function mulberry32(seed) {
+    let value = seed;
+    return () => {
+        value += 0x6D2B79F5;
+        let result = value;
+        result = Math.imul(result ^ (result >>> 15), result | 1);
+        result ^= result + Math.imul(result ^ (result >>> 7), result | 61);
+        return ((result ^ (result >>> 14)) >>> 0) / 4294967296;
     };
 }
 
 export function getDeterministicPermutation(movieIds, seedString) {
     const list = [...movieIds];
-    const seed = hashCode(seedString);
-    const rand = mulberry32(seed);
-    for (let i = list.length - 1; i > 0; i--) {
-        const j = Math.floor(rand() * (i + 1));
-        const temp = list[i];
-        list[i] = list[j];
-        list[j] = temp;
+    const random = mulberry32(hashCode(seedString));
+    for (let index = list.length - 1; index > 0; index -= 1) {
+        const target = Math.floor(random() * (index + 1));
+        [list[index], list[target]] = [list[target], list[index]];
     }
     return list;
 }
 
 export function getISOWeekKey(date) {
-    const local = new Date(date.getTime() + 7 * 60 * 60 * 1000);
+    const local = new Date(date.getTime() + (7 * 60 * 60 * 1000));
     const target = new Date(local.getTime());
-    const dayNr = (target.getUTCDay() + 6) % 7;
-    target.setUTCDate(target.getUTCDate() - dayNr + 3);
+    const dayNumber = (target.getUTCDay() + 6) % 7;
+    target.setUTCDate(target.getUTCDate() - dayNumber + 3);
     const firstThursday = target.getTime();
     target.setUTCMonth(0, 1);
     if (target.getUTCDay() !== 4) {
         target.setUTCMonth(0, 1 + ((4 - target.getUTCDay() + 7) % 7));
     }
-    const weekNum = 1 + Math.round((firstThursday - target.getTime()) / 604800000);
-    const year = new Date(firstThursday).getUTCFullYear();
-    return `${year}-W${String(weekNum).padStart(2, '0')}`;
+    const week = 1 + Math.round((firstThursday - target.getTime()) / 604800000);
+    return `${new Date(firstThursday).getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
 }
 
 export function calculateCurrentSlot(date) {
-    const local = new Date(date.getTime() + 7 * 60 * 60 * 1000);
-    const day = local.getUTCDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+    const local = new Date(date.getTime() + (7 * 60 * 60 * 1000));
+    const mondayBasedDay = (local.getUTCDay() + 6) % 7;
     const hour = local.getUTCHours();
-    
-    if (day === 1) { // Monday
-        if (hour < 3) return 14;
-        if (hour < 8) return 0;
-        if (hour < 20) return 1;
-        return 2;
-    }
-    if (day === 2) { // Tuesday
-        if (hour < 8) return 2;
-        if (hour < 20) return 3;
-        return 4;
-    }
-    if (day === 3) { // Wednesday
-        if (hour < 8) return 4;
-        if (hour < 20) return 5;
-        return 6;
-    }
-    if (day === 4) { // Thursday
-        if (hour < 8) return 6;
-        if (hour < 20) return 7;
-        return 8;
-    }
-    if (day === 5) { // Friday
-        if (hour < 8) return 8;
-        if (hour < 20) return 9;
-        return 10;
-    }
-    if (day === 6) { // Saturday
-        if (hour < 8) return 10;
-        if (hour < 20) return 11;
-        return 12;
-    }
-    if (day === 0) { // Sunday
-        if (hour < 8) return 12;
-        if (hour < 20) return 13;
-        return 14;
-    }
-    return 0; // fallback
+    if (mondayBasedDay === 0 && hour < 8) return 13;
+    if (hour < 8) return (mondayBasedDay * 2) - 1;
+    if (hour < 20) return mondayBasedDay * 2;
+    return (mondayBasedDay * 2) + 1;
 }
 
-// Concurrency pool runner
-async function runWithConcurrencyLimit(concurrency, items, asyncFn) {
-    const results = [];
-    const executing = [];
-    for (const item of items) {
-        const p = Promise.resolve().then(() => asyncFn(item));
-        results.push(p);
-        if (concurrency > 0) {
-            const e = p.then(() => executing.splice(executing.indexOf(e), 1));
-            executing.push(e);
-            if (executing.length >= concurrency) {
-                await Promise.race(executing);
-            }
+const rotate = (values, offset) => {
+    if (!values.length) return [];
+    const normalized = ((offset % values.length) + values.length) % values.length;
+    return [...values.slice(normalized), ...values.slice(0, normalized)];
+};
+
+const interleave = (...groups) => {
+    const output = [];
+    const maxLength = Math.max(0, ...groups.map((group) => group.length));
+    for (let index = 0; index < maxLength; index += 1) {
+        for (const group of groups) {
+            if (index < group.length) output.push(group[index]);
         }
     }
-    return Promise.all(results);
+    return output;
+};
+
+export function allocateCatalogSectionIds(batch, slot) {
+    if (!Number.isInteger(slot) || slot < 0 || slot > 13) {
+        throw new CatalogRefreshError('INVALID_SLOT', `Catalog slot must be between 0 and 13; received ${slot}`);
+    }
+    const newest = getDeterministicPermutation(batch.buckets.newest, `${batch.weekKey}:newest`);
+    const popular = getDeterministicPermutation(batch.buckets.popular, `${batch.weekKey}:popular`);
+    const classics = getDeterministicPermutation(batch.buckets.classics, `${batch.weekKey}:classics`);
+    const rotatedNewest = rotate(newest, slot * 7);
+    const rotatedPopular = rotate(popular, slot * 11);
+    const rotatedClassics = rotate(classics, slot * 13);
+
+    const hero = rotatedNewest.slice(0, 5);
+    const nowShowing = rotatedNewest.slice(5, 25);
+    const popularSection = rotatedPopular.slice(0, 20);
+    const classicsSection = rotatedClassics.slice(0, 20);
+    const used = new Set([...hero, ...nowShowing, ...popularSection, ...classicsSection]);
+    const remaining = interleave(
+        rotatedNewest.slice(25),
+        rotatedPopular.slice(20),
+        rotatedClassics.slice(20),
+    );
+    const recommended = [];
+    for (const id of remaining) {
+        if (!used.has(id)) {
+            used.add(id);
+            recommended.push(id);
+            if (recommended.length === 20) break;
+        }
+    }
+    if (used.size !== 85 || recommended.length !== 20) {
+        throw new CatalogRefreshError('SECTION_ALLOCATION_INVALID', 'Catalog section allocation must contain 85 unique movie IDs');
+    }
+    return { hero, nowShowing, popular: popularSection, classics: classicsSection, recommended };
 }
 
-// TMDB Fetch details helper with retry and timeout
-async function fetchDetailsAndCreditsWithRetry(movieId, retries = 3, delay = 500) {
-    const url = `https://api.themoviedb.org/3/movie/${movieId}`;
-    const params = {
-        language: 'en-US',
-        append_to_response: 'credits'
-    };
-    
-    for (let i = 0; i < retries; i++) {
+const createMetrics = () => ({
+    fetched: 0,
+    rejected: 0,
+    duplicates: 0,
+    detailsFetched: 0,
+    requestAttempts: 0,
+    statusCounts: {},
+});
+
+const classifyRequestError = (error) => {
+    const status = Number(error?.response?.status) || 0;
+    const code = String(error?.code || 'UNKNOWN');
+    const timeout = ['ECONNABORTED', 'ETIMEDOUT', 'ECONNRESET', 'ENETRESET'].includes(code);
+    return { status, code, retryable: timeout || RETRYABLE_STATUSES.has(status) };
+};
+
+const retryAfterMs = (error) => {
+    const raw = error?.response?.headers?.['retry-after'];
+    if (!raw) return 0;
+    const seconds = Number(raw);
+    if (Number.isFinite(seconds)) return Math.min(seconds * 1000, 30000);
+    const date = Date.parse(raw);
+    return Number.isFinite(date) ? Math.min(Math.max(0, date - Date.now()), 30000) : 0;
+};
+
+const createTmdbContext = ({ wait = sleep, random = Math.random } = {}) => ({ metrics: createMetrics(), wait, random });
+
+async function requestTmdb(path, params, context) {
+    if (!process.env.TMDB_API_KEY) {
+        throw new CatalogRefreshError('TMDB_NOT_CONFIGURED', 'TMDB_API_KEY is not configured');
+    }
+    let lastError;
+    for (let attempt = 1; attempt <= MAX_REQUEST_ATTEMPTS; attempt += 1) {
+        context.metrics.requestAttempts += 1;
+        if (context.metrics.requestAttempts > MAX_TMDB_ATTEMPTS) {
+            throw new CatalogRefreshError('TMDB_REQUEST_BUDGET_EXHAUSTED', 'TMDB request budget was exhausted');
+        }
         try {
-            const response = await axios.get(url, {
+            const response = await axios.get(`https://api.themoviedb.org/3${path}`, {
                 headers: { Authorization: `Bearer ${process.env.TMDB_API_KEY}` },
                 params,
-                timeout: 3000
+                timeout: Number(process.env.TMDB_TIMEOUT_MS) || 3000,
             });
+            context.metrics.statusCounts[String(response.status || 200)] = (context.metrics.statusCounts[String(response.status || 200)] || 0) + 1;
             return response.data;
         } catch (error) {
-            if (i === retries - 1) throw error;
-            await new Promise(resolve => setTimeout(resolve, delay * Math.pow(2, i)));
+            lastError = error;
+            const classified = classifyRequestError(error);
+            const category = classified.status ? String(classified.status) : classified.code;
+            context.metrics.statusCounts[category] = (context.metrics.statusCounts[category] || 0) + 1;
+            if (!classified.retryable || attempt === MAX_REQUEST_ATTEMPTS) break;
+            const exponential = Math.min(500 * (2 ** (attempt - 1)), 8000);
+            const delay = classified.status === 429 ? Math.max(exponential, retryAfterMs(error)) : exponential;
+            await context.wait(delay + Math.floor(context.random() * 251));
         }
     }
+    const classified = classifyRequestError(lastError);
+    throw new CatalogRefreshError(
+        classified.status === 429 ? 'TMDB_RATE_LIMITED' : 'TMDB_REQUEST_FAILED',
+        `TMDB request failed for ${path}`,
+        { transient: classified.retryable, cause: lastError },
+    );
 }
 
-function validateMovieProperties(details) {
-    if (!details) return false;
-    if (typeof details.id !== 'number' || !Number.isInteger(details.id) || details.id <= 0) return false;
-    if (typeof details.title !== 'string' || details.title.trim() === '') return false;
-    if (typeof details.overview !== 'string' || details.overview.trim() === '') return false;
-    if (!details.release_date || typeof details.release_date !== 'string' || details.release_date.trim() === '') return false;
-    if (!details.poster_path || typeof details.poster_path !== 'string' || details.poster_path.trim() === '') return false;
-    if (!details.backdrop_path || typeof details.backdrop_path !== 'string' || details.backdrop_path.trim() === '') return false;
-    if (details.adult === true) return false;
-    if (typeof details.runtime !== 'number' || !Number.isFinite(details.runtime) || details.runtime <= 0) return false;
-    if (!Array.isArray(details.genres)) return false;
-    if (typeof details.vote_average !== 'number' || !Number.isFinite(details.vote_average)) return false;
-    if (typeof details.original_language !== 'string' || details.original_language.trim() === '') return false;
-    return true;
+export const catalogRefreshTestHooks = Object.freeze({
+    createTmdbContext,
+    requestTmdb,
+    allocateVersionedBatch,
+});
+
+async function runWithConcurrencyLimit(limit, items, task) {
+    const results = new Array(items.length);
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+        while (cursor < items.length) {
+            const index = cursor;
+            cursor += 1;
+            results[index] = await task(items[index]);
+        }
+    });
+    await Promise.all(workers);
+    return results;
 }
 
-// Fetch candidates lists helper
-async function fetchCandidates(path, params) {
-    try {
-        if (!process.env.TMDB_API_KEY) return [];
-        const response = await axios.get(`https://api.themoviedb.org/3${path}`, {
-            headers: { Authorization: `Bearer ${process.env.TMDB_API_KEY}` },
-            params,
-            timeout: 3000
-        });
-        return response.data?.results || [];
-    } catch (err) {
-        console.warn(`[TMDB candidates fetch failed] path: ${path}, error: ${err.message}`);
-        return [];
+function validateMovie(details, { classicCutoff } = {}) {
+    if (!details || !Number.isInteger(details.id) || details.id <= 0) return false;
+    if (!String(details.title || '').trim() || !String(details.overview || '').trim()) return false;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(details.release_date || ''))) return false;
+    if (classicCutoff && details.release_date > classicCutoff) return false;
+    if (!String(details.poster_path || '').trim() || !String(details.backdrop_path || '').trim()) return false;
+    if (details.adult === true || !Number.isFinite(details.runtime) || details.runtime <= 0) return false;
+    if (!Array.isArray(details.genres) || !Number.isFinite(details.vote_average)) return false;
+    return Boolean(String(details.original_language || '').trim());
+}
+
+const toMovieDocument = (movie) => ({
+    _id: String(movie.id),
+    title: movie.title,
+    overview: movie.overview,
+    poster_path: movie.poster_path,
+    backdrop_path: movie.backdrop_path,
+    release_date: movie.release_date,
+    original_language: movie.original_language,
+    tagline: movie.tagline || '',
+    genres: movie.genres || [],
+    casts: (movie.credits?.cast || []).slice(0, 20),
+    vote_average: movie.vote_average,
+    runtime: movie.runtime,
+});
+
+const uniqueCandidateIds = (candidates, used, metrics) => {
+    const pageSeen = new Set();
+    const ids = [];
+    for (const candidate of candidates) {
+        const id = String(candidate?.id || '');
+        if (!/^\d+$/.test(id) || used.has(id) || pageSeen.has(id)) {
+            metrics.duplicates += 1;
+            continue;
+        }
+        pageSeen.add(id);
+        ids.push(id);
     }
-}
+    return ids;
+};
 
-export async function buildWeeklyCatalogBatch(weekKey) {
-    console.log(`[buildWeeklyCatalogBatch] Starting for week: ${weekKey}`);
-    
-    // Delete any existing staging/failed batch for this week to avoid duplicate keys
-    await CatalogBatch.findOneAndDelete({ weekKey, status: { $in: ['staging', 'failed'] } });
-    
-    const usedMovieIds = new Set();
-    const validatedMoviesMap = new Map(); // ID -> movie data
-    
-    const newestBucket = [];
-    const classicsBucket = [];
-    const popularBucket = [];
-    
-    let fetched = 0;
-    let rejected = 0;
-    let duplicates = 0;
-    let detailsFetched = 0;
-    
-    const newestPagesTrack = [];
-    const classicsPagesTrack = [];
-    const popularPagesTrack = [];
-    
-    // 1. Bucket NEWEST: 50 active movies (from theatrical/now playing/upcoming)
-    let page = 1;
-    while (newestBucket.length < 50 && page <= 10) {
-        newestPagesTrack.push(page);
-        const [nowPlaying, upcoming] = await Promise.all([
-            fetchCandidates('/movie/now_playing', { language: 'en-US', page }),
-            fetchCandidates('/movie/upcoming', { language: 'en-US', page })
-        ]);
-        
-        const pageCandidates = [];
-        const maxLen = Math.max(nowPlaying.length, upcoming.length);
-        for (let i = 0; i < maxLen; i++) {
-            if (i < nowPlaying.length) pageCandidates.push(nowPlaying[i]);
-            if (i < upcoming.length) pageCandidates.push(upcoming[i]);
-        }
-        
-        if (pageCandidates.length === 0) break;
-        fetched += pageCandidates.length;
-        
-        // Filter unique IDs in this batch
-        const candidateIdsToFetch = [];
-        for (const m of pageCandidates) {
-            const mId = String(m.id);
-            if (usedMovieIds.has(mId)) {
-                duplicates++;
-                continue;
-            }
-            if (candidateIdsToFetch.includes(mId)) {
-                duplicates++;
-                continue;
-            }
-            candidateIdsToFetch.push(mId);
-        }
-        
-        // Fetch details in parallel up to concurrency limit 5
-        const validationResults = await runWithConcurrencyLimit(5, candidateIdsToFetch, async (movieId) => {
-            try {
-                const details = await fetchDetailsAndCreditsWithRetry(movieId);
-                detailsFetched++;
-                if (validateMovieProperties(details)) {
-                    return details;
-                } else {
-                    rejected++;
-                    return null;
-                }
-            } catch (err) {
-                rejected++;
+async function fetchValidatedDetails(ids, context, validationOptions) {
+    return runWithConcurrencyLimit(DETAIL_CONCURRENCY, ids, async (id) => {
+        try {
+            const details = await requestTmdb(`/movie/${id}`, { language: 'en-US', append_to_response: 'credits' }, context);
+            context.metrics.detailsFetched += 1;
+            if (!validateMovie(details, validationOptions)) {
+                context.metrics.rejected += 1;
                 return null;
             }
-        });
-        
-        for (const movieDetails of validationResults) {
-            if (movieDetails && newestBucket.length < 50) {
-                const mId = String(movieDetails.id);
-                newestBucket.push(mId);
-                usedMovieIds.add(mId);
-                validatedMoviesMap.set(mId, movieDetails);
+            return details;
+        } catch (error) {
+            if (error.code === 'TMDB_REQUEST_BUDGET_EXHAUSTED') throw error;
+            context.metrics.rejected += 1;
+            return null;
+        }
+    });
+}
+
+export async function buildWeeklyCatalogDraft({ weekKey }) {
+    const context = createTmdbContext();
+    const used = new Set();
+    const movieMap = new Map();
+    const buckets = { newest: [], classics: [], popular: [] };
+    const pages = { newest: [], classics: [], popular: [] };
+    const weekYear = Number(String(weekKey).slice(0, 4));
+    const classicCutoff = `${weekYear - 15}-12-31`;
+
+    const collect = async ({ bucket, pageLimit, loadPage, validationOptions }) => {
+        for (let pageIndex = 0; buckets[bucket].length < BUCKET_SIZE && pageIndex < pageLimit; pageIndex += 1) {
+            const { candidates, pageLabel } = await loadPage(pageIndex);
+            pages[bucket].push(pageLabel);
+            context.metrics.fetched += candidates.length;
+            const ids = uniqueCandidateIds(candidates, used, context.metrics);
+            const details = await fetchValidatedDetails(ids, context, validationOptions);
+            for (const movie of details) {
+                if (!movie || buckets[bucket].length >= BUCKET_SIZE) continue;
+                const id = String(movie.id);
+                if (used.has(id)) continue;
+                used.add(id);
+                buckets[bucket].push(id);
+                movieMap.set(id, movie);
             }
         }
-        
-        page++;
-    }
-    
-    // 2. Bucket CLASSICS: 50 classics (release_date <= 2011-12-31, vote_count >= 500, vote_average >= 7.0, sorted by popularity)
-    page = 1;
-    while (classicsBucket.length < 50 && page <= 10) {
-        classicsPagesTrack.push(page);
-        const candidates = await fetchCandidates('/discover/movie', {
-            language: 'en-US',
-            'release_date.lte': '2011-12-31',
-            'vote_count.gte': 500,
-            'vote_average.gte': 7.0,
-            sort_by: 'popularity.desc',
-            page
-        });
-        
-        if (candidates.length === 0) break;
-        fetched += candidates.length;
-        
-        const candidateIdsToFetch = [];
-        for (const m of candidates) {
-            const mId = String(m.id);
-            if (usedMovieIds.has(mId)) {
-                duplicates++;
-                continue;
+    };
+
+    await collect({
+        bucket: 'newest',
+        pageLimit: 10,
+        loadPage: async (index) => {
+            const page = index + 1;
+            const [nowPlaying, upcoming] = await Promise.all([
+                requestTmdb('/movie/now_playing', { language: 'en-US', page }, context),
+                requestTmdb('/movie/upcoming', { language: 'en-US', page }, context),
+            ]);
+            const candidates = [];
+            const left = nowPlaying.results || [];
+            const right = upcoming.results || [];
+            for (let item = 0; item < Math.max(left.length, right.length); item += 1) {
+                if (left[item]) candidates.push(left[item]);
+                if (right[item]) candidates.push(right[item]);
             }
-            if (candidateIdsToFetch.includes(mId)) {
-                duplicates++;
-                continue;
-            }
-            candidateIdsToFetch.push(mId);
-        }
-        
-        const validationResults = await runWithConcurrencyLimit(5, candidateIdsToFetch, async (movieId) => {
-            try {
-                const details = await fetchDetailsAndCreditsWithRetry(movieId);
-                detailsFetched++;
-                if (validateMovieProperties(details)) {
-                    return details;
-                } else {
-                    rejected++;
-                    return null;
-                }
-            } catch (err) {
-                rejected++;
-                return null;
-            }
-        });
-        
-        for (const movieDetails of validationResults) {
-            if (movieDetails && classicsBucket.length < 50) {
-                const mId = String(movieDetails.id);
-                classicsBucket.push(mId);
-                usedMovieIds.add(mId);
-                validatedMoviesMap.set(mId, movieDetails);
-            }
-        }
-        
-        page++;
-    }
-    
-    // 3. Bucket POPULAR: 50 popular movies (using seeded randomized pages derived from weekKey)
-    const seed = hashCode(weekKey);
-    const rand = mulberry32(seed);
+            return { candidates, pageLabel: page };
+        },
+    });
+
+    await collect({
+        bucket: 'classics',
+        pageLimit: 10,
+        validationOptions: { classicCutoff },
+        loadPage: async (index) => {
+            const page = index + 1;
+            const data = await requestTmdb('/discover/movie', {
+                language: 'en-US',
+                'release_date.lte': classicCutoff,
+                'vote_count.gte': 500,
+                'vote_average.gte': 7,
+                sort_by: 'popularity.desc',
+                page,
+            }, context);
+            return { candidates: data.results || [], pageLabel: page };
+        },
+    });
+
+    const random = mulberry32(hashCode(weekKey));
     const popularPages = [];
     while (popularPages.length < 15) {
-        const p = Math.floor(rand() * 100) + 1; // page 1 to 100
-        if (!popularPages.includes(p)) {
-            popularPages.push(p);
-        }
+        const page = Math.floor(random() * 100) + 1;
+        if (!popularPages.includes(page)) popularPages.push(page);
     }
-    
-    let pageIdx = 0;
-    while (popularBucket.length < 50 && pageIdx < popularPages.length) {
-        const p = popularPages[pageIdx];
-        popularPagesTrack.push(p);
-        const candidates = await fetchCandidates('/movie/popular', { language: 'en-US', page: p });
-        
-        if (candidates.length > 0) {
-            fetched += candidates.length;
-            const candidateIdsToFetch = [];
-            for (const m of candidates) {
-                const mId = String(m.id);
-                if (usedMovieIds.has(mId)) {
-                    duplicates++;
-                    continue;
-                }
-                if (candidateIdsToFetch.includes(mId)) {
-                    duplicates++;
-                    continue;
-                }
-                candidateIdsToFetch.push(mId);
-            }
-            
-            const validationResults = await runWithConcurrencyLimit(5, candidateIdsToFetch, async (movieId) => {
-                try {
-                    const details = await fetchDetailsAndCreditsWithRetry(movieId);
-                    detailsFetched++;
-                    if (validateMovieProperties(details)) {
-                        return details;
-                    } else {
-                        rejected++;
-                        return null;
-                    }
-                } catch (err) {
-                    rejected++;
-                    return null;
-                }
-            });
-            
-            for (const movieDetails of validationResults) {
-                if (movieDetails && popularBucket.length < 50) {
-                    const mId = String(movieDetails.id);
-                    popularBucket.push(mId);
-                    usedMovieIds.add(mId);
-                    validatedMoviesMap.set(mId, movieDetails);
-                }
-            }
-        }
-        pageIdx++;
-    }
-    
-    const totalCount = newestBucket.length + classicsBucket.length + popularBucket.length;
-    
-    if (newestBucket.length !== 50 || classicsBucket.length !== 50 || popularBucket.length !== 50 || totalCount !== 150) {
-        const failMsg = `Unable to reach 150 unique validated movies (newest: ${newestBucket.length}, classics: ${classicsBucket.length}, popular: ${popularBucket.length})`;
-        console.error(`[buildWeeklyCatalogBatch] Failed: ${failMsg}`);
-        
-        const failedBatch = new CatalogBatch({
-            weekKey,
-            status: 'failed',
-            buckets: {
-                newest: newestBucket,
-                classics: classicsBucket,
-                popular: popularBucket
-            },
-            movieIds: [...newestBucket, ...classicsBucket, ...popularBucket],
-            generatedAt: new Date(),
-            failureReason: failMsg,
-            metrics: { fetched, rejected, duplicates, detailsFetched }
-        });
-        await failedBatch.save();
-        
-        throw new Error(failMsg);
-    }
-    
-    // Save staging batch
-    const stagingBatch = new CatalogBatch({
-        weekKey,
-        status: 'staging',
-        buckets: {
-            newest: newestBucket,
-            classics: classicsBucket,
-            popular: popularBucket
+    await collect({
+        bucket: 'popular',
+        pageLimit: popularPages.length,
+        loadPage: async (index) => {
+            const page = popularPages[index];
+            const data = await requestTmdb('/movie/popular', { language: 'en-US', page }, context);
+            return { candidates: data.results || [], pageLabel: page };
         },
-        movieIds: [...newestBucket, ...classicsBucket, ...popularBucket],
-        generatedAt: new Date(),
-        validatedAt: new Date(),
+    });
+
+    if (Object.values(buckets).some((bucket) => bucket.length !== BUCKET_SIZE) || used.size !== 150) {
+        throw new CatalogRefreshError(
+            'CATALOG_VALIDATION_FAILED',
+            `Unable to build 150 unique movies (${buckets.newest.length}/${buckets.classics.length}/${buckets.popular.length})`,
+        );
+    }
+
+    return {
+        weekKey,
+        buckets,
+        movieIds: [...buckets.newest, ...buckets.classics, ...buckets.popular],
+        movies: [...movieMap.values()].map(toMovieDocument),
         sourceMeta: {
             region: 'US',
             language: 'en-US',
-            newestPages: newestPagesTrack,
-            classicPages: classicsPagesTrack,
-            popularPages: popularPagesTrack
+            newestPages: pages.newest,
+            classicPages: pages.classics,
+            popularPages: pages.popular,
         },
-        metrics: { fetched, rejected, duplicates, detailsFetched }
-    });
-    
-    await stagingBatch.save();
-    console.log(`[buildWeeklyCatalogBatch] Staging batch saved successfully for week: ${weekKey}`);
-    
-    // Format movies array for MongoDB upserting later
-    const movies = [...validatedMoviesMap.values()].map(m => {
-        const casts = m.credits?.cast || [];
-        return {
-            _id: String(m.id),
-            title: m.title,
-            overview: m.overview,
-            poster_path: m.poster_path,
-            backdrop_path: m.backdrop_path,
-            release_date: m.release_date,
-            original_language: m.original_language,
-            tagline: m.tagline || '',
-            genres: m.genres || [],
-            casts: casts.slice(0, 20),
-            vote_average: m.vote_average,
-            runtime: m.runtime
-        };
-    });
-    
-    return { batch: stagingBatch, movies };
+        metrics: context.metrics,
+    };
 }
 
-export async function activateCatalogBatch(batchId, movies = []) {
-    const lockKey = 'nitrocine:v1:lock:catalog-refresh';
-    console.log(`[activateCatalogBatch] Attempting to acquire lock for batchId: ${batchId}`);
-    
-    const lock = await acquireLock(lockKey, { ttlMs: 30000, waitMs: 10000 });
-    if (lock.available && !lock.acquired) {
-        console.error(`[activateCatalogBatch] Failed to acquire lock: resource busy.`);
-        await CatalogBatch.findByIdAndUpdate(batchId, { status: 'failed', failureReason: 'Could not acquire distributed Redis lock' });
-        throw new Error('Could not acquire distributed Redis lock');
-    }
-    
+// Compatibility export for focused tests and tooling. It is deliberately non-persistent.
+export async function buildWeeklyCatalogBatch(weekKey) {
+    const draft = await buildWeeklyCatalogDraft({ weekKey });
+    return { batch: { weekKey, status: 'staging', ...draft }, movies: draft.movies };
+}
+
+const serializeRun = (run) => ({
+    runId: run.runId,
+    source: run.source,
+    requestedBy: run.requestedBy,
+    dryRun: run.dryRun,
+    status: run.status,
+    weekKey: run.weekKey,
+    targetVersion: run.targetVersion ?? null,
+    batchId: run.batchId ? String(run.batchId) : null,
+    fencingToken: run.fencingToken ?? null,
+    currentPhase: run.currentPhase,
+    attemptCount: run.attemptCount,
+    metrics: run.metrics || {},
+    errorCode: run.errorCode || '',
+    errorMessage: run.errorMessage || '',
+    startedAt: run.startedAt || null,
+    completedAt: run.completedAt || null,
+    createdAt: run.createdAt || null,
+    updatedAt: run.updatedAt || null,
+});
+
+const publishRun = async (run) => {
+    const payload = serializeRun(run);
     try {
-        const batch = await CatalogBatch.findById(batchId);
-        if (!batch) {
-            throw new Error(`Batch ${batchId} not found`);
-        }
-        
-        if (batch.status !== 'staging') {
-            throw new Error(`Only staging batches can be activated. Current status: ${batch.status}`);
-        }
-        
-        console.log(`[activateCatalogBatch] Setting catalog.refreshing = true`);
-        await SiteConfig.findOneAndUpdate(
-            { key: 'catalog' },
-            { $set: { 'catalog.refreshing': true } },
-            { upsert: true }
-        );
-        
-        // If movies array is empty, we try to reconstruct it from the batch movieIds if they are already in the DB
-        let movieDocs = movies;
-        if (!movieDocs || movieDocs.length === 0) {
-            const existing = await Movie.find({ _id: { $in: batch.movieIds } }).lean();
-            movieDocs = existing;
-        }
-        
-        console.log(`[activateCatalogBatch] Upserting ${movieDocs.length} Movie documents to MongoDB`);
-        for (const movie of movieDocs) {
-            const updateDoc = {
-                $set: {
-                    title: movie.title,
-                    overview: movie.overview,
-                    poster_path: movie.poster_path,
-                    backdrop_path: movie.backdrop_path,
-                    release_date: movie.release_date,
-                    original_language: movie.original_language,
-                    tagline: movie.tagline || '',
-                    genres: movie.genres || [],
-                    casts: movie.casts || [],
-                    vote_average: movie.vote_average,
-                    runtime: movie.runtime
-                },
-                $setOnInsert: {
-                    heroVideoId: '',
-                    heroVideoUrl: '',
-                    heroVideoMimeType: '',
-                    heroVideoPosterUrl: '',
-                    heroVideoStatus: '',
-                    heroVideoVersion: ''
-                }
-            };
-            await Movie.updateOne({ _id: String(movie._id || movie.id) }, updateDoc, { upsert: true });
-        }
-        
-        const currentSlot = calculateCurrentSlot(new Date());
-        
-        console.log(`[activateCatalogBatch] Setting SiteConfig activeBatchId and metadata`);
-        await SiteConfig.findOneAndUpdate(
-            { key: 'catalog' },
-            {
-                $set: {
-                    'catalog.activeBatchId': batch._id,
-                    'catalog.activeSlot': currentSlot,
-                    'catalog.lastSuccessfulRefreshAt': new Date(),
-                    'catalog.lastRotationAt': new Date()
-                }
-            },
-            { upsert: true }
-        );
-        
-        console.log(`[activateCatalogBatch] Retiring previous active batch`);
-        const previousActive = await CatalogBatch.findOne({ status: 'active', _id: { $ne: batch._id } });
-        if (previousActive) {
-            previousActive.status = 'retired';
-            previousActive.retiredAt = new Date();
-            await previousActive.save();
-        }
-        
-        batch.status = 'active';
-        batch.activatedAt = new Date();
-        await batch.save();
-        
-        console.log(`[activateCatalogBatch] Setting catalog.refreshing = false`);
-        await SiteConfig.findOneAndUpdate(
-            { key: 'catalog' },
-            { $set: { 'catalog.refreshing': false } }
-        );
-        
-        console.log(`[activateCatalogBatch] Invalidating Redis caches and warming cache`);
-        await invalidateMovieCatalog();
-        await deleteByPattern('nitrocine:v1:catalog:slot:*');
-        
-        // Warm cache for current slot
-        await getPublicHomePayload(10, 'US', new Date());
-        
-        console.log(`[activateCatalogBatch] Activation completed successfully!`);
+        await setRequiredJson(redisKeys.catalogRefreshJob(run.runId), payload, redisTtl.catalogRefreshJob);
     } catch (error) {
-        console.error(`[activateCatalogBatch] Error during activation:`, error);
-        
-        // Set staging batch to failed
-        await CatalogBatch.findByIdAndUpdate(batchId, { status: 'failed', failureReason: error.message });
-        
-        // Turn off refreshing flag
-        await SiteConfig.findOneAndUpdate(
-            { key: 'catalog' },
-            { $set: { 'catalog.refreshing': false } }
-        );
-        
-        throw error;
-    } finally {
-        if (lock.acquired) {
-            console.log(`[activateCatalogBatch] Releasing Redis lock`);
-            await releaseLock(lock);
-        }
+        throw new CatalogRefreshError('REDIS_UNAVAILABLE', 'Redis is unavailable for catalog refresh.', { transient: true, cause: error });
     }
+    return payload;
+};
+
+const publishRefreshState = async (lock, runId) => {
+    try {
+        await setRequiredJson(redisKeys.catalogRefreshState(), {
+            active: true,
+            runId,
+            fencingToken: lock.fencingToken,
+        }, Math.ceil(redisTtl.catalogRefreshLockMs / 1000) * 2);
+    } catch (error) {
+        throw new CatalogRefreshError('REDIS_UNAVAILABLE', 'Redis is unavailable for catalog refresh.', { transient: true, cause: error });
+    }
+};
+
+const clearOwnedRefreshState = async (lock) => {
+    if (!lock?.client?.isReady) return false;
+    const cleared = await lock.client.eval(CLEAR_REFRESH_STATE_SCRIPT, {
+        keys: [redisKeys.catalogRefreshState()],
+        arguments: [String(lock.fencingToken)],
+    });
+    return Number(cleared) === 1;
+};
+
+export async function queueCatalogRefreshRun({ runId = randomUUID(), source = 'admin', requestedBy = 'system', dryRun = false, now = new Date() } = {}) {
+    const weekKey = getISOWeekKey(now);
+    const run = await CatalogRefreshRun.findOneAndUpdate(
+        { runId },
+        { $setOnInsert: { runId, source, requestedBy, dryRun, status: 'queued', currentPhase: 'queued', weekKey } },
+        { new: true, upsert: true, setDefaultsOnInsert: true },
+    );
+    await publishRun(run);
+    return serializeRun(run);
 }
 
-export async function rotateActiveCatalogSlot() {
-    console.log(`[rotateActiveCatalogSlot] Starting slot rotation`);
-    const config = await SiteConfig.findOne({ key: 'catalog' }).lean();
-    const batchId = config?.catalog?.activeBatchId;
-    if (!batchId) {
-        console.warn(`[rotateActiveCatalogSlot] No active batch found in SiteConfig, skipping rotation.`);
-        return;
+export async function getCatalogRefreshRun(runId) {
+    const cached = await getJson(redisKeys.catalogRefreshJob(runId));
+    if (cached && TERMINAL_RUN_STATUSES.has(cached.status)) return cached;
+    const run = await CatalogRefreshRun.findOne({ runId }).lean();
+    if (!run) return cached || null;
+    const durable = serializeRun(run);
+    if (TERMINAL_RUN_STATUSES.has(durable.status)) {
+        await setRequiredJson(redisKeys.catalogRefreshJob(runId), durable, redisTtl.catalogRefreshJob).catch(() => undefined);
+        return durable;
     }
-    
-    const now = new Date();
-    const slot = calculateCurrentSlot(now);
-    
-    console.log(`[rotateActiveCatalogSlot] Updating SiteConfig activeSlot: ${slot}`);
-    await SiteConfig.findOneAndUpdate(
-        { key: 'catalog' },
+    return cached || durable;
+}
+
+export async function failQueuedCatalogRefreshRun(runId, error) {
+    const run = await CatalogRefreshRun.findOneAndUpdate(
+        { runId, status: 'queued' },
         {
             $set: {
-                'catalog.activeSlot': slot,
-                'catalog.lastRotationAt': now
-            }
-        }
+                status: 'failed',
+                currentPhase: 'failed',
+                errorCode: error?.code || 'INNGEST_SEND_FAILED',
+                errorMessage: 'Unable to queue the catalog refresh.',
+                completedAt: new Date(),
+            },
+        },
+        { new: true },
     );
-    
-    console.log(`[rotateActiveCatalogSlot] Invalidating slot cache and warming`);
-    // Invalidate slot-sensitive cache
-    await deleteByPattern('nitrocine:v1:catalog:slot:*');
-    
-    // Warm cache for the new slot
-    await getPublicHomePayload(10, 'US', now);
-    console.log(`[rotateActiveCatalogSlot] Rotation completed successfully!`);
+    if (run) await publishRun(run);
+    return run ? serializeRun(run) : null;
 }
+
+const updateRun = async (runId, fencingToken, patch, { terminal = false } = {}) => {
+    const filter = { runId, status: { $nin: ['succeeded', 'failed'] } };
+    if (fencingToken !== undefined && fencingToken !== null) filter.fencingToken = fencingToken;
+    const update = { $set: patch };
+    if (terminal) update.$set.completedAt = new Date();
+    const run = await CatalogRefreshRun.findOneAndUpdate(filter, update, { new: true });
+    if (!run) {
+        const current = await CatalogRefreshRun.findOne({ runId });
+        if (current) await publishRun(current).catch(() => undefined);
+        return current;
+    }
+    await publishRun(run);
+    return run;
+};
+
+async function claimRun({ runId, source, requestedBy, dryRun, weekKey, fencingToken }) {
+    const existing = await CatalogRefreshRun.findOne({ runId });
+    if (existing && TERMINAL_RUN_STATUSES.has(existing.status)) return { run: existing, terminal: true };
+    const run = await CatalogRefreshRun.findOneAndUpdate(
+        { runId, status: { $nin: ['succeeded', 'failed'] } },
+        {
+            $setOnInsert: { runId, source, requestedBy, dryRun, weekKey },
+            $set: {
+                status: 'running',
+                currentPhase: 'acquired-lock',
+                fencingToken,
+                startedAt: existing?.startedAt || new Date(),
+                errorCode: '',
+                errorMessage: '',
+            },
+            $inc: { attemptCount: 1 },
+        },
+        { new: true, upsert: true, setDefaultsOnInsert: true },
+    );
+    await publishRun(run);
+    return { run, terminal: false };
+}
+
+async function recordPreLeaseFailure({ runId, source, requestedBy, dryRun, weekKey, error }) {
+    const run = await CatalogRefreshRun.findOneAndUpdate(
+        { runId, status: { $nin: ['succeeded', 'failed'] } },
+        {
+            $setOnInsert: { runId, source, requestedBy, dryRun, weekKey },
+            $set: {
+                status: 'running',
+                currentPhase: 'waiting-for-lock',
+                errorCode: error.code,
+                errorMessage: error.message,
+                startedAt: new Date(),
+            },
+            $inc: { attemptCount: 1 },
+        },
+        { new: true, upsert: true, setDefaultsOnInsert: true },
+    );
+    const willRetry = error.transient && source !== 'cli' && run.attemptCount < 3;
+    if (willRetry) {
+        await publishRun(run).catch(() => undefined);
+        return run;
+    }
+    const failed = await CatalogRefreshRun.findOneAndUpdate(
+        { runId, status: { $nin: ['succeeded', 'failed'] }, attemptCount: run.attemptCount },
+        {
+            $set: {
+                status: 'failed',
+                currentPhase: 'failed',
+                completedAt: new Date(),
+            },
+        },
+        { new: true },
+    );
+    const current = failed || await CatalogRefreshRun.findOne({ runId }) || run;
+    await publishRun(current).catch(() => undefined);
+    return current;
+}
+
+async function allocateVersionedBatch({ weekKey, runId, fencingToken, source }) {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+        const session = await mongoose.startSession();
+        try {
+            let allocated;
+            await session.withTransaction(async () => {
+                const existing = await CatalogBatch.findOne({ runId }).session(session);
+                if (existing) {
+                    if (existing.status !== 'active' && existing.status !== 'retired') {
+                        existing.fencingToken = fencingToken;
+                        existing.status = 'building';
+                        existing.failureReason = '';
+                        await existing.save({ session });
+                    }
+                    allocated = existing;
+                    return;
+                }
+                const latest = await CatalogBatch.findOne({ weekKey }).sort({ version: -1 }).session(session).lean();
+                const version = (latest?.version || 0) + 1;
+                [allocated] = await CatalogBatch.create([{
+                    weekKey,
+                    version,
+                    runId,
+                    fencingToken,
+                    status: 'building',
+                    generatedAt: new Date(),
+                    sourceMeta: { language: 'en-US', region: 'US' },
+                    metrics: {},
+                }], { session });
+            });
+            return allocated;
+        } catch (error) {
+            if (error?.code === 11000 && attempt < 3) continue;
+            if (error?.code === 11000) {
+                throw new CatalogRefreshError('VERSION_CONFLICT', 'Unable to allocate a catalog version', { transient: true, cause: error });
+            }
+            throw error;
+        } finally {
+            await session.endSession();
+        }
+    }
+    throw new CatalogRefreshError('VERSION_CONFLICT', 'Unable to allocate a catalog version');
+}
+
+const movieBulkOperations = (movies) => movies.map((movie) => ({
+    updateOne: {
+        filter: { _id: String(movie._id) },
+        update: {
+            $set: {
+                title: movie.title,
+                overview: movie.overview,
+                poster_path: movie.poster_path,
+                backdrop_path: movie.backdrop_path,
+                release_date: movie.release_date,
+                original_language: movie.original_language,
+                tagline: movie.tagline || '',
+                genres: movie.genres || [],
+                casts: movie.casts || [],
+                vote_average: movie.vote_average,
+                runtime: movie.runtime,
+            },
+            $setOnInsert: {
+                heroVideoId: '',
+                heroVideoUrl: '',
+                heroVideoMimeType: '',
+                heroVideoPosterUrl: '',
+                heroVideoStatus: '',
+                heroVideoVersion: '',
+            },
+        },
+        upsert: true,
+    },
+}));
+
+async function assertLease(lock, lostLease) {
+    if (lostLease()) throw new CatalogRefreshError('LOCK_LOST', 'Catalog refresh lease was lost', { transient: true });
+    if (!await verifyFencedLock(lock)) throw new CatalogRefreshError('STALE_FENCE', 'Catalog refresh fencing token is stale', { transient: true });
+}
+
+export async function activateCatalogBatch(batchId, movies, {
+    lock,
+    lostLease = () => false,
+    now = new Date(),
+    faultInjector = async () => undefined,
+} = {}) {
+    if (!lock) throw new CatalogRefreshError('LOCK_REQUIRED', 'A fenced catalog lease is required for activation');
+    await assertLease(lock, lostLease);
+    const session = await mongoose.startSession();
+    try {
+        await session.withTransaction(async () => {
+            const batch = await CatalogBatch.findById(batchId).session(session);
+            if (!batch || batch.status !== 'staging') {
+                throw new CatalogRefreshError('BATCH_NOT_STAGING', 'Only a staging batch can be activated');
+            }
+            await Movie.bulkWrite(movieBulkOperations(movies), { session, ordered: false });
+            await faultInjector('after-movie-upsert');
+            const persistedCount = await Movie.countDocuments({ _id: { $in: batch.movieIds } }).session(session);
+            if (persistedCount !== 150) {
+                throw new CatalogRefreshError('PERSISTED_MOVIES_INCOMPLETE', `Expected 150 persisted movies, found ${persistedCount}`);
+            }
+            await CatalogBatch.updateMany(
+                { status: 'active', _id: { $ne: batch._id } },
+                { $set: { status: 'retired', retiredAt: now } },
+                { session },
+            );
+            await faultInjector('after-retire-active');
+            batch.status = 'active';
+            batch.activatedAt = now;
+            await batch.save({ session });
+            await faultInjector('after-activate-batch');
+
+            await assertLease(lock, lostLease);
+            await SiteConfig.updateOne(
+                { key: 'catalog' },
+                { $setOnInsert: { key: 'catalog', 'catalog.lastFencingToken': 0 } },
+                { upsert: true, session },
+            );
+            const config = await SiteConfig.findOneAndUpdate(
+                {
+                    key: 'catalog',
+                    $or: [
+                        { 'catalog.lastFencingToken': { $lt: lock.fencingToken } },
+                        { 'catalog.lastFencingToken': { $exists: false } },
+                    ],
+                },
+                {
+                    $set: {
+                        'catalog.activeBatchId': batch._id,
+                        'catalog.activeSlot': calculateCurrentSlot(now),
+                        'catalog.lastSuccessfulRefreshAt': now,
+                        'catalog.lastRotationAt': now,
+                        'catalog.lastFencingToken': lock.fencingToken,
+                    },
+                },
+                { new: true, session },
+            );
+            if (!config) throw new CatalogRefreshError('STALE_FENCE', 'A newer catalog fencing token is already active');
+            await faultInjector('after-site-config-update');
+            await assertLease(lock, lostLease);
+            await faultInjector('before-commit');
+        });
+    } finally {
+        await session.endSession();
+    }
+}
+
+const normalizeMovieForPayload = (movie) => ({
+    _id: String(movie._id),
+    id: String(movie._id),
+    title: movie.title,
+    overview: movie.overview,
+    poster_path: movie.poster_path,
+    backdrop_path: movie.backdrop_path,
+    release_date: movie.release_date,
+    original_language: movie.original_language,
+    tagline: movie.tagline || '',
+    genres: movie.genres || [],
+    casts: movie.casts || [],
+    vote_average: movie.vote_average,
+    runtime: movie.runtime,
+    heroVideoId: movie.heroVideoId || '',
+    heroVideoUrl: movie.heroVideoUrl || '',
+    heroVideoMimeType: movie.heroVideoMimeType || '',
+    heroVideoPosterUrl: movie.heroVideoPosterUrl || '',
+    heroVideoStatus: movie.heroVideoStatus || '',
+    heroVideoVersion: movie.heroVideoVersion || '',
+});
+
+const posterOnlyPayload = (payload) => ({
+    ...payload,
+    hero: (payload.hero || []).map((movie) => ({
+        ...movie,
+        heroVideoStatus: 'refreshing',
+        heroVideoUrl: '',
+        heroVideoMimeType: '',
+    })),
+});
 
 export async function getPublicHomePayload(limit = 10, region = 'US', now = new Date()) {
-    const config = await SiteConfig.findOne({ key: 'catalog' }).lean();
-    const refreshing = config?.catalog?.refreshing || false;
-    let batchId = config?.catalog?.activeBatchId;
-    
-    let batch = null;
-    if (batchId) {
-        batch = await CatalogBatch.findById(batchId).lean();
-    }
-    
+    void limit;
+    void region;
+    const [config, refreshState] = await Promise.all([
+        SiteConfig.findOne({ key: 'catalog' }).lean(),
+        getJson(redisKeys.catalogRefreshState()),
+    ]);
+    const refreshing = Boolean(refreshState?.active || config?.catalog?.refreshing);
+    let batch = config?.catalog?.activeBatchId
+        ? await CatalogBatch.findById(config.catalog.activeBatchId).lean()
+        : null;
+    if (!batch || batch.status !== 'active') batch = await CatalogBatch.findOne({ status: 'active' }).lean();
     if (!batch) {
-        batch = await CatalogBatch.findOne({ status: 'active' }).lean();
+        const lastGood = await getJson(redisKeys.catalogLastGood());
+        if (!lastGood) return { hero: [], nowShowing: [], popular: [], classics: [], recommended: [], meta: null };
+        return refreshing ? posterOnlyPayload(lastGood) : lastGood;
     }
-    
-    if (!batch) {
-        // Try last-good cache
-        const lastGood = await getJson('nitrocine:v1:catalog:last-good');
-        if (lastGood) {
-            if (refreshing) {
-                lastGood.hero = lastGood.hero.map(m => ({ ...m, heroVideoStatus: 'refreshing' }));
-            }
-            return lastGood;
-        }
-        return { hero: [], nowShowing: [], popular: [], classics: [], recommended: [] };
-    }
-    
+
     const slot = calculateCurrentSlot(now);
-    const cacheKey = `nitrocine:v1:catalog:slot:${batch._id}:${slot}`;
-    
-    const cached = await getJson(cacheKey);
-    if (cached) {
-        if (refreshing) {
-            cached.hero = cached.hero.map(m => ({ ...m, heroVideoStatus: 'refreshing' }));
-        }
-        return cached;
-    }
-    
-    // Fetch and permutation
-    const permutedIds = getDeterministicPermutation(batch.movieIds, `${batch.weekKey}-${slot}`);
-    const movies = await Movie.find({ _id: { $in: permutedIds } }).lean();
-    const movieMap = new Map(movies.map(m => [String(m._id), m]));
-    
-    const orderedMovies = permutedIds.map(id => {
-        const m = movieMap.get(String(id));
-        if (!m) return null;
-        return {
-            _id: String(m._id),
-            id: String(m._id),
-            title: m.title,
-            overview: m.overview,
-            poster_path: m.poster_path,
-            backdrop_path: m.backdrop_path,
-            release_date: m.release_date,
-            original_language: m.original_language,
-            tagline: m.tagline || '',
-            genres: m.genres || [],
-            casts: m.casts || [],
-            vote_average: m.vote_average,
-            runtime: m.runtime,
-            heroVideoId: m.heroVideoId || '',
-            heroVideoUrl: m.heroVideoUrl || '',
-            heroVideoMimeType: m.heroVideoMimeType || '',
-            heroVideoPosterUrl: m.heroVideoPosterUrl || '',
-            heroVideoStatus: m.heroVideoStatus || '',
-            heroVideoVersion: m.heroVideoVersion || ''
+    const cacheKey = redisKeys.catalogSlot(batch._id, slot);
+    let payload = await getJson(cacheKey);
+    if (!payload) {
+        const sectionIds = allocateCatalogSectionIds(batch, slot);
+        const orderedIds = [
+            ...sectionIds.hero,
+            ...sectionIds.nowShowing,
+            ...sectionIds.popular,
+            ...sectionIds.classics,
+            ...sectionIds.recommended,
+        ];
+        const movies = await Movie.find({ _id: { $in: orderedIds } }).lean();
+        const movieMap = new Map(movies.map((movie) => [String(movie._id), normalizeMovieForPayload(movie)]));
+        const resolve = (ids) => ids.map((id) => movieMap.get(String(id))).filter(Boolean);
+        payload = {
+            hero: resolve(sectionIds.hero),
+            nowShowing: resolve(sectionIds.nowShowing),
+            popular: resolve(sectionIds.popular),
+            classics: resolve(sectionIds.classics),
+            recommended: resolve(sectionIds.recommended),
+            meta: {
+                batchId: String(batch._id),
+                weekKey: batch.weekKey,
+                version: batch.version,
+                slot,
+            },
         };
-    }).filter(Boolean);
-    
-    const hero = orderedMovies.slice(0, 5);
-    const nowShowing = orderedMovies.slice(5, 25);
-    const popular = orderedMovies.slice(25, 45);
-    const classics = orderedMovies.slice(45, 65);
-    const recommended = orderedMovies.slice(65, 85);
-    
-    const payload = { hero, nowShowing, popular, classics, recommended };
-    
-    await setJson(cacheKey, payload, 86400 * 7);
-    await setJson('nitrocine:v1:catalog:last-good', payload, 86400 * 30);
-    
-    if (refreshing) {
-        payload.hero = payload.hero.map(m => ({ ...m, heroVideoStatus: 'refreshing' }));
+        const payloadIds = [payload.hero, payload.nowShowing, payload.popular, payload.classics, payload.recommended]
+            .flat()
+            .map((movie) => movie._id);
+        if (payloadIds.length !== 85 || new Set(payloadIds).size !== 85) {
+            throw new CatalogRefreshError('PAYLOAD_MOVIES_INCOMPLETE', 'Catalog payload must resolve 85 unique Movie documents');
+        }
+        await setJson(cacheKey, payload, 86400 * 7);
+        await setJson(redisKeys.catalogLastGood(), payload, 86400 * 30);
     }
-    
-    return payload;
+    return refreshing ? posterOnlyPayload(payload) : payload;
 }
 
-export async function refreshWeeklyCatalog(options = {}) {
-    const weekKey = getISOWeekKey(new Date());
-    if (options.dryRun) {
-        const { batch, movies } = await buildWeeklyCatalogBatch(weekKey);
-        const mongoose = (await import('mongoose')).default;
-        await mongoose.connection.collection('catalogbatches').deleteOne({ _id: batch._id });
-        return { success: true, dryRun: true, batchId: batch._id, movieCount: movies.length };
-    } else {
-        const { batch, movies } = await buildWeeklyCatalogBatch(weekKey);
-        await activateCatalogBatch(batch._id, movies);
-        return { success: true, batchId: batch._id, movieCount: movies.length };
-    }
+export async function rotateActiveCatalogSlot(now = new Date()) {
+    const config = await SiteConfig.findOne({ key: 'catalog' }).lean();
+    if (!config?.catalog?.activeBatchId) return { skipped: true };
+    const slot = calculateCurrentSlot(now);
+    await SiteConfig.updateOne(
+        { key: 'catalog' },
+        { $set: { 'catalog.activeSlot': slot, 'catalog.lastRotationAt': now } },
+    );
+    await deleteKeys(redisKeys.homeHero());
+    await deleteByPattern(redisKeys.homeHeroPattern());
+    await deleteByPattern(redisKeys.tmdbTrailersPattern());
+    const payload = await getPublicHomePayload(10, 'US', now);
+    return { skipped: false, slot, meta: payload.meta };
 }
 
+export async function refreshWeeklyCatalog({
+    dryRun = false,
+    source = 'cli',
+    runId = randomUUID(),
+    requestedBy = 'system',
+    now = new Date(),
+} = {}) {
+    await verifyCatalogV2Indexes();
+    const weekKey = getISOWeekKey(now);
+    const [terminalRun, fenceConfig] = await Promise.all([
+        CatalogRefreshRun.findOne({ runId, status: { $in: ['succeeded', 'failed'] } }),
+        SiteConfig.findOne({ key: 'catalog' }).select('catalog.lastFencingToken').lean(),
+    ]);
+    if (terminalRun) return serializeRun(terminalRun);
+    let lock;
+    try {
+        lock = await acquireFencedLock(redisKeys.catalogRefreshLock(), redisKeys.catalogRefreshFence(), {
+            ttlMs: redisTtl.catalogRefreshLockMs,
+            waitMs: 10000,
+            minimumFencingToken: fenceConfig?.catalog?.lastFencingToken || 0,
+        });
+    } catch (error) {
+        const normalized = new CatalogRefreshError(
+            error?.code === 'LOCK_BUSY' ? 'LOCK_BUSY' : 'REDIS_UNAVAILABLE',
+            error?.code === 'LOCK_BUSY' ? 'Catalog refresh is waiting for the active lease.' : 'Redis is unavailable for catalog refresh.',
+            { transient: true, cause: error },
+        );
+        await recordPreLeaseFailure({ runId, source, requestedBy, dryRun, weekKey, error: normalized });
+        throw normalized;
+    }
+    let lost = false;
+    let heartbeatBusy = false;
+    const heartbeat = setInterval(async () => {
+        if (heartbeatBusy || lost) return;
+        heartbeatBusy = true;
+        try {
+            if (!await renewFencedLock(lock)) lost = true;
+            if (!dryRun && !lost) {
+                await publishRefreshState(lock, runId);
+            }
+        } catch {
+            lost = true;
+        } finally {
+            heartbeatBusy = false;
+        }
+    }, Math.min(30000, Math.floor(redisTtl.catalogRefreshLockMs / 4)));
+    heartbeat.unref?.();
+
+    let batch = null;
+    try {
+        const claimed = await claimRun({ runId, source, requestedBy, dryRun, weekKey, fencingToken: lock.fencingToken });
+        if (claimed.terminal) return serializeRun(claimed.run);
+        console.info('[catalog-refresh]', JSON.stringify({ runId, status: 'started', source, dryRun, weekKey, fencingToken: lock.fencingToken }));
+        if (!dryRun) {
+            await publishRefreshState(lock, runId);
+            await CatalogBatch.updateMany(
+                {
+                    status: { $in: ['building', 'staging'] },
+                    $or: [
+                        { fencingToken: { $lt: lock.fencingToken } },
+                        { updatedAt: { $lt: new Date(now.getTime() - (redisTtl.catalogRefreshLockMs * 2)) } },
+                    ],
+                },
+                { $set: { status: 'failed', failureReason: 'STALE_REFRESH_RUN' } },
+            );
+            batch = await allocateVersionedBatch({ weekKey, runId, fencingToken: lock.fencingToken, source });
+            if (['active', 'retired'].includes(batch.status)) {
+                const run = await updateRun(runId, lock.fencingToken, {
+                    status: 'succeeded',
+                    currentPhase: 'completed',
+                    targetVersion: batch.version,
+                    batchId: batch._id,
+                    metrics: batch.metrics || {},
+                }, { terminal: true });
+                console.info('[catalog-refresh]', JSON.stringify({ runId, status: 'succeeded', weekKey, version: batch.version, idempotent: true }));
+                return serializeRun(run);
+            }
+            await updateRun(runId, lock.fencingToken, {
+                currentPhase: 'fetching',
+                targetVersion: batch.version,
+                batchId: batch._id,
+            });
+        } else {
+            const latest = await CatalogBatch.findOne({ weekKey }).sort({ version: -1 }).lean();
+            await updateRun(runId, lock.fencingToken, { currentPhase: 'validating', targetVersion: (latest?.version || 0) + 1 });
+        }
+
+        const draft = await buildWeeklyCatalogDraft({ weekKey });
+        await assertLease(lock, () => lost);
+        if (dryRun) {
+            const run = await updateRun(runId, lock.fencingToken, {
+                status: 'succeeded',
+                currentPhase: 'completed',
+                metrics: draft.metrics,
+            }, { terminal: true });
+            console.info('[catalog-refresh]', JSON.stringify({ runId, status: 'succeeded', weekKey, dryRun: true, metrics: draft.metrics }));
+            return serializeRun(run);
+        }
+
+        batch.buckets = draft.buckets;
+        batch.movieIds = draft.movieIds;
+        batch.sourceMeta = { ...draft.sourceMeta, source };
+        batch.metrics = draft.metrics;
+        batch.validatedAt = new Date();
+        batch.status = 'staging';
+        await batch.save();
+        await updateRun(runId, lock.fencingToken, { currentPhase: 'activating', metrics: draft.metrics });
+        await activateCatalogBatch(batch._id, draft.movies, { lock, lostLease: () => lost, now });
+
+        await deleteByPattern(redisKeys.catalogSlotPattern());
+        await deleteKeys(redisKeys.homeHero());
+        await deleteByPattern(redisKeys.homeHeroPattern());
+        await deleteByPattern(redisKeys.tmdbTrailersPattern());
+        await clearOwnedRefreshState(lock);
+        const payload = await getPublicHomePayload(10, 'US', now);
+        const run = await updateRun(runId, lock.fencingToken, {
+            status: 'succeeded',
+            currentPhase: 'completed',
+            metrics: draft.metrics,
+            batchId: batch._id,
+            targetVersion: batch.version,
+        }, { terminal: true });
+        console.info('[catalog-refresh]', JSON.stringify({ runId, status: 'succeeded', weekKey, version: batch.version, slot: payload.meta?.slot }));
+        return serializeRun(run);
+    } catch (error) {
+        const normalized = error instanceof CatalogRefreshError
+            ? error
+            : new CatalogRefreshError('CATALOG_REFRESH_FAILED', 'Catalog refresh failed.', { cause: error });
+        if (batch?._id) {
+            await CatalogBatch.updateOne(
+                { _id: batch._id, status: { $in: ['building', 'staging'] } },
+                { $set: { status: 'failed', failureReason: normalized.code } },
+            ).catch(() => undefined);
+        }
+        const auditRun = await CatalogRefreshRun.findOne({ runId }).lean().catch(() => null);
+        const willRetry = normalized.transient && source !== 'cli' && (auditRun?.attemptCount || 1) < 3;
+        await updateRun(runId, lock.fencingToken, willRetry ? {
+            currentPhase: 'retrying',
+            errorCode: normalized.code,
+            errorMessage: normalized.message,
+        } : {
+            status: 'failed',
+            currentPhase: 'failed',
+            errorCode: normalized.code,
+            errorMessage: normalized.message,
+        }, { terminal: !willRetry }).catch(() => undefined);
+        console.error('[catalog-refresh]', JSON.stringify({ runId, status: willRetry ? 'retrying' : 'failed', code: normalized.code }));
+        throw normalized;
+    } finally {
+        clearInterval(heartbeat);
+        if (!dryRun) await clearOwnedRefreshState(lock).catch(() => undefined);
+        await releaseFencedLock(lock);
+    }
+}

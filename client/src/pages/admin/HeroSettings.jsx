@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDownIcon, ArrowUpIcon, CheckIcon, ImagePlusIcon, RotateCcwIcon, SaveIcon, SearchIcon, SparklesIcon, XIcon } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Loading from '../../components/Loading';
@@ -7,6 +7,7 @@ import { useAppContext } from '../../context/AppContext';
 import HeroVideoUploader from './HeroVideoUploader';
 
 const MAX_HERO_MOVIES = 5;
+const CATALOG_JOB_STORAGE_KEY = 'nitrocine_catalog_refresh_job';
 
 const getImageUrl = (path, size = 'w342') => {
   if (!path) return '';
@@ -24,28 +25,71 @@ const HeroSettings = () => {
   const [searchTerm, setSearchTerm] = useState('');
   
   const [dryRun, setDryRun] = useState(false);
-  const [refreshingCatalog, setRefreshingCatalog] = useState(false);
+  const [refreshingCatalog, setRefreshingCatalog] = useState(() => Boolean(sessionStorage.getItem(CATALOG_JOB_STORAGE_KEY)));
   const [refreshStatus, setRefreshStatus] = useState('');
+  const [catalogJobId, setCatalogJobId] = useState(() => sessionStorage.getItem(CATALOG_JOB_STORAGE_KEY) || '');
+  const terminalToastRef = useRef('');
 
   const handleCatalogRefresh = async () => {
     try {
       setRefreshingCatalog(true);
-      setRefreshStatus('Refreshing...');
+      setRefreshStatus('Queueing...');
       const { data } = await axios.post('/api/admin/catalog/refresh', { dryRun });
-      if (data.success) {
-        setRefreshStatus('Success');
-        toast.success(data.dryRun ? 'Dry run completed successfully.' : 'Catalog refreshed successfully.');
-      } else {
-        setRefreshStatus('Failed');
-        toast.error(data.message || 'Catalog refresh failed.');
-      }
+      if (!data.success || !data.jobId) throw new Error(data.message || 'Catalog refresh was not queued.');
+      sessionStorage.setItem(CATALOG_JOB_STORAGE_KEY, data.jobId);
+      terminalToastRef.current = '';
+      setCatalogJobId(data.jobId);
+      setRefreshStatus('Queued');
     } catch (error) {
       setRefreshStatus('Failed');
       toast.error(error.response?.data?.message || error.message || 'Catalog refresh failed.');
-    } finally {
       setRefreshingCatalog(false);
     }
   };
+
+  useEffect(() => {
+    if (!catalogJobId) return undefined;
+    let active = true;
+    let timer;
+    const poll = async () => {
+      try {
+        const { data } = await axios.get(`/api/admin/catalog/refresh/${encodeURIComponent(catalogJobId)}`);
+        if (!active || !data.success) return;
+        const job = data.job;
+        const terminal = job.status === 'succeeded' || job.status === 'failed';
+        setRefreshingCatalog(!terminal);
+        setRefreshStatus(job.status === 'running'
+          ? `Running: ${job.currentPhase}`
+          : job.status.charAt(0).toUpperCase() + job.status.slice(1));
+        if (terminal) {
+          sessionStorage.removeItem(CATALOG_JOB_STORAGE_KEY);
+          if (terminalToastRef.current !== `${catalogJobId}:${job.status}`) {
+            terminalToastRef.current = `${catalogJobId}:${job.status}`;
+            if (job.status === 'succeeded') {
+              toast.success(job.dryRun
+                ? `Dry run validated ${job.metrics?.detailsFetched || 150} movies.`
+                : `Catalog v${job.targetVersion} activated.`);
+            } else {
+              toast.error(job.errorMessage || job.errorCode || 'Catalog refresh failed.');
+            }
+          }
+          setCatalogJobId('');
+          return;
+        }
+        timer = window.setTimeout(poll, 2000);
+      } catch (error) {
+        if (!active) return;
+        setRefreshingCatalog(false);
+        setRefreshStatus('Status unavailable');
+        toast.error(error.response?.data?.message || 'Unable to read catalog refresh status.');
+      }
+    };
+    void poll();
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [axios, catalogJobId]);
 
 
   const movieById = useMemo(() => {
@@ -207,7 +251,7 @@ const HeroSettings = () => {
 
               {refreshStatus && (
                 <span className={`text-sm font-medium ${
-                  refreshStatus === 'Success' ? 'text-green-500' :
+                  refreshStatus === 'Succeeded' ? 'text-green-500' :
                   refreshStatus === 'Failed' ? 'text-red-500' :
                   'text-gray-400'
                 }`}>

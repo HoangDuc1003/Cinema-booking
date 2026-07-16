@@ -5,11 +5,6 @@ import { fetchWithTimeout as requestWithTimeout } from './fetchWithTimeout.js';
 
 const API_BASE = (import.meta.env.VITE_BASE_URL || '').replace(/\/$/, '');
 const IMAGE_BASE = 'https://image.tmdb.org/t/p';
-const HERO_CACHE_KEY = 'home_hero_v2';
-const HERO_CACHE_TTL = 1000 * 60 * 2;
-const HOME_NOW_SHOWING_CACHE_KEY = 'home_now_showing_v1';
-const HOME_NOW_SHOWING_CACHE_TTL = 1000 * 60 * 5;
-const HOME_NOW_SHOWING_STALE_TTL = 1000 * 60 * 60 * 24;
 const API_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS) || 4500;
 
 const fallbackMovies = (limit = dummyShowsData.length) => dummyShowsData.slice(0, limit);
@@ -56,16 +51,6 @@ const fetchBackendJson = async (path, options = {}) => {
 
 export const fetchHomeHero = async ({ signal } = {}) => {
     try {
-        const cached = sessionStorage.getItem(HERO_CACHE_KEY);
-        if (cached) {
-            const parsed = JSON.parse(cached);
-            if (Date.now() - parsed.t < HERO_CACHE_TTL) return parsed.data;
-        }
-    } catch {
-        //
-    }
-
-    try {
         const response = await fetchWithTimeout(`${API_BASE}/api/show/hero`, { signal });
         const payload = await response.json().catch(() => null);
         if (!response.ok || !payload?.success) {
@@ -75,20 +60,15 @@ export const fetchHomeHero = async ({ signal } = {}) => {
         const data = {
             settings: payload.settings || {},
             movies: onlyMoviesWithImages(Array.isArray(payload.movies) && payload.movies.length ? payload.movies : fallbackMovies(5)),
+            source: Array.isArray(payload.movies) && payload.movies.length ? 'server' : 'fallback',
         };
-
-        try {
-            sessionStorage.setItem(HERO_CACHE_KEY, JSON.stringify({ t: Date.now(), data }));
-        } catch {
-            //
-        }
-
         return data;
     } catch (error) {
         if (signal?.aborted) throw error;
         return {
             settings: { mode: 'fallback', effectiveMode: 'fallback' },
             movies: onlyMoviesWithImages(fallbackMovies(5)),
+            source: 'fallback',
         };
     }
 };
@@ -130,23 +110,6 @@ export const fetchHomeNowShowing = async ({ limit = 10, region } = {}) => {
     const safeRegion = /^[A-Za-z]{2}$/.test(String(region || ''))
         ? String(region).toUpperCase()
         : '';
-    let staleEntry = null;
-
-    try {
-        const cached = sessionStorage.getItem(HOME_NOW_SHOWING_CACHE_KEY);
-        if (cached) {
-            const parsed = JSON.parse(cached);
-            if (Array.isArray(parsed?.data)) {
-                staleEntry = parsed;
-                if (Date.now() - parsed.t < HOME_NOW_SHOWING_CACHE_TTL) {
-                    return parsed.data.slice(0, safeLimit);
-                }
-            }
-        }
-    } catch {
-        // Cache is an optimization; continue with the live source.
-    }
-
     try {
         const query = new URLSearchParams({ limit: String(safeLimit) });
         if (safeRegion) query.set('region', safeRegion);
@@ -155,21 +118,9 @@ export const fetchHomeNowShowing = async ({ limit = 10, region } = {}) => {
         const movies = onlyMoviesWithImages(rawMovies.map(normalizeMovieCard));
         if (!movies.length) throw new Error('Home Now Showing returned no usable movies.');
 
-        try {
-            sessionStorage.setItem(HOME_NOW_SHOWING_CACHE_KEY, JSON.stringify({
-                t: Date.now(),
-                data: movies,
-            }));
-        } catch {
-            // Still return fresh data when storage is unavailable.
-        }
-
         return movies.slice(0, safeLimit);
     } catch (error) {
-        if (staleEntry && Date.now() - staleEntry.t < HOME_NOW_SHOWING_STALE_TTL) {
-            return staleEntry.data.slice(0, safeLimit);
-        }
-        console.error('fetchHomeNowShowing error', error);
+        if (error?.name === 'AbortError') throw error;
         return onlyMoviesWithImages(fallbackMovies(safeLimit).map(normalizeMovieCard));
     }
 };
@@ -312,11 +263,10 @@ export const fetchMovieDetails = async (id) => {
     }
 }
 // services/tmdb.js
-export const fetchLatestTrailers = async (opts = { limit: 10, ttlHours: 2, pagesToSearch: 4 }) => {
+export const fetchLatestTrailers = async (opts = { limit: 10 }) => {
     try {
         const limit = opts.limit || 10;
-        const pages = opts.pagesToSearch || 4;
-        return await fetchBackendJson(`/trailers?limit=${limit}&pages=${pages}`);
+        return await fetchBackendJson(`/trailers?limit=${limit}`);
     } catch { return []; }
 };
 

@@ -7,6 +7,7 @@ import Movie from '../models/Movie.js';
 import SiteConfig from '../models/SiteConfig.js';
 import {
     getDeterministicPermutation,
+    allocateCatalogSectionIds,
     getISOWeekKey,
     calculateCurrentSlot,
     buildWeeklyCatalogBatch,
@@ -14,6 +15,7 @@ import {
     rotateActiveCatalogSlot,
     getPublicHomePayload
 } from '../services/catalogRefreshService.js';
+import { redisKeys } from '../services/redisKeys.js';
 
 test('getISOWeekKey returns correct week keys', () => {
     // 2026-07-15T23:08:30+07:00 is a Wednesday in W29
@@ -26,21 +28,46 @@ test('getISOWeekKey returns correct week keys', () => {
 });
 
 test('calculateCurrentSlot returns correct slot index', () => {
-    // Mon 03:00 - 08:00 is slot 0
-    const slot0 = new Date('2026-07-13T03:00:00+07:00');
-    assert.equal(calculateCurrentSlot(slot0), 0);
+    assert.equal(calculateCurrentSlot(new Date('2026-07-13T07:59:59+07:00')), 13);
+    assert.equal(calculateCurrentSlot(new Date('2026-07-13T08:00:00+07:00')), 0);
+    assert.equal(calculateCurrentSlot(new Date('2026-07-13T20:00:00+07:00')), 1);
+    assert.equal(calculateCurrentSlot(new Date('2026-07-14T07:59:59+07:00')), 1);
+    assert.equal(calculateCurrentSlot(new Date('2026-07-19T20:00:00+07:00')), 13);
+    for (let day = 13; day <= 19; day += 1) {
+        for (let hour = 0; hour < 24; hour += 1) {
+            for (const minute of [0, 59]) {
+                const slot = calculateCurrentSlot(new Date(`2026-07-${day}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00+07:00`));
+                assert.ok(slot >= 0 && slot <= 13, `invalid slot ${slot} at day ${day}, ${hour}:${minute}`);
+            }
+        }
+    }
+});
 
-    // Mon 02:59 is slot 14
-    const slot14Mon = new Date('2026-07-13T02:59:59+07:00');
-    assert.equal(calculateCurrentSlot(slot14Mon), 14);
-
-    // Mon 08:00 - 20:00 is slot 1
-    const slot1 = new Date('2026-07-13T08:00:00+07:00');
-    assert.equal(calculateCurrentSlot(slot1), 1);
-
-    // Sunday 20:00 is slot 14
-    const slot14Sun = new Date('2026-07-19T20:00:00+07:00');
-    assert.equal(calculateCurrentSlot(slot14Sun), 14);
+test('section allocation preserves bucket semantics and 85 globally unique IDs', () => {
+    const batch = {
+        weekKey: '2026-W29',
+        buckets: {
+            newest: Array.from({ length: 50 }, (_, index) => `newest-${index}`),
+            popular: Array.from({ length: 50 }, (_, index) => `popular-${index}`),
+            classics: Array.from({ length: 50 }, (_, index) => `classic-${index}`),
+        },
+    };
+    const seenAcrossWeek = new Set();
+    for (let slot = 0; slot < 14; slot += 1) {
+        const sections = allocateCatalogSectionIds(batch, slot);
+        assert.equal(sections.hero.length, 5);
+        assert.equal(sections.nowShowing.length, 20);
+        assert.equal(sections.popular.length, 20);
+        assert.equal(sections.classics.length, 20);
+        assert.equal(sections.recommended.length, 20);
+        assert.ok([...sections.hero, ...sections.nowShowing].every((id) => id.startsWith('newest-')));
+        assert.ok(sections.popular.every((id) => id.startsWith('popular-')));
+        assert.ok(sections.classics.every((id) => id.startsWith('classic-')));
+        const all = Object.values(sections).flat();
+        assert.equal(new Set(all).size, 85);
+        all.forEach((id) => seenAcrossWeek.add(id));
+    }
+    assert.equal(seenAcrossWeek.size, 150);
 });
 
 test('getDeterministicPermutation is deterministic and based on seed', () => {
@@ -62,6 +89,8 @@ test('buildWeeklyCatalogBatch collects, validates, and buckets movies', async ()
     const originalGet = axios.get;
     const originalSave = CatalogBatch.prototype.save;
     const originalDeleteOne = CatalogBatch.findOneAndDelete;
+    let activeDetails = 0;
+    let maxActiveDetails = 0;
     
     // Mock axios.get
     axios.get = async (url, config) => {
@@ -91,12 +120,16 @@ test('buildWeeklyCatalogBatch collects, validates, and buckets movies', async ()
             // Return movie details
             const urlParts = url.split('/');
             const movieId = Number(urlParts[urlParts.length - 1]);
+            activeDetails += 1;
+            maxActiveDetails = Math.max(maxActiveDetails, activeDetails);
+            await new Promise((resolve) => setTimeout(resolve, 1));
+            activeDetails -= 1;
             return {
                 data: {
                     id: movieId,
                     title: `Test Movie ${movieId}`,
                     overview: `Overview of ${movieId}`,
-                    release_date: '2020-01-01',
+                    release_date: movieId >= 2000 && movieId < 3000 ? '2010-01-01' : '2020-01-01',
                     poster_path: `/poster-${movieId}.jpg`,
                     backdrop_path: `/backdrop-${movieId}.jpg`,
                     adult: false,
@@ -133,6 +166,7 @@ test('buildWeeklyCatalogBatch collects, validates, and buckets movies', async ()
         
         assert.equal(movies.length, 150);
         assert.equal(movies[0].title, `Test Movie ${movies[0]._id}`);
+        assert.ok(maxActiveDetails <= 5, `detail concurrency exceeded five: ${maxActiveDetails}`);
     } finally {
         axios.get = originalGet;
         CatalogBatch.prototype.save = originalSave;
@@ -168,7 +202,14 @@ test('getPublicHomePayload partitions correctly and handles refreshing status', 
     const mockBatch = {
         _id: 'batch-123',
         weekKey: '2026-W29',
-        movieIds: Array.from({ length: 150 }, (_, i) => `movie-${i}`)
+        version: 2,
+        status: 'active',
+        buckets: {
+            newest: Array.from({ length: 50 }, (_, i) => `movie-${i}`),
+            classics: Array.from({ length: 50 }, (_, i) => `movie-${i + 50}`),
+            popular: Array.from({ length: 50 }, (_, i) => `movie-${i + 100}`),
+        },
+        movieIds: Array.from({ length: 150 }, (_, i) => `movie-${i}`),
     };
     
     SiteConfig.findOne = () => ({
@@ -198,6 +239,7 @@ test('getPublicHomePayload partitions correctly and handles refreshing status', 
     });
     
     try {
+        cacheStore[redisKeys.catalogRefreshState()] = JSON.stringify({ active: true });
         const payload = await getPublicHomePayload(10, 'US', new Date());
         
         // Assert sizes

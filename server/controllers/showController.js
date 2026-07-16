@@ -8,7 +8,7 @@ import { redisKeys, redisTtl } from '../services/redisKeys.js';
 import { getPublicHomeHero } from '../services/heroService.js';
 import { getPublicHomeNowShowing } from '../services/homeNowShowingService.js';
 import { fetchTmdbImage } from '../services/tmdbImageService.js';
-import { getPublicHomePayload } from '../services/catalogRefreshService.js';
+import { calculateCurrentSlot, getPublicHomePayload } from '../services/catalogRefreshService.js';
 
 const tmdbHeaders = () => ({ Authorization: `Bearer ${process.env.TMDB_API_KEY}` });
 const setCacheHeader = (res, cache) => res.set('X-Cache', cache);
@@ -226,43 +226,38 @@ export const searchTmdbMovies = async (req, res) => {
 export const getTmdbTrailers = async (req, res) => {
     try {
         const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 10, 1), 20);
-        const pages = Math.min(Math.max(Number.parseInt(req.query.pages, 10) || 4, 1), 5);
+        let payload;
+        try {
+            payload = await getPublicHomePayload(limit, 'US', new Date());
+        } catch {
+            const movies = await Movie.find({ poster_path: { $nin: [null, ''] } })
+                .sort({ updatedAt: -1 })
+                .limit(limit)
+                .lean();
+            payload = { nowShowing: movies, popular: [], recommended: [], meta: null };
+        }
+        const candidates = [
+            ...(payload.nowShowing || []),
+            ...(payload.popular || []),
+            ...(payload.recommended || []),
+        ].slice(0, limit).map((movie) => ({
+            id: movie.id || movie._id,
+            _id: movie._id || movie.id,
+            title: movie.title,
+            overview: movie.overview,
+            release_date: movie.release_date,
+            vote_average: movie.vote_average,
+            poster_path: movie.poster_path?.startsWith('http') ? movie.poster_path : (movie.poster_path ? `https://image.tmdb.org/t/p/w500${movie.poster_path}` : null),
+            backdrop_path: movie.backdrop_path?.startsWith('http') ? movie.backdrop_path : (movie.backdrop_path ? `https://image.tmdb.org/t/p/w780${movie.backdrop_path}` : null),
+            qualityLabel: 'HD',
+        }));
+        const batchId = payload.meta?.batchId || 'fallback';
+        const slot = payload.meta?.slot ?? calculateCurrentSlot(new Date());
         return await sendTmdbResponse(
             res,
-            redisKeys.tmdbTrailers(limit, pages),
+            redisKeys.tmdbTrailers(batchId, slot, limit),
             redisTtl.movies,
-            async () => {
-                try {
-                    const trailers = [];
-                    for (let page = 1; page <= pages && trailers.length < limit; page += 1) {
-                        const nowPlaying = await fetchTmdbJson('/movie/now_playing', { language: 'en-US', page });
-                        for (const movie of nowPlaying.results || []) {
-                            const videos = await fetchTmdbJson(`/movie/${movie.id}/videos`, { language: 'en-US' });
-                            const video = videos.results?.find(
-                                (item) => item.site?.toLowerCase() === 'youtube' && item.type === 'Trailer',
-                            );
-                            if (!video) continue;
-                            trailers.push({
-                                id: movie.id,
-                                title: movie.title,
-                                overview: movie.overview,
-                                release_date: movie.release_date,
-                                vote_average: movie.vote_average,
-                                backdrop_path: movie.backdrop_path ? `https://image.tmdb.org/t/p/w1280${movie.backdrop_path}` : null,
-                                videoUrl: `https://www.youtube.com/embed/${video.key}`,
-                                thumbnail: `https://img.youtube.com/vi/${video.key}/hqdefault.jpg`,
-                                videoName: video.name,
-                                qualityLabel: '1080p',
-                            });
-                            if (trailers.length >= limit) break;
-                        }
-                    }
-                    return trailers;
-                } catch (error) {
-                    console.warn('[getTmdbTrailers] TMDB unavailable:', error.message);
-                    return [];
-                }
-            },
+            async () => candidates,
         );
     } catch (error) {
         console.error('[getTmdbTrailers]', error.message);

@@ -1,6 +1,6 @@
 import { cloudinary } from '../configs/cloudinary.js';
 import Movie from '../models/Movie.js';
-import { deleteKeys } from './cacheService.js';
+import { deleteByPattern, deleteKeys } from './cacheService.js';
 import { redisKeys } from './redisKeys.js';
 
 export const getUploadSignature = async (movieId) => {
@@ -22,18 +22,43 @@ export const getUploadSignature = async (movieId) => {
     };
 };
 
-export const commitHeroVideo = async (movieId, { publicId, url, mimeType }) => {
+const invalidateHeroCatalogCaches = async () => {
+    await deleteKeys(redisKeys.homeHero(), redisKeys.catalogLastGood());
+    await deleteByPattern(redisKeys.homeHeroPattern());
+    await deleteByPattern(redisKeys.catalogSlotPattern());
+};
+
+const verifyUploadedHeroVideo = async (publicId) => {
+    const id = String(publicId || '').trim();
+    if (!id.startsWith('hero_trailers/') || id.length > 240 || id.includes('..')) {
+        throw new Error('Invalid Hero video asset ID');
+    }
+    const asset = await cloudinary.api.resource(id, { resource_type: 'video' });
+    const format = String(asset?.format || '').toLowerCase();
+    const secureUrl = String(asset?.secure_url || '');
+    if (asset?.public_id !== id || asset?.resource_type !== 'video' || !['mp4', 'webm'].includes(format)) {
+        throw new Error('Uploaded Hero asset is not a supported native video');
+    }
+    const parsedUrl = new URL(secureUrl);
+    if (parsedUrl.protocol !== 'https:' || parsedUrl.hostname !== 'res.cloudinary.com') {
+        throw new Error('Uploaded Hero asset is not hosted by the trusted CDN');
+    }
+    return { publicId: id, url: secureUrl, mimeType: `video/${format}` };
+};
+
+export const commitHeroVideo = async (movieId, { publicId }) => {
     const movie = await Movie.findById(movieId);
     if (!movie) throw new Error('Movie not found');
+    const verified = await verifyUploadedHeroVideo(publicId);
 
-    movie.heroVideoId = publicId || '';
-    movie.heroVideoUrl = url || '';
-    movie.heroVideoMimeType = mimeType || 'video/mp4';
+    movie.heroVideoId = verified.publicId;
+    movie.heroVideoUrl = verified.url;
+    movie.heroVideoMimeType = verified.mimeType;
     movie.heroVideoStatus = 'ready';
     movie.heroVideoVersion = Date.now().toString();
     await movie.save();
 
-    await deleteKeys(redisKeys.homeHero());
+    await invalidateHeroCatalogCaches();
     return movie;
 };
 
@@ -56,7 +81,7 @@ export const removeHeroVideo = async (movieId) => {
     movie.heroVideoVersion = Date.now().toString();
     await movie.save();
 
-    await deleteKeys(redisKeys.homeHero());
+    await invalidateHeroCatalogCaches();
     return movie;
 };
 

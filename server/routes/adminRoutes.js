@@ -1,6 +1,6 @@
 import express from 'express'
 import { protectAdmin } from '../middleware/auth.js';
-import { getAllBookings, getDashboardData, getHeroSettings, isAdmin, getAllShows, updateHeroSettings, getHeroVideoSignature, commitHeroVideoAction, removeHeroVideoAction, refreshCatalogAction } from '../controllers/adminController.js';
+import { getAllBookings, getDashboardData, getHeroSettings, isAdmin, getAllShows, updateHeroSettings, getHeroVideoSignature, commitHeroVideoAction, removeHeroVideoAction, refreshCatalogAction, getCatalogRefreshStatusAction } from '../controllers/adminController.js';
 
 const adminRouter = express.Router();
 
@@ -14,6 +14,7 @@ adminRouter.delete('/hero/:movieId/video', protectAdmin, removeHeroVideoAction)
 adminRouter.get('/all-shows', protectAdmin,getAllShows)
 adminRouter.get('/all-bookings', protectAdmin,getAllBookings)
 adminRouter.post('/catalog/refresh', protectAdmin, refreshCatalogAction)
+adminRouter.get('/catalog/refresh/:runId', protectAdmin, getCatalogRefreshStatusAction)
 
 export default adminRouter;
 

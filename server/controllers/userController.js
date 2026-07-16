@@ -2,6 +2,19 @@ import { clerkClient } from "@clerk/express";
 import Booking from "../models/Booking.js";
 import Movies from "../models/Movie.js";
 
+export const resolveFavoriteMovies = async (
+    userId,
+    {
+        getUser = (id) => clerkClient.users.getUser(id),
+        findMovies = (ids) => Movies.find({ _id: { $in: ids } }).lean(),
+    } = {},
+) => {
+    const user = await getUser(userId);
+    const favorites = user.privateMetadata?.favorites || [];
+    if (!favorites.length) return [];
+    return findMovies(favorites);
+};
+
 // GET /api/user/bookings - Get user bookings
 export const getUserBookings = async (req, res) => {
     try {
@@ -61,14 +74,7 @@ export const getFavorites = async (req, res) => {
             return res.status(401).json({ success: false, message: "Not authorized" });
         }
 
-        const user = await clerkClient.users.getUser(userId);
-        const favorites = user.privateMetadata?.favorites || [];
-
-        if (!favorites.length) {
-            return res.json({ success: true, movies: [] });
-        }
-
-        const movies = await Movies.find({ _id: { $in: favorites } }).lean();
+        const movies = await resolveFavoriteMovies(userId);
         res.json({ success: true, movies });
     } catch (error) {
         console.log('[getFavorites Error]:', error.message);

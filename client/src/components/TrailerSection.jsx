@@ -29,7 +29,7 @@ const getTrailerVideoId = (trailer) => {
   return candidates.map(extractYouTubeVideoId).find(Boolean) || null;
 };
 
-const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnly = false, onDataLoaded }) => {
+const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnly = false }) => {
   const [trailers, setTrailers]         = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading]       = useState(true);
@@ -39,6 +39,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
 
   const carouselRef = useRef(null);
   const styleRef    = useRef(false);
+  const prefetchedRef = useRef(new Set());
 
   const currentTrailer = trailers[currentIndex] || null;
 
@@ -128,9 +129,12 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
     const load = async () => {
       setIsLoading(true);
       try {
-        const data = await fetchLatestTrailers({ limit: 10, ttlHours: 2, pagesToSearch: 4 });
+        const data = await fetchLatestTrailers({ limit: 10 });
         if (!mounted) return;
-        setTrailers((cur) => mergeTrailerLists(cur.filter((t) => t.isRequestedTrailer), data));
+        setTrailers((cur) => mergeTrailerLists(
+          cur.filter((t) => t.isRequestedTrailer),
+          data.map((candidate) => ({ ...candidate, videoResolved: false })),
+        ));
         setHasError(false);
       } catch (e) {
         console.error('Failed to load trailers:', e);
@@ -138,13 +142,11 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
       } finally {
         if (mounted) {
           setIsLoading(false);
-          if (onDataLoaded) onDataLoaded();
         }
       }
     };
     load();
-    const id = setInterval(load, 1000 * 60 * 60 * 2);
-    return () => { mounted = false; clearInterval(id); };
+    return () => { mounted = false; };
   }, [movieOnly]);
 
   useEffect(() => {
@@ -166,12 +168,62 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
         if (movieOnly && mounted) setHasError(true);
       } finally {
         if (movieOnly && mounted) setIsLoading(false);
-        if (mounted && onDataLoaded) onDataLoaded();
       }
     };
     load();
     return () => { mounted = false; controller.abort(); };
   }, [featuredMovie, movieOnly]);
+
+  useEffect(() => {
+    if (movieOnly) return undefined;
+    const candidate = trailers[currentIndex];
+    if (!candidate || candidate.videoResolved) return undefined;
+    let mounted = true;
+    const controller = new AbortController();
+
+    const resolveCandidate = async (index, movie) => {
+      const data = await fetchMovieTrailers(movie, { signal: controller.signal }).catch(() => []);
+      if (!mounted) return false;
+      setTrailers((current) => current.map((item, itemIndex) => (
+        itemIndex === index
+          ? { ...item, ...(data[0] || {}), videoResolved: true }
+          : item
+      )));
+      return data.length > 0;
+    };
+
+    const load = async () => {
+      await resolveCandidate(currentIndex, candidate);
+    };
+
+    void load();
+    return () => { mounted = false; controller.abort(); };
+  }, [currentIndex, movieOnly, trailers]);
+
+  useEffect(() => {
+    if (movieOnly || trailers.length < 2) return undefined;
+    const current = trailers[currentIndex];
+    if (!current?.videoResolved || !getTrailerVideoId(current)) return undefined;
+    const nextIndex = (currentIndex + 1) % trailers.length;
+    const next = trailers[nextIndex];
+    const nextKey = String(next?._id || next?.id || nextIndex);
+    if (!next || next.videoResolved || prefetchedRef.current.has(nextKey)) return undefined;
+    prefetchedRef.current.add(nextKey);
+    let mounted = true;
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      const data = await fetchMovieTrailers(next, { signal: controller.signal }).catch(() => []);
+      if (!mounted) return;
+      setTrailers((items) => items.map((item, index) => (
+        index === nextIndex ? { ...item, ...(data[0] || {}), videoResolved: true } : item
+      )));
+    }, 750);
+    return () => {
+      mounted = false;
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [currentIndex, movieOnly, trailers]);
 
   if (movieOnly) {
     if (isLoading) {
@@ -186,7 +238,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
     return (
       <section id={sectionId} className="scroll-mt-20 relative overflow-hidden" style={{ background: 'transparent', marginTop: 20 }}>
         <div className="ts-content-shell">
-          {currentTrailer && (
+          {currentTrailer && getTrailerVideoId(currentTrailer) && (
             <CinematicTrailerPlayer
               videoId={getTrailerVideoId(currentTrailer)}
               movieTitle={currentTrailer.videoName || currentTrailer.title}
@@ -219,7 +271,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
         <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-white tracking-wide">Trailers</h2>
       </div>
 
-      {currentTrailer && (
+      {currentTrailer && getTrailerVideoId(currentTrailer) && (
         <div className="relative z-10 w-full">
           <CinematicTrailerPlayer
             videoId={getTrailerVideoId(currentTrailer)}
@@ -233,6 +285,10 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
             onPrevious={goPrev}
           />
         </div>
+      )}
+
+      {currentTrailer && !getTrailerVideoId(currentTrailer) && !currentTrailer.videoResolved && (
+        <div className="flex items-center justify-center py-20"><Loading /></div>
       )}
 
       <div className="ts-carousel-wrap relative z-10" onMouseEnter={() => setCarouselPaused(true)} onMouseLeave={() => setCarouselPaused(false)}>

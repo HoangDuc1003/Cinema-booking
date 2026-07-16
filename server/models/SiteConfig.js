@@ -13,6 +13,7 @@ const siteConfigSchema = new mongoose.Schema(
             activeSlot: { type: Number },
             lastRotationAt: { type: Date },
             lastSuccessfulRefreshAt: { type: Date },
+            lastFencingToken: { type: Number, default: 0 },
         },
     },
     { timestamps: true },

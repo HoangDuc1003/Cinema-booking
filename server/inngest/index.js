@@ -2,11 +2,20 @@ import { Inngest } from 'inngest';
 import connectDB from '../configs/db.js';
 import User from '../models/User.js';
 import { reconcileHeroAssets } from '../services/heroVideoService.js';
-import { getISOWeekKey, buildWeeklyCatalogBatch, activateCatalogBatch, rotateActiveCatalogSlot } from '../services/catalogRefreshService.js';
+import { getISOWeekKey, refreshWeeklyCatalog, rotateActiveCatalogSlot } from '../services/catalogRefreshService.js';
 
 // Gracefully handle missing Inngest keys (avoids crashing on Vercel)
 let inngest;
 let functions = [];
+
+const executeCatalogRefresh = async (options) => {
+    try {
+        return await refreshWeeklyCatalog(options);
+    } catch (error) {
+        if (error?.transient) throw error;
+        return { success: false, permanent: true, errorCode: error?.code || 'CATALOG_REFRESH_FAILED' };
+    }
+};
 
 try {
     // Create Inngest client
@@ -14,14 +23,42 @@ try {
 
     // Background job: Weekly catalog refresh
     const weeklyCatalogRefresh = inngest.createFunction(
-        { id: "weekly-catalog-refresh", cron: "TZ=Asia/Ho_Chi_Minh 0 3 * * 1" },
-        async () => {
+        {
+            id: "weekly-catalog-refresh",
+            cron: "TZ=Asia/Ho_Chi_Minh 0 3 * * 1",
+            retries: 3,
+            concurrency: { limit: 1, key: '"catalog-refresh"', scope: 'env' },
+        },
+        async ({ event, step }) => {
             await connectDB();
-            const weekKey = getISOWeekKey(new Date());
-            const { batch, movies } = await buildWeeklyCatalogBatch(weekKey);
-            await activateCatalogBatch(batch._id, movies);
-            return { success: true, batchId: batch._id };
+            const scheduledAt = new Date(event?.ts || Date.now());
+            const runId = `cron:${getISOWeekKey(scheduledAt)}:${scheduledAt.toISOString()}`;
+            return step.run('refresh-weekly-catalog', () => executeCatalogRefresh({
+                source: 'cron',
+                runId,
+                requestedBy: 'inngest-cron',
+                now: scheduledAt,
+            }));
         }
+    );
+
+    const requestedCatalogRefresh = inngest.createFunction(
+        {
+            id: 'requested-catalog-refresh',
+            retries: 3,
+            concurrency: { limit: 1, key: '"catalog-refresh"', scope: 'env' },
+            triggers: [{ event: 'catalog/refresh.requested' }],
+        },
+        async ({ event, step }) => {
+            await connectDB();
+            const { runId, dryRun, requestedBy } = event.data;
+            return step.run('refresh-requested-catalog', () => executeCatalogRefresh({
+                source: 'admin',
+                runId,
+                dryRun: Boolean(dryRun),
+                requestedBy,
+            }));
+        },
     );
 
     // Background job: Rotate active catalog slot
@@ -110,6 +147,7 @@ try {
         syncUserDeletion,
         syncUserUpdation,
         weeklyCatalogRefresh,
+        requestedCatalogRefresh,
         rotateActiveCatalogSlotJob,
         reconcileHeroAssetsJob
     ];

@@ -66,7 +66,9 @@ app.use(clerkMiddleware({
 }));
 
 app.use(async (req, res, next) => {
-    if (req.path.startsWith('/api/show/tmdb')) {
+    const catalogBackedTmdbPath = req.path === '/api/show/tmdb/home-now-showing'
+        || req.path === '/api/show/tmdb/trailers';
+    if (req.path.startsWith('/api/show/tmdb') && !catalogBackedTmdbPath) {
         return next();
     }
 

@@ -11,6 +11,12 @@ const withRedis = async (operation, fallback = null) => {
     }
 };
 
+export const withRequiredRedis = async (operation) => {
+    const client = await connectRedis({ required: true });
+    if (!client?.isReady) throw new Error('Redis is not ready');
+    return operation(client);
+};
+
 export const getJson = async (key) => withRedis(async (client) => {
     const value = await client.get(key);
     return value === null ? null : JSON.parse(value);
@@ -19,6 +25,10 @@ export const getJson = async (key) => withRedis(async (client) => {
 export const setJson = async (key, value, ttlSeconds) => withRedis(
     (client) => client.set(key, JSON.stringify(value), { EX: ttlSeconds }),
     false,
+);
+
+export const setRequiredJson = async (key, value, ttlSeconds) => withRequiredRedis(
+    (client) => client.set(key, JSON.stringify(value), { EX: ttlSeconds }),
 );
 
 export const getValue = async (key) => withRedis((client) => client.get(key));
@@ -60,4 +70,6 @@ export default {
     deleteKeys,
     deleteByPattern,
     rememberJson,
+    withRequiredRedis,
+    setRequiredJson,
 };

@@ -8,7 +8,9 @@
     "start": "node api/index.js",
     "test": "node --test",
     "test:concurrency": "node scripts/simulate-booking-concurrency.js",
-    "seed:catalog": "node scripts/seed.js"
+    "seed:catalog": "node scripts/seed.js",
+    "migrate:catalog-v2": "node scripts/migrate-catalog-v2.js",
+    "rollback:catalog": "node scripts/rollback-catalog.js"
   },
   "keywords": [],
   "author": "",

@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useReducer, useRef, useState } from 'rea
 import { useNavigate } from 'react-router-dom';
 import { fetchHomeHero } from '../services/tmdb';
 import { dummyShowsData } from '../assets/assets';
-import Loading from './Loading';
 import HeroContent from './hero/HeroContent';
 import HeroMedia from './hero/HeroMedia';
 import HeroPosterRail from './hero/HeroPosterRail';
@@ -183,24 +182,17 @@ const useSaveData = () => {
 
 const HeroSection = ({
   autoPreview = false,
-  introComplete = true,
-  posterWarmupMs = 0,
-  onDataLoaded,
 }) => {
   const navigate = useNavigate();
   const initialBestMovies = selectBestHeroMovies(dummyShowsData);
   const [movies, setMovies] = useState(initialBestMovies);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [isLoading, setIsLoading] = useState(false);
   const [heroCatalogSettled, setHeroCatalogSettled] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [playbackIntent, setPlaybackIntent] = useState(HERO_PLAYBACK_INTENT.NONE);
   const [muted, setMuted] = useState(true);
   const [soundPreferred, setSoundPreferred] = useState(true);
   const [autoplaySoundBlocked, setAutoplaySoundBlocked] = useState(false);
-  const [posterWarmupComplete, setPosterWarmupComplete] = useState(() => (
-    !autoPreview || (introComplete && posterWarmupMs <= 0)
-  ));
   const [catalogSource, setCatalogSource] = useState(() => {
     const isMock = new URLSearchParams(window.location.search).get('heroMock') === '1';
     return isMock ? 'mock' : 'fallback';
@@ -480,11 +472,7 @@ const HeroSection = ({
         if (controller.signal.aborted) return;
 
         const isMock = new URLSearchParams(window.location.search).get('heroMock') === '1';
-        if (data && Array.isArray(data.movies) && data.movies.length) {
-          setCatalogSource(isMock ? 'mock' : 'server');
-        } else {
-          setCatalogSource(isMock ? 'mock' : 'fallback');
-        }
+        setCatalogSource(isMock ? 'mock' : (data?.source === 'server' ? 'server' : 'fallback'));
 
         const rawMovies = Array.isArray(data.movies) && data.movies.length ? data.movies : dummyShowsData;
         const orderedMovies = rawMovies.slice(0, HERO_MAX_MOVIES);
@@ -504,9 +492,7 @@ const HeroSection = ({
         }
       } finally {
         if (!controller.signal.aborted) {
-          setIsLoading(false);
           setHeroCatalogSettled(true);
-          if (onDataLoaded) onDataLoaded();
         }
       }
     };
@@ -537,17 +523,6 @@ const HeroSection = ({
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
-
-  useEffect(() => {
-    const shouldComplete = !autoPreview || (introComplete && documentVisible);
-    const delay = shouldComplete && autoPreview
-      ? Math.max(0, Number(posterWarmupMs) || 0)
-      : 0;
-    // A timer callback avoids a synchronous state cascade and lets cleanup
-    // cancel the gate immediately when the tab becomes hidden.
-    const timerId = window.setTimeout(() => setPosterWarmupComplete(shouldComplete), delay);
-    return () => window.clearTimeout(timerId);
-  }, [autoPreview, documentVisible, introComplete, posterWarmupMs]);
 
   useEffect(() => {
     if (heroVisible && documentVisible) return;
@@ -872,13 +847,7 @@ const HeroSection = ({
     dispatch({ type: 'AUDIO_FALLBACK_MUTED', generation });
   }, []);
 
-  if (isLoading || !currentMovie) {
-    return (
-      <div className="hero-section flex items-center justify-center">
-        <Loading />
-      </div>
-    );
-  }
+  if (!currentMovie) return null;
 
   const desktopImageCandidates = currentMovie.heroImageCandidates?.length
     ? currentMovie.heroImageCandidates
@@ -910,8 +879,6 @@ const HeroSection = ({
       ref={rootRef}
       className={`hero-section ${disclosure.isCompact ? 'is-compact' : ''}`.trim()}
       aria-label="Featured movie"
-      data-intro-complete={introComplete ? 'true' : 'false'}
-      data-poster-warmup-complete={posterWarmupComplete ? 'true' : 'false'}
       data-video-visible={videoVisible ? 'true' : 'false'}
       data-catalog-source={catalogSource}
     >

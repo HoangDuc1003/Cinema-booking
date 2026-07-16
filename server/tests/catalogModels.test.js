@@ -2,10 +2,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import CatalogBatch from '../models/CatalogBatch.js';
 import SiteConfig from '../models/SiteConfig.js';
+import CatalogRefreshRun from '../models/CatalogRefreshRun.js';
+
+const batchIdentity = {
+    version: 1,
+    runId: 'test-run-2026-w28',
+    fencingToken: 1,
+};
 
 test('CatalogBatch validation rejects invalid status values', () => {
     const batch = new CatalogBatch({
         weekKey: '2026-W28',
+        ...batchIdentity,
         status: 'invalid_status',
     });
     const err = batch.validateSync();
@@ -16,6 +24,7 @@ test('CatalogBatch validation rejects invalid status values', () => {
 test('CatalogBatch validation rejects bucket with non-50 items when staging', () => {
     const batch = new CatalogBatch({
         weekKey: '2026-W28',
+        ...batchIdentity,
         status: 'staging',
         buckets: {
             newest: Array(49).fill('movie-1'), // 49 instead of 50
@@ -34,6 +43,7 @@ test('CatalogBatch validation rejects duplicate movie IDs in buckets', () => {
     const newest = Array(50).fill('movie-1');
     const batch = new CatalogBatch({
         weekKey: '2026-W28',
+        ...batchIdentity,
         status: 'staging',
         buckets: {
             newest,
@@ -55,6 +65,7 @@ test('CatalogBatch validation accepts exactly 50 unique movie IDs in buckets and
 
     const batch = new CatalogBatch({
         weekKey: '2026-W28',
+        ...batchIdentity,
         status: 'staging',
         buckets: { newest, classics, popular },
         movieIds,
@@ -78,9 +89,25 @@ test('CatalogBatch validation accepts exactly 50 unique movie IDs in buckets and
     assert.equal(err, undefined);
 });
 
+test('CatalogBatch validation rejects overlap between otherwise valid buckets', () => {
+    const newest = Array.from({ length: 50 }, (_, index) => `newest-${index}`);
+    const classics = Array.from({ length: 50 }, (_, index) => `classics-${index}`);
+    const popular = Array.from({ length: 50 }, (_, index) => `popular-${index}`);
+    popular[0] = newest[0];
+    const batch = new CatalogBatch({
+        weekKey: '2026-W28',
+        ...batchIdentity,
+        status: 'staging',
+        buckets: { newest, classics, popular },
+        movieIds: Array.from({ length: 150 }, (_, index) => `movie-${index}`),
+    });
+    assert.ok(batch.validateSync()?.errors.movieIds);
+});
+
 test('CatalogBatch validation skips bucket and movieIds length checks if status is failed', () => {
     const batch = new CatalogBatch({
         weekKey: '2026-W28',
+        ...batchIdentity,
         status: 'failed',
         buckets: {
             newest: ['only-one'],
@@ -101,4 +128,26 @@ test('SiteConfig has catalog schema fields', () => {
     assert.ok(schema.path('catalog.activeSlot'));
     assert.ok(schema.path('catalog.lastRotationAt'));
     assert.ok(schema.path('catalog.lastSuccessfulRefreshAt'));
+    assert.ok(schema.path('catalog.lastFencingToken'));
+});
+
+test('CatalogBatch exposes version, run and single-active database guards', () => {
+    const indexes = CatalogBatch.schema.indexes();
+    assert.ok(indexes.some(([fields, options]) => fields.weekKey === 1 && fields.version === 1 && options.unique));
+    assert.ok(indexes.some(([fields, options]) => fields.runId === 1 && options.unique && options.sparse));
+    assert.ok(indexes.some(([fields, options]) => fields.status === 1 && options.partialFilterExpression?.status === 'active'));
+});
+
+test('CatalogRefreshRun only accepts monotonic lifecycle status values', () => {
+    const run = new CatalogRefreshRun({
+        runId: 'run-audit-1',
+        source: 'admin',
+        requestedBy: 'admin-1',
+        dryRun: false,
+        status: 'queued',
+        weekKey: '2026-W28',
+    });
+    assert.equal(run.validateSync(), undefined);
+    run.status = 'unknown';
+    assert.ok(run.validateSync()?.errors.status);
 });

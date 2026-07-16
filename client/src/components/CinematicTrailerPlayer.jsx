@@ -37,7 +37,6 @@ const CinematicTrailerPlayer = ({
   
   const handleError = (e) => {
     console.warn("Trailer Player Error:", e);
-    if (onNext) onNext();
   };
 
   const { containerRef, player } = useYouTubePlayer({
