@@ -27,6 +27,10 @@ export default defineConfig({
     url: 'http://127.0.0.1:4174/',
     reuseExistingServer: true,
     timeout: 30_000,
+    env: {
+      ...process.env,
+      VITE_E2E_PROFILE_TEST: 'true',
+    },
   },
 });
 

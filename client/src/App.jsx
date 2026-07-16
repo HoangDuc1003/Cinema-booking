@@ -7,6 +7,8 @@ import Footer from './components/Footer'
 import ErrorBoundary from './components/ErrorBoundary'
 import { useAppContext } from './context/AppContext';
 import Loading from './components/Loading';
+import useMediaQuery from './hooks/useMediaQuery';
+import MobileExperienceGate from './components/mobile/MobileExperienceGate';
 
 const Home = lazy(() => import('./pages/Home'));
 const Movies = lazy(() => import('./pages/Movies'));
@@ -29,10 +31,39 @@ const HeroSettings = lazy(() => import('./pages/admin/HeroSettings'));
 // Keep the cinematic loading surface consistent while route chunks resolve.
 const PageFallback = () => <Loading />;
 
+const PublicRoutes = () => (
+  <Routes>
+    <Route path='/' element={<ErrorBoundary><Home /></ErrorBoundary>} />
+    <Route path='/movies' element={<ErrorBoundary><Movies /></ErrorBoundary>} />
+    <Route path='/movies/:id' element={<ErrorBoundary><MovieDetails /></ErrorBoundary>} />
+    <Route path='/my-bookings' element={<ErrorBoundary><MyBookings /></ErrorBoundary>} />
+    <Route path='/loading/:nextUrl' element={<ErrorBoundary><Loading /></ErrorBoundary>} />
+    <Route path='/favorite' element={<ErrorBoundary><Favorite /></ErrorBoundary>} />
+    <Route path='/releases' element={<ErrorBoundary><Release /></ErrorBoundary>} />
+    <Route path='/theater' element={<ErrorBoundary><Theater /></ErrorBoundary>} />
+    <Route path='/my-movies' element={<ErrorBoundary><MyMovies /></ErrorBoundary>} />
+    <Route path="/movies/:id/:date" element={<ErrorBoundary><SeatLayout /></ErrorBoundary>} />
+  </Routes>
+);
+
 const App = () => {
   // Hide navbar/footer on admin routes
   const isAdminRoute = useLocation().pathname.startsWith('/admin')
   const { user } = useAppContext()
+  const isPhone = useMediaQuery('(max-width: 767px)') && !isAdminRoute;
+
+  if (isPhone) {
+    return (
+      <div className='min-h-screen w-full overflow-x-hidden bg-black'>
+        <Toaster />
+        {isPhone ? <MobileExperienceGate>
+          <Suspense fallback={<PageFallback />}>
+            <PublicRoutes />
+          </Suspense>
+        </MobileExperienceGate> : null}
+      </div>
+    );
+  }
 
   return (
     <div className='flex flex-col min-h-screen overflow-x-hidden w-full'>
@@ -42,57 +73,8 @@ const App = () => {
 
       <main className='flex-grow'>
         <Suspense fallback={<PageFallback />}>
+          <PublicRoutes />
           <Routes>
-            <Route path='/' element={
-              <ErrorBoundary>
-                <Home />
-              </ErrorBoundary>
-            } />
-            <Route path='/movies' element={
-              <ErrorBoundary>
-                <Movies />
-              </ErrorBoundary>
-            } />
-            <Route path='/movies/:id' element={
-              <ErrorBoundary>
-                <MovieDetails />
-              </ErrorBoundary>
-            } />
-            <Route path='/my-bookings' element={
-              <ErrorBoundary>
-                <MyBookings />
-              </ErrorBoundary>
-            } />
-            <Route path='/loading/:nextUrl' element={
-              <ErrorBoundary>
-                <Loading />
-              </ErrorBoundary>
-            } />
-            <Route path='/favorite' element={
-              <ErrorBoundary>
-                <Favorite />
-              </ErrorBoundary>
-            } />
-            <Route path='/releases' element={
-              <ErrorBoundary>
-                <Release />
-              </ErrorBoundary>
-            } />
-            <Route path='/theater' element={
-              <ErrorBoundary>
-                <Theater />
-              </ErrorBoundary>
-            } />
-            <Route path='/my-movies' element={
-              <ErrorBoundary>
-                <MyMovies />
-              </ErrorBoundary>
-            } />
-            <Route path="/movies/:id/:date" element={
-              <ErrorBoundary>
-                <SeatLayout />
-              </ErrorBoundary>
-            } />
             <Route path="/admin/*" element={user ? (
               <ErrorBoundary>
                 <Layout />

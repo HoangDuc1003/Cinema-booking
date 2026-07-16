@@ -461,7 +461,7 @@ export async function queueCatalogRefreshRun({ runId = randomUUID(), source = 'a
     const run = await CatalogRefreshRun.findOneAndUpdate(
         { runId },
         { $setOnInsert: { runId, source, requestedBy, dryRun, status: 'queued', currentPhase: 'queued', weekKey } },
-        { new: true, upsert: true, setDefaultsOnInsert: true },
+        { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true },
     );
     await publishRun(run);
     return serializeRun(run);
@@ -492,7 +492,7 @@ export async function failQueuedCatalogRefreshRun(runId, error) {
                 completedAt: new Date(),
             },
         },
-        { new: true },
+        { returnDocument: 'after' },
     );
     if (run) await publishRun(run);
     return run ? serializeRun(run) : null;
@@ -503,7 +503,7 @@ const updateRun = async (runId, fencingToken, patch, { terminal = false } = {}) 
     if (fencingToken !== undefined && fencingToken !== null) filter.fencingToken = fencingToken;
     const update = { $set: patch };
     if (terminal) update.$set.completedAt = new Date();
-    const run = await CatalogRefreshRun.findOneAndUpdate(filter, update, { new: true });
+    const run = await CatalogRefreshRun.findOneAndUpdate(filter, update, { returnDocument: 'after' });
     if (!run) {
         const current = await CatalogRefreshRun.findOne({ runId });
         if (current) await publishRun(current).catch(() => undefined);
@@ -530,7 +530,7 @@ async function claimRun({ runId, source, requestedBy, dryRun, weekKey, fencingTo
             },
             $inc: { attemptCount: 1 },
         },
-        { new: true, upsert: true, setDefaultsOnInsert: true },
+        { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true },
     );
     await publishRun(run);
     return { run, terminal: false };
@@ -550,7 +550,7 @@ async function recordPreLeaseFailure({ runId, source, requestedBy, dryRun, weekK
             },
             $inc: { attemptCount: 1 },
         },
-        { new: true, upsert: true, setDefaultsOnInsert: true },
+        { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true },
     );
     const willRetry = error.transient && source !== 'cli' && run.attemptCount < 3;
     if (willRetry) {
@@ -566,7 +566,7 @@ async function recordPreLeaseFailure({ runId, source, requestedBy, dryRun, weekK
                 completedAt: new Date(),
             },
         },
-        { new: true },
+        { returnDocument: 'after' },
     );
     const current = failed || await CatalogRefreshRun.findOne({ runId }) || run;
     await publishRun(current).catch(() => undefined);
@@ -707,7 +707,7 @@ export async function activateCatalogBatch(batchId, movies, {
                         'catalog.lastFencingToken': lock.fencingToken,
                     },
                 },
-                { new: true, session },
+                { returnDocument: 'after', session },
             );
             if (!config) throw new CatalogRefreshError('STALE_FENCE', 'A newer catalog fencing token is already active');
             await faultInjector('after-site-config-update');

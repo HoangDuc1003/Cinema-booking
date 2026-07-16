@@ -105,7 +105,7 @@ export const fetchMovieTrailers = async (movie, { signal } = {}) => {
         }));
 };
 
-export const fetchHomeNowShowing = async ({ limit = 10, region } = {}) => {
+export const fetchHomeNowShowing = async ({ limit = 10, region, signal } = {}) => {
     const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 10, 1), 20);
     const safeRegion = /^[A-Za-z]{2}$/.test(String(region || ''))
         ? String(region).toUpperCase()
@@ -113,7 +113,7 @@ export const fetchHomeNowShowing = async ({ limit = 10, region } = {}) => {
     try {
         const query = new URLSearchParams({ limit: String(safeLimit) });
         if (safeRegion) query.set('region', safeRegion);
-        const data = await fetchBackendJson(`/home-now-showing?${query.toString()}`);
+        const data = await fetchBackendJson(`/home-now-showing?${query.toString()}`, { signal });
         const rawMovies = Array.isArray(data?.results) ? data.results : [];
         const movies = onlyMoviesWithImages(rawMovies.map(normalizeMovieCard));
         if (!movies.length) throw new Error('Home Now Showing returned no usable movies.');
@@ -156,7 +156,7 @@ export const fetchPopularMovies = async (options = { includeDetails: false, deta
         let allMovies = [];
         for (let p = 0; p < totalPages; p++) {
             const pageNum = basePage + p;
-            const data = await fetchBackendJson(`/popular?page=${pageNum}`);
+            const data = await fetchBackendJson(`/popular?page=${pageNum}`, { signal: options?.signal });
             allMovies.push(...data.results);
         }
 
@@ -270,9 +270,9 @@ export const fetchLatestTrailers = async (opts = { limit: 10 }) => {
     } catch { return []; }
 };
 
-export const fetchUpcomingMovies = async () => {
+export const fetchUpcomingMovies = async ({ signal } = {}) => {
     try {
-        const data = await fetchBackendJson('/upcoming?page=1');
+        const data = await fetchBackendJson('/upcoming?page=1', { signal });
         return onlyMoviesWithImages(data.results.map(movie => ({
             ...movie,
             poster_path: movie.poster_path ? `${IMAGE_BASE}/w500${movie.poster_path}` : null,
