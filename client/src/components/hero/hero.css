@@ -553,7 +553,7 @@
 .hero-poster-rail.is-compacting,
 .hero-poster-rail.is-hidden {
   opacity: 0;
-  pointer-events: none;
+  pointer-events: none !important;
   transform: translateY(1.5rem);
 }
 
@@ -824,6 +824,5 @@
   .hero-media__breath { opacity: 0.03 !important; }
   .hero-transition-flare { opacity: 0 !important; }
 }
-
 
 

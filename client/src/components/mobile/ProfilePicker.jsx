@@ -18,6 +18,20 @@ const ProfileEditor = ({ profile, onClose }) => {
     nameRef.current?.focus();
     const onKeyDown = (event) => {
       if (event.key === 'Escape') onClose();
+      if (event.key !== 'Tab' || !dialogRef.current) return;
+      const focusable = [...dialogRef.current.querySelectorAll(
+        'button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+      )];
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
@@ -31,6 +45,8 @@ const ProfileEditor = ({ profile, onClose }) => {
       if (profile) await updateProfile(profile.id, input);
       else await createProfile(input);
       onClose();
+    } catch {
+      // The context exposes a sanitized message while the editor stays open.
     } finally {
       setSaving(false);
     }
@@ -42,6 +58,8 @@ const ProfileEditor = ({ profile, onClose }) => {
     try {
       await deleteProfile(profile.id);
       onClose();
+    } catch {
+      // The context exposes a sanitized message while the editor stays open.
     } finally {
       setSaving(false);
     }
@@ -100,10 +118,20 @@ const ProfilePicker = () => {
   const [editMode, setEditMode] = useState(false);
   const [editingProfile, setEditingProfile] = useState(undefined);
   const editTriggerRef = useRef(null);
+  const editorTriggerIdRef = useRef('');
+
+  const openEditor = (profile) => {
+    editorTriggerIdRef.current = profile?.id || 'add-profile';
+    setEditingProfile(profile);
+  };
 
   const closeEditor = () => {
     setEditingProfile(undefined);
-    window.setTimeout(() => editTriggerRef.current?.focus(), 0);
+    window.setTimeout(() => {
+      const trigger = [...document.querySelectorAll('[data-profile-editor-trigger]')]
+        .find((element) => element.dataset.profileEditorTrigger === editorTriggerIdRef.current);
+      (trigger || editTriggerRef.current)?.focus();
+    }, 0);
   };
 
   return (
@@ -117,7 +145,12 @@ const ProfilePicker = () => {
         <div className="mobile-profile-grid">
           {profiles.map((profile) => (
             <div className="mobile-profile-tile" key={profile.id}>
-              <button type="button" onClick={() => editMode ? setEditingProfile(profile) : selectProfile(profile)} aria-label={`${editMode ? 'Chỉnh sửa' : 'Chọn'} hồ sơ ${profile.name}`}>
+              <button
+                type="button"
+                data-profile-editor-trigger={profile.id}
+                onClick={() => editMode ? openEditor(profile) : selectProfile(profile)}
+                aria-label={`${editMode ? 'Chỉnh sửa' : 'Chọn'} hồ sơ ${profile.name}`}
+              >
                 <ProfileAvatar avatarId={profile.avatarId} name={profile.name} />
                 {editMode && <span className="mobile-profile-tile__edit" aria-hidden="true"><Pencil /></span>}
               </button>
@@ -126,7 +159,7 @@ const ProfilePicker = () => {
           ))}
           {editMode && profiles.length < 5 && (
             <div className="mobile-profile-tile">
-              <button type="button" onClick={() => setEditingProfile(null)} aria-label="Thêm hồ sơ" className="mobile-profile-add"><Plus /></button>
+              <button type="button" data-profile-editor-trigger="add-profile" onClick={() => openEditor(null)} aria-label="Thêm hồ sơ" className="mobile-profile-add"><Plus /></button>
               <span>Thêm hồ sơ</span>
             </div>
           )}

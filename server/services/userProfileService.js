@@ -63,7 +63,7 @@ export const sanitizeProfiles = (profiles = []) => {
 
 export const createDefaultProfile = (displayName = 'Bạn') => ({
     id: randomUUID(),
-    name: normalizeName(String(displayName || 'Bạn').slice(0, 20)),
+    name: normalizeName(String(displayName || 'Bạn').trim().slice(0, 20) || 'Bạn'),
     avatarId: ALLOWED_PROFILE_AVATARS[0],
     isKids: false,
 });
@@ -96,4 +96,3 @@ export const deleteProfileFromCollection = (profiles, profileId) => {
     if (next.length === current.length) throw new ProfileValidationError('Profile was not found.', 404);
     return next;
 };
-

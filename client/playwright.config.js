@@ -28,7 +28,6 @@ export default defineConfig({
     reuseExistingServer: true,
     timeout: 30_000,
     env: {
-      ...process.env,
       VITE_E2E_PROFILE_TEST: 'true',
     },
   },

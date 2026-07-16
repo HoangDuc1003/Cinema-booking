@@ -23,6 +23,7 @@ export const useHeroContentDisclosure = ({
 
   const timersRef = useRef(new Set());
   const pointerLeaveTimerRef = useRef(null);
+  const pointerIntentRef = useRef(false);
   const stateRef = useRef(disclosureState);
   useEffect(() => {
     stateRef.current = disclosureState;
@@ -139,15 +140,22 @@ export const useHeroContentDisclosure = ({
   // Handle pointer hover intent (80-120ms enter, 900-1300ms leave)
   const handlePointerEnter = useCallback(() => {
     clearPointerLeaveTimer();
+    pointerIntentRef.current = false;
+  }, [clearPointerLeaveTimer]);
+
+  const handlePointerMove = useCallback(() => {
+    if (pointerIntentRef.current) return;
+    pointerIntentRef.current = true;
     setIsPointerActive(true);
     if (stateRef.current === 'compact' || stateRef.current === 'compacting') {
       scheduleTimer(() => {
         expand({ animate: true });
       }, POINTER_ENTER_DELAY_MS);
     }
-  }, [clearPointerLeaveTimer, expand, scheduleTimer]);
+  }, [expand, scheduleTimer]);
 
   const handlePointerLeave = useCallback(() => {
+    pointerIntentRef.current = false;
     setIsPointerActive(false);
     clearPointerLeaveTimer();
     if (
@@ -231,6 +239,7 @@ export const useHeroContentDisclosure = ({
     expand,
     compact,
     handlePointerEnter,
+    handlePointerMove,
     handlePointerLeave,
     handleFocusCapture,
     handleBlurCapture,

@@ -112,11 +112,6 @@ export const AppProvider = ({ children }) => {
   }, [user]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchShows(); 
-  }, [fetchShows]);
-
-  useEffect(() => {
     if (user) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       fetchIsAdmin();

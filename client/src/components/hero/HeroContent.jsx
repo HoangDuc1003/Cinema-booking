@@ -26,6 +26,7 @@ const HeroContent = ({
   onScheduleRecompact,
   onCancelRecompact,
   onPointerEnter,
+  onPointerMove,
   onPointerLeave,
   onFocusCapture,
   onBlurCapture,
@@ -67,6 +68,7 @@ const HeroContent = ({
         onPointerEnter?.(event);
         onReveal?.(event);
       }}
+      onMouseMove={(event) => onPointerMove?.(event)}
       onMouseLeave={(event) => {
         onPointerLeave?.(event);
         onScheduleRecompact?.(event.currentTarget);

@@ -28,6 +28,8 @@ const mockHomeApis = async (page) => {
       body = { success: true, data: { results: movies.slice().reverse() } };
     } else if (url.includes('/upcoming')) {
       body = { success: true, data: { results: movies.slice(4) } };
+    } else if (url.includes('/trailers')) {
+      body = { success: true, data: [] };
     } else if (url.endsWith('/api/show/all')) {
       body = { success: true, shows: movies };
     } else {
@@ -70,6 +72,7 @@ test.describe('mobile application experience', () => {
     await setProfileFixture(page, { signedIn: false });
     await page.goto('/');
     await expect(page.getByTestId('mobile-auth-entry')).toBeVisible();
+    await expect.poll(() => page.locator('.mobile-auth-entry__backdrop').evaluate((image) => image.complete && image.naturalWidth > 0)).toBe(true);
     await expect(page.getByRole('button', { name: 'Đăng nhập' })).toBeVisible();
     await expect(page.locator('.app-navbar')).toHaveCount(0);
     await expect(page.locator('footer')).toHaveCount(0);
@@ -86,14 +89,50 @@ test.describe('mobile application experience', () => {
     await expect(profile).toBeFocused();
     await page.screenshot({ path: evidence('02-profile-picker-390x844.png'), fullPage: true });
     await profile.press('Enter');
-    await expect(page.getByRole('status', { name: 'Đang tải trang chủ' })).toBeVisible();
+    await expect(page.getByRole('status')).toContainText('Đang tải trang chủ');
     await page.screenshot({ path: evidence('03-profile-launch-390x844.png'), fullPage: true });
     await expect(page.getByTestId('mobile-home')).toBeVisible({ timeout: 4_000 });
     expect(await page.evaluate(() => sessionStorage.getItem('nitrocine:active-profile:e2e-user'))).toBe('profile-one');
   });
 
+  test('profile editor supports rename, allowed avatar selection, add and permitted delete', async ({ page }) => {
+    await openPicker(page);
+    await page.getByRole('button', { name: 'Quản lý hồ sơ' }).click();
+    await page.getByRole('button', { name: 'Chỉnh sửa hồ sơ Hoàng' }).click();
+    const name = page.getByLabel('Tên hồ sơ');
+    await expect(name).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Shift+Tab');
+    await expect(page.getByRole('button', { name: 'Lưu hồ sơ' })).toBeFocused();
+    await name.fill('Hoàng mới');
+    await page.getByRole('button', { name: 'Chọn ảnh nitro-blue' }).click();
+    await page.getByRole('button', { name: 'Lưu hồ sơ' }).click();
+    await expect(page.getByText('Hoàng mới', { exact: true })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Thêm hồ sơ' }).click();
+    await page.getByLabel('Tên hồ sơ').fill('Gia đình');
+    await page.getByRole('button', { name: 'Lưu hồ sơ' }).click();
+    await expect(page.getByText('Gia đình', { exact: true })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Chỉnh sửa hồ sơ Gia đình' }).click();
+    await page.getByRole('button', { name: 'Xóa' }).click();
+    await expect(page.getByText('Gia đình', { exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Chỉnh sửa hồ sơ Hoàng mới' }).click();
+    await expect(page.getByRole('button', { name: 'Xóa' })).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('button', { name: 'Chỉnh sửa hồ sơ Hoàng mới' })).toBeFocused();
+  });
+
   for (const viewport of [{ width: 390, height: 844 }, { width: 430, height: 932 }]) {
     test(`mobile Home has app shell at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+      const requests = [];
+      const failedAppRequests = [];
+      const pageErrors = [];
+      page.on('request', (request) => requests.push(request.url()));
+      page.on('requestfailed', (request) => {
+        if (/\/api\/show\/|\/src\/assets\//.test(request.url())) failedAppRequests.push(request.url());
+      });
+      page.on('pageerror', (error) => pageErrors.push(error.message));
       await enterHome(page, viewport);
       await expect(page.getByTestId('mobile-top-bar')).toBeVisible();
       await expect(page.getByRole('navigation', { name: 'Danh mục phim' })).toBeVisible();
@@ -103,6 +142,15 @@ test.describe('mobile application experience', () => {
       await expect(page.locator('.app-navbar')).toHaveCount(0);
       await expect(page.locator('footer')).toHaveCount(0);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      await expect.poll(() => requests.filter((url) => url.includes('/api/show/tmdb/upcoming')).length).toBe(1);
+      expect(requests.filter((url) => url.includes('/api/show/hero')).length).toBe(1);
+      expect(requests.filter((url) => url.includes('/home-now-showing')).length).toBe(1);
+      expect(requests.filter((url) => url.includes('/api/show/tmdb/popular')).length).toBe(1);
+      expect(requests.filter((url) => url.endsWith('/api/show/all')).length).toBe(0);
+      expect(requests.some((url) => /youtube|\/videos(?:\?|$)/i.test(url))).toBe(false);
+      expect(failedAppRequests).toEqual([]);
+      expect(pageErrors).toEqual([]);
+      await expect(page.locator('iframe, video')).toHaveCount(0);
       await page.screenshot({ path: evidence(`04-home-${viewport.width}x${viewport.height}.png`), fullPage: true });
     });
   }
@@ -111,11 +159,12 @@ test.describe('mobile application experience', () => {
     await enterHome(page);
     const home = page.getByRole('button', { name: 'Trang chủ', exact: true });
     await expect(home).toHaveAttribute('aria-current', 'page');
-    await page.getByRole('button', { name: 'Tìm kiếm' }).click();
+    const bottomNav = page.getByTestId('mobile-bottom-nav');
+    await bottomNav.getByRole('button', { name: 'Tìm kiếm' }).click();
     await expect(page).toHaveURL(/\/movies$/);
-    await page.getByRole('button', { name: 'Vé của tôi' }).click();
+    await bottomNav.getByRole('button', { name: 'Vé của tôi' }).click();
     await expect(page).toHaveURL(/\/my-bookings$/);
-    await page.getByRole('button', { name: 'Hồ sơ' }).click();
+    await bottomNav.getByRole('button', { name: 'Hồ sơ' }).click();
     await expect(page.getByTestId('profile-picker')).toBeVisible();
   });
 

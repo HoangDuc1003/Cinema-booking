@@ -29,6 +29,7 @@ const HeroPosterRail = ({ movies, currentIndex, getThumbnailUrls, onSelect, clas
     aria-label="Hero movie navigation"
     aria-hidden={hidden ? true : undefined}
     inert={hidden ? true : undefined}
+    style={hidden ? { pointerEvents: 'none' } : undefined}
   >
     <div className="hero-poster-rail__progress" aria-hidden="true">
       {movies.map((movie, index) => (

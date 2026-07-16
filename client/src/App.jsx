@@ -31,7 +31,7 @@ const HeroSettings = lazy(() => import('./pages/admin/HeroSettings'));
 // Keep the cinematic loading surface consistent while route chunks resolve.
 const PageFallback = () => <Loading />;
 
-const PublicRoutes = () => (
+const AppRoutes = ({ includeAdmin = false, user = null }) => (
   <Routes>
     <Route path='/' element={<ErrorBoundary><Home /></ErrorBoundary>} />
     <Route path='/movies' element={<ErrorBoundary><Movies /></ErrorBoundary>} />
@@ -43,6 +43,20 @@ const PublicRoutes = () => (
     <Route path='/theater' element={<ErrorBoundary><Theater /></ErrorBoundary>} />
     <Route path='/my-movies' element={<ErrorBoundary><MyMovies /></ErrorBoundary>} />
     <Route path="/movies/:id/:date" element={<ErrorBoundary><SeatLayout /></ErrorBoundary>} />
+    {includeAdmin && <Route path="/admin/*" element={user ? (
+      <ErrorBoundary><Layout /></ErrorBoundary>
+    ) : (
+      <div className='min-h-screen flex justify-center items-center'>
+        <SignIn fallbackRedirectUrl={'/admin'} />
+      </div>
+    )}>
+      <Route index element={<DashBoard />} />
+      <Route path="add-shows" element={<AddShows />} />
+      <Route path="hero" element={<HeroSettings />} />
+      <Route path="list-shows" element={<ListShows />} />
+      <Route path="add-bookings" element={<AddShows />} />
+      <Route path="list-bookings" element={<ListBookings />} />
+    </Route>}
   </Routes>
 );
 
@@ -50,7 +64,11 @@ const App = () => {
   // Hide navbar/footer on admin routes
   const isAdminRoute = useLocation().pathname.startsWith('/admin')
   const { user } = useAppContext()
-  const isPhone = useMediaQuery('(max-width: 767px)') && !isAdminRoute;
+  const isE2EProfileBuild = import.meta.env.DEV && import.meta.env.VITE_E2E_PROFILE_TEST === 'true';
+  const hasE2EProfileFixture = isE2EProfileBuild && Boolean(globalThis.__NITROCINE_PROFILE_TEST__);
+  const isPhone = useMediaQuery('(max-width: 767px)')
+    && !isAdminRoute
+    && (!isE2EProfileBuild || hasE2EProfileFixture);
 
   if (isPhone) {
     return (
@@ -58,7 +76,7 @@ const App = () => {
         <Toaster />
         {isPhone ? <MobileExperienceGate>
           <Suspense fallback={<PageFallback />}>
-            <PublicRoutes />
+            <AppRoutes />
           </Suspense>
         </MobileExperienceGate> : null}
       </div>
@@ -73,25 +91,7 @@ const App = () => {
 
       <main className='flex-grow'>
         <Suspense fallback={<PageFallback />}>
-          <PublicRoutes />
-          <Routes>
-            <Route path="/admin/*" element={user ? (
-              <ErrorBoundary>
-                <Layout />
-              </ErrorBoundary>
-            ) : (
-              <div className='min-h-screen flex justify-center items-center'>
-                <SignIn fallbackRedirectUrl={'/admin'}/>
-              </div>
-            )}>
-              <Route index element={<DashBoard />} />
-              <Route path="add-shows" element={<AddShows />} />
-              <Route path="hero" element={<HeroSettings />} />
-              <Route path="list-shows" element={<ListShows />} />
-              <Route path="add-bookings" element={<AddShows />} />
-              <Route path="list-bookings" element={<ListBookings />} />
-            </Route>
-          </Routes>
+          <AppRoutes includeAdmin user={user} />
         </Suspense>
       </main>
 

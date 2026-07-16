@@ -942,6 +942,7 @@ const HeroSection = ({
         muted={muted}
         onToggleMuted={handleToggleMuted}
         onPointerEnter={disclosure.handlePointerEnter}
+        onPointerMove={disclosure.handlePointerMove}
         onPointerLeave={disclosure.handlePointerLeave}
         onFocusCapture={disclosure.handleFocusCapture}
         onBlurCapture={disclosure.handleBlurCapture}
