@@ -1,6 +1,7 @@
 import Movie from '../models/Movie.js';
 import Show from '../models/Show.js';
 import SiteConfig from '../models/SiteConfig.js';
+import CatalogBatch from '../models/CatalogBatch.js';
 import { deleteByPattern, deleteKeys, getJson } from './cacheService.js';
 import { redisKeys } from './redisKeys.js';
 import { getPublicHomePayload } from './catalogRefreshService.js';
@@ -105,7 +106,8 @@ const forcePosterOnly = (movies) => movies.map((movie) => ({
     heroVideoStatus: 'refreshing',
 }));
 
-export const getPublicHomeHero = async () => {
+export const getPublicHomeHero = async (options = {}) => {
+    const { heroOffset } = options;
     const [config, refreshState] = await Promise.all([
         getHomeHeroConfig(),
         getJson(redisKeys.catalogRefreshState()),
@@ -117,6 +119,38 @@ export const getPublicHomeHero = async () => {
     if (config.mode === 'manual' && config.movieIds.length) {
         movies = await loadMoviesByIds(config.movieIds);
         if (movies.length) effectiveMode = 'manual';
+    }
+    if (!movies.length && typeof heroOffset === 'number' && Number.isFinite(heroOffset) && heroOffset >= 0) {
+        try {
+            const siteConfig = await SiteConfig.findOne({ key: 'catalog' }).lean();
+            let batch = siteConfig?.catalog?.activeBatchId
+                ? await CatalogBatch.findById(siteConfig.catalog.activeBatchId).lean()
+                : null;
+            if (!batch || batch.status !== 'active') batch = await CatalogBatch.findOne({ status: 'active' }).lean();
+            const all150Ids = Array.isArray(batch?.movieIds) && batch.movieIds.length === 150
+                ? batch.movieIds
+                : (batch ? [...(batch.buckets?.newest || []), ...(batch.buckets?.popular || []), ...(batch.buckets?.classics || [])] : []);
+            if (all150Ids.length > 0) {
+                const startIdx = (heroOffset * 5) % all150Ids.length;
+                const selectedIds = [
+                    ...all150Ids.slice(startIdx, startIdx + 5),
+                    ...all150Ids.slice(0, Math.max(0, 5 - (all150Ids.length - startIdx))),
+                ].slice(0, 5);
+                const rawMovies = await Movie.find({ _id: { $in: selectedIds } }).lean();
+                const movieMap = new Map(rawMovies.map((m) => [String(m._id), normalizeHeroMovie(m)]));
+                movies = selectedIds.map((id) => movieMap.get(String(id))).filter(Boolean);
+                if (movies.length) {
+                    meta = {
+                        batchId: String(batch._id),
+                        weekKey: batch.weekKey,
+                        version: batch.version,
+                        slot: Math.floor((heroOffset * 5) / 150) || 0,
+                    };
+                }
+            }
+        } catch {
+            movies = [];
+        }
     }
     if (!movies.length) {
         try {

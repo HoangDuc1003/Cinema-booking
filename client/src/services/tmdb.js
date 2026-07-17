@@ -2,6 +2,9 @@
 import { dummyShowsData } from '../assets/assets';
 import { extractYouTubeVideoId } from '../components/hero/heroVideoSource.js';
 import { fetchWithTimeout as requestWithTimeout } from './fetchWithTimeout.js';
+import { resolveClientHeroOffset } from './heroCatalogOffset.js';
+
+export { resolveClientHeroOffset } from './heroCatalogOffset.js';
 
 const API_BASE = (import.meta.env.VITE_BASE_URL || '').replace(/\/$/, '');
 const IMAGE_BASE = 'https://image.tmdb.org/t/p';
@@ -49,9 +52,13 @@ const fetchBackendJson = async (path, options = {}) => {
     return payload.data;
 };
 
-export const fetchHomeHero = async ({ signal } = {}) => {
+export const fetchHomeHero = async ({ signal, offset } = {}) => {
     try {
-        const response = await fetchWithTimeout(`${API_BASE}/api/show/hero`, { signal });
+        const activeOffset = typeof offset === 'number' && Number.isFinite(offset) && offset >= 0
+            ? offset
+            : resolveClientHeroOffset();
+        const url = `${API_BASE}/api/show/hero?heroOffset=${encodeURIComponent(activeOffset)}`;
+        const response = await fetchWithTimeout(url, { signal });
         const payload = await response.json().catch(() => null);
         if (!response.ok || !payload?.success) {
             throw new Error(payload?.message || `Hero request failed (${response.status})`);

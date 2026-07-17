@@ -73,7 +73,10 @@ export const getTmdbPopular = async (req, res) => {
 
 export const getHomeHero = async (req, res) => {
     try {
-        const payload = await getPublicHomeHero();
+        const heroOffset = req.query.heroOffset !== undefined && !Number.isNaN(parseInt(req.query.heroOffset, 10))
+            ? parseInt(req.query.heroOffset, 10)
+            : undefined;
+        const payload = await getPublicHomeHero({ heroOffset });
         return setCacheHeader(res, payload.cache).json({
             success: true,
             settings: payload.settings,

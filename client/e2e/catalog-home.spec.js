@@ -31,7 +31,7 @@ test('Home renders immediately without list calls and Trailer resolves at most a
     contentType: 'image/png',
     body: ONE_PIXEL_PNG,
   }));
-  await page.route('**/api/show/hero', (route) => route.fulfill({
+  await page.route(/\/api\/show\/hero(?:\?|$)/, (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
     body: JSON.stringify({ success: true, movies: [candidates[0]] }),

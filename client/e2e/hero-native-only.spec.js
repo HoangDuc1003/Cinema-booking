@@ -49,7 +49,7 @@ async function setupHeroTest(page, movies) {
     return route.abort();
   });
 
-  await page.route('**/api/show/hero', (route) => {
+  await page.route(/\/api\/show\/hero(?:\?|$)/, (route) => {
     return route.fulfill({
       status: 200,
       contentType: 'application/json',

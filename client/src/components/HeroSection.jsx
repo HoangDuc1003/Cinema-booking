@@ -17,13 +17,23 @@ import {
   heroReducer,
 } from './hero/heroMachine';
 import { useHeroContentDisclosure } from './hero/useHeroContentDisclosure';
+import {
+  HERO_MAX_MOVIES,
+  formatRuntime,
+  getHeroMovieKey,
+  getInitialHeroMovies,
+  getNow,
+  saveHeroMoviesCache,
+  selectBestHeroMovies,
+  validateMovieCandidates,
+} from './hero/heroCatalogLoader';
+import { useMediaQuery, useSaveData } from './hero/useHeroEnvironment';
 import './hero/hero.css';
 
 const VIDEO_ENTER_DURATION_MS = 850;
 const HERO_POSTER_SWAP_DELAY_MS = 400;
 const HERO_POSTER_TRANSITION_MS = 1_200;
-const HERO_AUTO_CAROUSEL_MS = 9_000;
-const HERO_MAX_MOVIES = 5;
+const HERO_AUTO_CAROUSEL_MS = 5_000;
 
 const HERO_PLAYBACK_INTENT = Object.freeze({
   NONE: 'none',
@@ -32,160 +42,12 @@ const HERO_PLAYBACK_INTENT = Object.freeze({
   CONTINUATION: 'continuation',
 });
 
-const getNow = () => performance.now();
-
-const getHeroMovieKey = (movie, fallback = '') => String(movie?.id || movie?._id || fallback);
-
-const formatRuntime = (minutes) => {
-  if (!Number.isFinite(minutes) || minutes <= 0) return 'N/A';
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  return `${hours}h ${remainingMinutes}m`;
-};
-
-const selectBestHeroMovies = (movies) => {
-  if (!Array.isArray(movies) || !movies.length) return dummyShowsData.slice(0, HERO_MAX_MOVIES);
-  const scored = movies.map((m) => {
-    const popularity = Number(m.popularity) || 0;
-    const voteAverage = Number(m.vote_average) || 0;
-    const voteCount = Number(m.vote_count) || 0;
-    const hasBackdrop = Boolean(m.backdrop_path || m.backdrop_original);
-    const hasNative = Boolean(resolveConfiguredHeroVideoSource(m));
-    const releaseYear = Number((m.release_date || '').slice(0, 4)) || 0;
-    const isRecent = releaseYear >= new Date().getFullYear() - 1;
-
-    const score = popularity * 0.3
-      + voteAverage * 10
-      + (voteCount > 100 ? 15 : 0)
-      + (hasBackdrop ? 30 : 0)
-      + (hasNative ? 50 : 0)
-      + (isRecent ? 25 : 0);
-
-    return { movie: m, score };
-  });
-
-  scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, HERO_MAX_MOVIES).map((item) => item.movie);
-};
-
-const canLoadImage = (url, signal, timeoutMs = 6_000) => new Promise((resolve) => {
-  if (!url || signal?.aborted) {
-    resolve(false);
-    return;
-  }
-
-  const image = new Image();
-  let settled = false;
-  let timeoutId;
-  const cleanup = () => {
-    window.clearTimeout(timeoutId);
-    image.onload = null;
-    image.onerror = null;
-    signal?.removeEventListener('abort', handleAbort);
-  };
-  const finish = (loaded) => {
-    if (settled) return;
-    settled = true;
-    cleanup();
-    resolve(loaded);
-  };
-  const handleAbort = () => {
-    finish(false);
-  };
-
-  image.onload = () => {
-    finish(image.naturalWidth > 0 && image.naturalHeight > 0);
-  };
-  image.onerror = () => {
-    finish(false);
-  };
-  signal?.addEventListener('abort', handleAbort, { once: true });
-  timeoutId = window.setTimeout(() => finish(false), timeoutMs);
-  image.src = url;
-});
-
-const validateMovieCandidates = async (movies, signal) => {
-  const findFirstLoadable = async (candidates) => {
-    for (const url of candidates) {
-      if (signal?.aborted) return '';
-      if (await canLoadImage(url, signal)) return url;
-    }
-    return '';
-  };
-
-  const putFirst = (candidates, selected) => (
-    selected ? [selected, ...candidates.filter((candidate) => candidate !== selected)] : candidates
-  );
-
-  const validateMovie = async (movie) => {
-    const desktopCandidates = buildHeroImageCandidates([
-      movie.backdrop_original,
-      movie.backdrop_w1280,
-      movie.backdrop_path,
-      movie.poster_path,
-    ], 'w1280');
-    const mobileCandidates = buildHeroImageCandidates([
-      movie.poster_path,
-      movie.backdrop_original,
-      movie.backdrop_w1280,
-      movie.backdrop_path,
-    ], 'w780');
-
-    const [heroImageUrl, heroMobileImageUrl] = await Promise.all([
-      findFirstLoadable(desktopCandidates),
-      findFirstLoadable(mobileCandidates),
-    ]);
-    const fallbackUrl = heroImageUrl || heroMobileImageUrl;
-    if (!fallbackUrl) return null;
-
-    return {
-      ...movie,
-      heroImageUrl: heroImageUrl || fallbackUrl,
-      heroMobileImageUrl: heroMobileImageUrl || fallbackUrl,
-      heroImageCandidates: putFirst(desktopCandidates, heroImageUrl || fallbackUrl),
-      heroMobileImageCandidates: putFirst(mobileCandidates, heroMobileImageUrl || fallbackUrl),
-    };
-  };
-
-  const results = await Promise.all(movies.slice(0, HERO_MAX_MOVIES).map(validateMovie));
-  return results.filter(Boolean);
-};
-
-const useMediaQuery = (query) => {
-  const [matches, setMatches] = useState(() => (
-    typeof window !== 'undefined' && window.matchMedia(query).matches
-  ));
-
-  useEffect(() => {
-    const mediaQuery = window.matchMedia(query);
-    const handleChange = (event) => setMatches(event.matches);
-    mediaQuery.addEventListener?.('change', handleChange);
-    return () => mediaQuery.removeEventListener?.('change', handleChange);
-  }, [query]);
-
-  return matches;
-};
-
-const useSaveData = () => {
-  const [saveData, setSaveData] = useState(() => Boolean(navigator.connection?.saveData));
-
-  useEffect(() => {
-    const connection = navigator.connection;
-    if (!connection) return undefined;
-    const handleChange = () => setSaveData(Boolean(connection.saveData));
-    connection.addEventListener?.('change', handleChange);
-    return () => connection.removeEventListener?.('change', handleChange);
-  }, []);
-
-  return saveData;
-};
-
 const HeroSection = ({
   autoPreview = false,
 }) => {
   const navigate = useNavigate();
-  const initialBestMovies = selectBestHeroMovies(dummyShowsData);
-  const [movies, setMovies] = useState(initialBestMovies);
+  const initialMoviesList = getInitialHeroMovies();
+  const [movies, setMovies] = useState(initialMoviesList);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [heroCatalogSettled, setHeroCatalogSettled] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
@@ -201,7 +63,7 @@ const HeroSection = ({
   const [heroVisible, setHeroVisible] = useState(() => typeof IntersectionObserver === 'undefined');
   const [documentVisible, setDocumentVisible] = useState(() => !document.hidden);
 
-  const initialMovieKey = getHeroMovieKey(initialBestMovies[0], 0);
+  const initialMovieKey = initialMoviesList.length ? getHeroMovieKey(initialMoviesList[0], 0) : 'hero-loading';
   const [machine, dispatch] = useReducer(
     heroReducer,
     { movieKey: initialMovieKey, generation: 0 },
@@ -454,6 +316,7 @@ const HeroSection = ({
     const controller = new AbortController();
     const applyMovies = (nextMovies) => {
       if (!nextMovies.length) return;
+      saveHeroMoviesCache(nextMovies);
       if (attemptLockRef.current || machineRef.current.phase !== HERO_PHASES.POSTER) return;
       abortMetadataRequests();
       const generation = nextGeneration();
@@ -478,12 +341,18 @@ const HeroSection = ({
         const orderedMovies = rawMovies.slice(0, HERO_MAX_MOVIES);
 
         const validMovies = await validateMovieCandidates(orderedMovies, controller.signal);
-        if (!controller.signal.aborted && validMovies.length) applyMovies(validMovies);
+        if (!controller.signal.aborted && validMovies.length) {
+          applyMovies(validMovies);
+        } else if (!controller.signal.aborted && !moviesRef.current.length) {
+          const fallbackMovies = selectBestHeroMovies(dummyShowsData);
+          const validFallback = await validateMovieCandidates(fallbackMovies, controller.signal);
+          if (validFallback.length) applyMovies(validFallback);
+        }
       } catch (error) {
         if (error?.name !== 'AbortError' && import.meta.env.DEV) {
           console.warn('Hero load error:', error.message);
         }
-        if (!controller.signal.aborted) {
+        if (!controller.signal.aborted && !moviesRef.current.length) {
           const isMock = new URLSearchParams(window.location.search).get('heroMock') === '1';
           setCatalogSource(isMock ? 'mock' : 'fallback');
           const fallbackMovies = selectBestHeroMovies(dummyShowsData);
@@ -712,9 +581,10 @@ const HeroSection = ({
   }, [machine.generation, machine.phase, machine.playbackStatus]);
 
   useEffect(() => {
+    const isPosterMode = machine.phase === HERO_PHASES.POSTER || machine.phase === HERO_PHASES.TRAILER_FAILED;
     if (
       !movies.length
-      || machine.phase !== HERO_PHASES.POSTER
+      || !isPosterMode
       || isTransitioning
       || disclosure.isPointerActive
       || disclosure.isFocusActive
@@ -847,7 +717,20 @@ const HeroSection = ({
     dispatch({ type: 'AUDIO_FALLBACK_MUTED', generation });
   }, []);
 
-  if (!currentMovie) return null;
+  if (!currentMovie) {
+    if (!heroCatalogSettled) {
+      return (
+        <section
+          ref={rootRef}
+          className={`hero-section ${disclosure.isCompact ? 'is-compact' : ''}`.trim()}
+          aria-label="Featured movie loading"
+        >
+          <div className="hero-poster-shell is-visible animate-pulse bg-white/5" style={{ minHeight: '480px' }} />
+        </section>
+      );
+    }
+    return null;
+  }
 
   const desktopImageCandidates = currentMovie.heroImageCandidates?.length
     ? currentMovie.heroImageCandidates
