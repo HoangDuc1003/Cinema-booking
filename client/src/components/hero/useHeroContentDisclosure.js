@@ -90,7 +90,7 @@ export const useHeroContentDisclosure = ({
     }, COMPACTING_TRANSITION_MS);
   }, [clearAllTimers, reducedMotion, scheduleTimer]);
 
-  // Main five-second stable playback compact rule
+  // Main three-second stable playback compact rule
   useEffect(() => {
     if (
       reducedMotion

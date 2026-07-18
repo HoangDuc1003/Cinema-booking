@@ -9,8 +9,9 @@ The Hero background has exactly two valid outcomes:
 ## YouTube curtain reveal
 - The only embedded provider is YouTube through the IFrame Player API.
 - Only the active movie may load a trailer or mount an iframe.
-- Start playback muted behind a closed cinematic curtain.
-- Keep the iframe transparent until the curtain has fully opened.
+- Start metadata/player work immediately, preserve the unobscured poster for one second, then start playback muted while the cinematic curtain closes over three seconds.
+- Open as soon as both the closing motion and advancing playback are verified; do not add a fixed hold.
+- Keep the iframe transparent until playback is verified, then reveal it behind the opening curtain.
 - Unmute only after the curtain clears, ramping volume from 0 to 60 over 800ms.
 - The curtain is the sole loading-artifact mask; do not add center-button masks.
 - Reveal only after a real `PLAYING` state and advancing `currentTime`.
@@ -37,13 +38,14 @@ Do not apply client scoring to a successful server response.
 For an active desktop trailer:
 - Hero has one YouTube iframe and no native video;
 - five server-ordered movies render as five persistent thumbnail controls while only the active movie owns an iframe;
-- the curtain starts closed, opens with the weighted transform animation, then leaves the DOM;
-- the iframe is transparent until the curtain reaches `open`;
+- the curtain animates from open to closed while playback begins, then opens with the weighted transform animation and leaves the DOM;
+- the iframe is transparent until playback is verified and becomes visible behind the opening curtain;
 - `currentTime` advances before reveal;
 - volume reaches 60 only after the 800ms post-curtain fade.
-- five seconds after the verified trailer is revealed, compact copy retains the title, genres, metadata, a two-line description preview, and the two primary CTAs;
+- three seconds after the verified trailer is revealed, hide the thumbnail rail and move compact copy to the lower-left while retaining the title, genres, metadata, a two-line description preview, and the two primary CTAs;
 - the close transition must animate through `is-compacting` before final layout removal; do not snap `top` or secondary controls away on its first frame;
-- compact movie copy can expand again through pointer, keyboard focus, or title interaction without hiding the thumbnail rail.
+- compact movie copy can expand again through pointer, keyboard focus, or title interaction and restore the thumbnail rail.
+- selecting `Poster` destroys the active iframe and restores the poster in the same render; while that explicit poster mode remains active, automatic trailer attempts stay disabled, carousel transitions begin every five seconds, and the image swaps 400ms into each transition.
 
 For a player failure or blocked autoplay:
 - the poster remains visible;

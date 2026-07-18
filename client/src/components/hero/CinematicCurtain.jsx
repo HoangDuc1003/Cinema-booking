@@ -1,13 +1,13 @@
 import { useEffect } from 'react';
 
-const CURTAIN_REMOVAL_DELAY_MS = 500;
+const CURTAIN_REMOVAL_DELAY_MS = 250;
 
 /**
  * Decorative screen-reader-hidden theatre curtain used while a YouTube player
  * reaches verified playback. The parent removes it only after the open state
  * has remained visible long enough for its exit animation to settle.
  *
- * @param {{ state: 'closed' | 'opening' | 'open', onRevealComplete: () => void }} props
+ * @param {{ state: 'previewing' | 'closing' | 'closed' | 'opening' | 'open', onRevealComplete: () => void }} props
  */
 const CinematicCurtain = ({ state, onRevealComplete }) => {
   useEffect(() => {

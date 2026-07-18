@@ -52,14 +52,13 @@ export const HERO_FAILURE_REASONS = Object.freeze({
 });
 
 export const HERO_PREVIEW_PLAYBACK_MS = 50_000;
-export const HERO_COMPACT_PLAYBACK_MS = 5_000;
+export const HERO_COMPACT_PLAYBACK_MS = 3_000;
 export const HERO_BUFFERING_HYSTERESIS_MS = 450;
 export const HERO_PLAYING_HYSTERESIS_MS = 250;
-// Minimum quarantine after PLAYING + currentTime samples confirm real playback.
-// YouTube may briefly render transient center bezels after programmatic playback;
-// the poster stays above the player until this quarantine has elapsed AND samples
-// show continuous currentTime advancement without buffering.
-export const HERO_VISUAL_READY_CONFIRM_MS = 2_000;
+// Quarantine after PLAYING + currentTime samples confirm real playback. It is
+// aligned with the closing curtain so transient player chrome stays covered
+// without adding a second fixed hold before the curtain opens.
+export const HERO_VISUAL_READY_CONFIRM_MS = 900;
 export const HERO_PLAYBACK_TIMEOUT_MS = 5_000;
 
 export const createInitialHeroState = ({ movieKey = '', generation = 0, audioPreference = HERO_AUDIO_STATUS.PREFERRED_ON } = {}) => ({

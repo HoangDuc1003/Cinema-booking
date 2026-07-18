@@ -13,6 +13,7 @@ import useFadeVolume from '../hooks/useFadeVolume';
 import {
   HERO_FAILURE_REASONS,
   HERO_PHASES,
+  HERO_PLAYER_STATUS,
   HERO_PLAYBACK_STATUS,
   createInitialHeroState,
   getPlaybackRemaining,
@@ -36,8 +37,9 @@ const VIDEO_ENTER_DURATION_MS = 850;
 const HERO_POSTER_SWAP_DELAY_MS = 400;
 const HERO_POSTER_TRANSITION_MS = 1_200;
 const HERO_AUTO_CAROUSEL_MS = 5_000;
-const CURTAIN_HOLD_MS = 2_400;
-const CURTAIN_OPEN_DURATION_MS = 1_800;
+const CURTAIN_POSTER_PREVIEW_MS = 1_000;
+const CURTAIN_CLOSE_DURATION_MS = 3_000;
+const CURTAIN_OPEN_DURATION_MS = 1_000;
 const CURTAIN_REDUCED_MOTION_DURATION_MS = 200;
 const AUDIO_REVEAL_DELAY_MS = 200;
 const HERO_AUDIO_VOLUME = 60;
@@ -62,9 +64,9 @@ const HeroSection = ({
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [playbackIntent, setPlaybackIntent] = useState(HERO_PLAYBACK_INTENT.NONE);
   const [muted, setMuted] = useState(true);
+  const [manualPosterMode, setManualPosterMode] = useState(false);
   const [catalogSource, setCatalogSource] = useState('fallback');
   const [revealedGeneration, setRevealedGeneration] = useState(null);
-  const [playerReadyGeneration, setPlayerReadyGeneration] = useState(null);
   const [curtainState, setCurtainState] = useState('closed');
   const [curtainMounted, setCurtainMounted] = useState(false);
   const [cinematicRevealed, setCinematicRevealed] = useState(false);
@@ -94,7 +96,6 @@ const HeroSection = ({
   const playbackTimersRef = useRef(new Set());
   const carouselIntervalRef = useRef(null);
   const pendingVisualReadyRef = useRef(null);
-  const postTrailerHoldActiveRef = useRef(false);
   const pendingContinuationRef = useRef(false);
   const playerRef = useRef(null);
   const cinematicTimersRef = useRef(new Set());
@@ -120,7 +121,9 @@ const HeroSection = ({
   const trailerFailed = machine.phase === HERO_PHASES.TRAILER_FAILED;
   const playbackPhase = trailerLoading || trailerActive;
   const verifiedVideoVisible = trailerActive && machine.visualReady && !machine.posterVisible;
-  const videoVisible = cinematicRevealed && verifiedVideoVisible;
+  const videoVisible = verifiedVideoVisible && (
+    cinematicRevealed || curtainState === 'opening' || curtainState === 'open'
+  );
   const awaitingFirstReveal = playbackPhase && (
     revealedGeneration !== machine.generation || !cinematicRevealed
   );
@@ -144,10 +147,14 @@ const HeroSection = ({
     playbackStatus: machine.playbackStatus,
     // Start the old compact/expand lifecycle only after the curtain has
     // actually revealed the verified trailer, not while it is still covered.
-    visualReady: videoVisible,
+    visualReady: cinematicRevealed && verifiedVideoVisible,
     posterVisible: machine.posterVisible || !cinematicRevealed,
     reducedMotion,
   });
+  const expandHeroContent = disclosure.expand;
+  const posterCarouselPaused = !manualPosterMode && (
+    disclosure.isPointerActive || disclosure.isFocusActive
+  );
 
   useEffect(() => {
     moviesRef.current = movies;
@@ -185,18 +192,21 @@ const HeroSection = ({
     clearCinematicTimers();
     cancelFade();
     playerRef.current = null;
-    curtainStateRef.current = 'closed';
+    const nextCurtainState = mountCurtain ? 'previewing' : 'closed';
+    curtainStateRef.current = nextCurtainState;
     curtainOpenPendingRef.current = null;
     verifiedPlaybackGenerationRef.current = null;
-    setPlayerReadyGeneration(null);
-    setCurtainState('closed');
+    setCurtainState(nextCurtainState);
     setCurtainMounted(mountCurtain);
     setCinematicRevealed(false);
   }, [cancelFade, clearCinematicTimers]);
 
   const beginCurtainOpening = useCallback((generation) => {
-    if (generation !== generationRef.current || curtainStateRef.current !== 'closed') return;
-    if (verifiedPlaybackGenerationRef.current !== generation) {
+    if (generation !== generationRef.current) return;
+    if (
+      curtainStateRef.current !== 'closed'
+      || verifiedPlaybackGenerationRef.current !== generation
+    ) {
       curtainOpenPendingRef.current = generation;
       return;
     }
@@ -216,7 +226,12 @@ const HeroSection = ({
       setCinematicRevealed(true);
 
       scheduleCinematicTimer(() => {
-        if (generation !== generationRef.current) return;
+        const latestMachine = machineRef.current;
+        if (
+          generation !== generationRef.current
+          || latestMachine.playbackStatus !== HERO_PLAYBACK_STATUS.STABLE
+          || !latestMachine.visualReady
+        ) return;
         fadeIn(playerRef.current, {
           from: 0,
           to: HERO_AUDIO_VOLUME,
@@ -228,6 +243,28 @@ const HeroSection = ({
       }, AUDIO_REVEAL_DELAY_MS);
     }, curtainDuration);
   }, [fadeIn, reducedMotion, scheduleCinematicTimer]);
+
+  const beginCurtainClosing = useCallback((generation) => {
+    if (generation !== generationRef.current || curtainStateRef.current !== 'previewing') return;
+
+    scheduleCinematicTimer(() => {
+      if (generation !== generationRef.current || curtainStateRef.current !== 'previewing') return;
+
+      curtainStateRef.current = 'closing';
+      setCurtainState('closing');
+
+      const curtainDuration = reducedMotion
+        ? CURTAIN_REDUCED_MOTION_DURATION_MS
+        : CURTAIN_CLOSE_DURATION_MS;
+
+      scheduleCinematicTimer(() => {
+        if (generation !== generationRef.current || curtainStateRef.current !== 'closing') return;
+        curtainStateRef.current = 'closed';
+        setCurtainState('closed');
+        beginCurtainOpening(generation);
+      }, curtainDuration);
+    }, CURTAIN_POSTER_PREVIEW_MS);
+  }, [beginCurtainOpening, reducedMotion, scheduleCinematicTimer]);
 
   const clearTransitionTimers = useCallback(() => {
     transitionTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
@@ -347,7 +384,7 @@ const HeroSection = ({
     const targetMovie = moviesRef.current[currentIndexRef.current];
     if (!targetMovie) return;
 
-    postTrailerHoldActiveRef.current = false;
+    setManualPosterMode(false);
     const targetKey = getHeroMovieKey(targetMovie, currentIndexRef.current);
     const currentMachine = machineRef.current;
     const retrying = currentMachine.phase === HERO_PHASES.TRAILER_FAILED;
@@ -374,6 +411,7 @@ const HeroSection = ({
     prepareCinematicAttempt({ mountCurtain: true });
 
     const generation = nextGeneration();
+    beginCurtainClosing(generation);
     attemptLockRef.current = { generation, movieKey: targetKey };
     dispatch({
       type: 'TRAILER_REQUESTED',
@@ -413,7 +451,7 @@ const HeroSection = ({
         now: getNow(),
       });
     }
-  }, [loadHeroVideoSource, nextGeneration, prepareCinematicAttempt, resetToPoster]);
+  }, [beginCurtainClosing, loadHeroVideoSource, nextGeneration, prepareCinematicAttempt, resetToPoster]);
 
   const switchMovie = useCallback((targetIndex, { animate = true, continueTrailer = false } = {}) => {
     const availableMovies = moviesRef.current;
@@ -421,18 +459,15 @@ const HeroSection = ({
     const normalizedIndex = ((targetIndex % availableMovies.length) + availableMovies.length) % availableMovies.length;
     if (normalizedIndex === currentIndexRef.current) return;
 
-    postTrailerHoldActiveRef.current = false;
     pendingContinuationRef.current = continueTrailer;
     abortMetadataRequests({ includePrefetch: false });
     clearPlaybackTimers();
     prepareCinematicAttempt({ mountCurtain: false });
     pendingVisualReadyRef.current = null;
     setRevealedGeneration(null);
-    window.clearInterval(carouselIntervalRef.current);
-    carouselIntervalRef.current = null;
     setPlaybackIntent(continueTrailer ? HERO_PLAYBACK_INTENT.CONTINUATION : HERO_PLAYBACK_INTENT.NONE);
     setMuted(true);
-    disclosure.expand({ animate: false });
+    expandHeroContent({ animate: false });
 
     const targetKey = getHeroMovieKey(availableMovies[normalizedIndex], normalizedIndex);
     const generation = nextGeneration();
@@ -458,7 +493,7 @@ const HeroSection = ({
     }, HERO_POSTER_TRANSITION_MS);
     transitionTimersRef.current.add(swapTimer);
     transitionTimersRef.current.add(settleTimer);
-  }, [abortMetadataRequests, clearPlaybackTimers, disclosure, nextGeneration, prepareCinematicAttempt, reducedMotion]);
+  }, [abortMetadataRequests, clearPlaybackTimers, expandHeroContent, nextGeneration, prepareCinematicAttempt, reducedMotion]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -603,6 +638,8 @@ const HeroSection = ({
       return () => window.clearTimeout(timerId);
     }
 
+    if (manualPosterMode) return undefined;
+
     if (
       !automaticPreviewEligible
       || !heroCatalogSettled
@@ -623,6 +660,7 @@ const HeroSection = ({
     heroVisible,
     isUserInitiated,
     isTransitioning,
+    manualPosterMode,
     machine.movieKey,
     machine.phase,
     startTrailerAttempt,
@@ -744,23 +782,19 @@ const HeroSection = ({
     if (
       !movies.length
       || !isPosterMode
-      || isTransitioning
-      || disclosure.isPointerActive
-      || disclosure.isFocusActive
+      || posterCarouselPaused
     ) {
       return undefined;
     }
-    const delay = postTrailerHoldActiveRef.current ? 2000 : HERO_AUTO_CAROUSEL_MS;
     const intervalId = window.setInterval(() => {
-      postTrailerHoldActiveRef.current = false;
       switchMovie(currentIndexRef.current + 1, { animate: true, continueTrailer: false });
-    }, delay);
+    }, HERO_AUTO_CAROUSEL_MS);
     carouselIntervalRef.current = intervalId;
     return () => {
       window.clearInterval(intervalId);
       if (carouselIntervalRef.current === intervalId) carouselIntervalRef.current = null;
     };
-  }, [disclosure.isFocusActive, disclosure.isPointerActive, isTransitioning, machine.phase, movies.length, switchMovie]);
+  }, [machine.phase, movies.length, posterCarouselPaused, switchMovie]);
 
   const handleToggleTrailer = () => {
     if (machine.phase === HERO_PHASES.TRAILER_LOADING || attemptLockRef.current) return;
@@ -771,6 +805,7 @@ const HeroSection = ({
     ].includes(machine.phase);
 
     if (activePhase) {
+      setManualPosterMode(true);
       resetToPoster(currentMovieKey);
       return;
     }
@@ -842,7 +877,6 @@ const HeroSection = ({
   const handlePlayerReady = useCallback(({ generation, player }) => {
     if (generation !== generationRef.current) return;
     playerRef.current = player;
-    setPlayerReadyGeneration(generation);
     dispatch({ type: 'PLAYER_READY', generation });
   }, []);
 
@@ -878,23 +912,7 @@ const HeroSection = ({
   }, [beginCurtainOpening, revealVerifiedVideo]);
 
   useEffect(() => {
-    clearCinematicTimers();
-    if (playerReadyGeneration !== machine.generation) return undefined;
-
-    const holdDuration = reducedMotion ? 0 : CURTAIN_HOLD_MS;
-    scheduleCinematicTimer(() => beginCurtainOpening(machine.generation), holdDuration);
-    return clearCinematicTimers;
-  }, [
-    beginCurtainOpening,
-    clearCinematicTimers,
-    machine.generation,
-    playerReadyGeneration,
-    reducedMotion,
-    scheduleCinematicTimer,
-  ]);
-
-  useEffect(() => {
-    if (!playerEnabled || playerReadyGeneration === machine.generation) return undefined;
+    if (!playerEnabled || machine.playerStatus === HERO_PLAYER_STATUS.READY) return undefined;
 
     const timerId = window.setTimeout(() => {
       handlePlayerFailure({
@@ -904,7 +922,7 @@ const HeroSection = ({
       });
     }, YOUTUBE_READY_TIMEOUT_MS);
     return () => window.clearTimeout(timerId);
-  }, [handlePlayerFailure, machine.generation, playerEnabled, playerReadyGeneration]);
+  }, [handlePlayerFailure, machine.generation, machine.playerStatus, playerEnabled]);
 
   const handleCurtainRevealComplete = useCallback(() => {
     if (curtainStateRef.current !== 'open') return;
@@ -934,7 +952,6 @@ const HeroSection = ({
   const handleEnded = useCallback(({ generation }) => {
     if (generation !== generationRef.current) return;
     setMuted(true);
-    postTrailerHoldActiveRef.current = true;
     resetToPoster(machineRef.current.movieKey);
   }, [resetToPoster]);
 
@@ -1091,6 +1108,8 @@ const HeroSection = ({
           animate: true,
           continueTrailer: trailerActive || trailerLoading,
         })}
+        className={disclosure.isCompacting ? 'is-compacting' : disclosure.isCompact ? 'is-compact' : ''}
+        hidden={disclosure.disclosureState === 'compact'}
       />
 
       <div className="sr-only" aria-live="assertive">
