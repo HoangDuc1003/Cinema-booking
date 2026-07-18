@@ -1,6 +1,6 @@
 import { dummyShowsData } from '../../assets/assets';
 import { buildHeroImageCandidates } from './heroImages';
-import { resolveConfiguredHeroVideoSource } from './heroMock';
+import { isHeroTrailerMockEnabled, resolveConfiguredHeroVideoSource } from './heroMock';
 
 export const HERO_MAX_MOVIES = 5;
 export const HERO_CACHE_KEY = 'nitrocine:hero-catalog-cache-v1';
@@ -149,7 +149,16 @@ export const getInitialHeroMovies = () => {
       const cached = window.sessionStorage.getItem(HERO_CACHE_KEY);
       if (cached) {
         const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        const moviesList = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.movies) ? parsed.movies : null);
+        if (moviesList && moviesList.length > 0) {
+          const isMockMode = Boolean(import.meta?.env?.DEV) && isHeroTrailerMockEnabled(window.location?.search, import.meta.env.DEV);
+          const hasMockUrl = moviesList.some((m) => String(m?.heroVideoUrl || '').includes('/mock/hero-trailer.mp4'));
+          if (!isMockMode && (parsed?.source === 'fallback' || parsed?.source === 'mock' || hasMockUrl)) {
+            window.sessionStorage.removeItem(HERO_CACHE_KEY);
+            return [];
+          }
+          return moviesList;
+        }
       }
     }
   } catch {
@@ -158,10 +167,21 @@ export const getInitialHeroMovies = () => {
   return [];
 };
 
-export const saveHeroMoviesCache = (movies) => {
+export const saveHeroMoviesCache = (movies, options = {}) => {
   try {
     if (typeof window !== 'undefined' && window.sessionStorage && Array.isArray(movies) && movies.length > 0) {
-      window.sessionStorage.setItem(HERO_CACHE_KEY, JSON.stringify(movies));
+      const isMockMode = Boolean(import.meta?.env?.DEV) && isHeroTrailerMockEnabled(window.location?.search, import.meta.env.DEV);
+      const hasMockUrl = movies.some((m) => String(m?.heroVideoUrl || '').includes('/mock/hero-trailer.mp4'));
+      if (options.source === 'fallback' || (!isMockMode && hasMockUrl)) {
+        window.sessionStorage.removeItem(HERO_CACHE_KEY);
+        return;
+      }
+      const payload = {
+        version: 2,
+        source: options.source || 'server',
+        movies,
+      };
+      window.sessionStorage.setItem(HERO_CACHE_KEY, JSON.stringify(payload));
     }
   } catch {
     /* ignore storage errors */

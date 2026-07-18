@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm -v)",
+      "Bash(npm -v)",
+      "Bash(docker --version)",
+      "Bash(docker compose *)",
+      "Bash(git --version)",
+      "PowerShell(corepack --version)",
+      "PowerShell(corepack enable)",
+      "PowerShell(corepack prepare pnpm@9.15.9 --activate)",
+      "PowerShell(pnpm -v)",
+      "Bash(pnpm install *)",
+      "Bash(pnpm turbo *)",
+      "Bash(pnpm --filter @fastcheck/worker lint)",
+      "Bash(pnpm --filter @fastcheck/worker typecheck)",
+      "Bash(pnpm --filter @fastcheck/worker test)",
+      "Bash(cp .env.example .env)",
+      "Bash(pnpm db:migrate)",
+      "Bash(docker exec *)",
+      "Bash(pnpm dev *)",
+      "Bash(pnpm --filter @fastcheck/contracts build)"
+    ]
+  }
+}

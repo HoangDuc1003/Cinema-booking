@@ -7,7 +7,7 @@ import HeroMedia from './hero/HeroMedia';
 import HeroPosterRail from './hero/HeroPosterRail';
 import HeroVideoRenderer from './hero/HeroVideoRenderer';
 import { buildHeroImageCandidates } from './hero/heroImages';
-import { resolveConfiguredHeroVideoSource } from './hero/heroMock';
+import { isHeroTrailerMockEnabled, resolveConfiguredHeroVideoSource } from './hero/heroMock';
 import {
   HERO_FAILURE_REASONS,
   HERO_PHASES,
@@ -56,7 +56,7 @@ const HeroSection = ({
   const [soundPreferred, setSoundPreferred] = useState(true);
   const [autoplaySoundBlocked, setAutoplaySoundBlocked] = useState(false);
   const [catalogSource, setCatalogSource] = useState(() => {
-    const isMock = new URLSearchParams(window.location.search).get('heroMock') === '1';
+    const isMock = typeof window !== 'undefined' && isHeroTrailerMockEnabled(window.location.search, import.meta.env.DEV);
     return isMock ? 'mock' : 'fallback';
   });
   const [revealedGeneration, setRevealedGeneration] = useState(null);
@@ -177,13 +177,15 @@ const HeroSection = ({
       trailerCacheRef.current.delete(targetKey);
     }
 
+    const isMockEnabled = typeof window !== 'undefined' && isHeroTrailerMockEnabled(window.location.search, import.meta.env.DEV);
+
     const cachedSource = trailerCacheRef.current.get(targetKey);
-    if (cachedSource && (!manual || cachedSource.kind !== 'native' || cachedSource.src !== '/mock/hero-trailer.mp4')) {
+    if (cachedSource && (!manual || cachedSource.kind !== 'native' || cachedSource.src !== '/mock/hero-trailer.mp4' || isMockEnabled)) {
       return cachedSource;
     }
 
-    const configuredSource = resolveConfiguredHeroVideoSource(targetMovie);
-    if (configuredSource && (!manual || configuredSource.src !== '/mock/hero-trailer.mp4')) {
+    const configuredSource = resolveConfiguredHeroVideoSource(targetMovie, { mockEnabled: isMockEnabled });
+    if (configuredSource && (!manual || configuredSource.src !== '/mock/hero-trailer.mp4' || isMockEnabled)) {
       trailerCacheRef.current.set(targetKey, configuredSource);
       return configuredSource;
     }
@@ -211,13 +213,17 @@ const HeroSection = ({
     }
 
     if (targetMovie && (targetMovie.heroVideoUrl || targetMovie.videoUrl)) {
-      const fallbackSource = {
-        kind: 'native',
-        src: String(targetMovie.heroVideoUrl || targetMovie.videoUrl).trim(),
-        mimeType: targetMovie.heroVideoMimeType || 'video/mp4',
-      };
-      trailerCacheRef.current.set(targetKey, fallbackSource);
-      return fallbackSource;
+      const src = String(targetMovie.heroVideoUrl || targetMovie.videoUrl).trim();
+      const isMockUrl = src === '/mock/hero-trailer.mp4' || src.includes('/mock/hero-trailer.mp4');
+      if (!isMockUrl || isMockEnabled) {
+        const fallbackSource = {
+          kind: 'native',
+          src,
+          mimeType: targetMovie.heroVideoMimeType || 'video/mp4',
+        };
+        trailerCacheRef.current.set(targetKey, fallbackSource);
+        return fallbackSource;
+      }
     }
 
     return null;
@@ -352,10 +358,18 @@ const HeroSection = ({
 
   useEffect(() => {
     const controller = new AbortController();
-    const applyMovies = (nextMovies) => {
+    const applyMovies = (nextMovies, { source = 'server' } = {}) => {
       if (!nextMovies.length) return;
-      saveHeroMoviesCache(nextMovies);
-      if (attemptLockRef.current || machineRef.current.phase !== HERO_PHASES.POSTER) return;
+      saveHeroMoviesCache(nextMovies, { source });
+      const isSameMovies = moviesRef.current.length === nextMovies.length
+        && moviesRef.current.every((m, idx) => getHeroMovieKey(m, idx) === getHeroMovieKey(nextMovies[idx], idx));
+      if (attemptLockRef.current || machineRef.current.phase !== HERO_PHASES.POSTER) {
+        if (isSameMovies) {
+          moviesRef.current = nextMovies;
+          setMovies(nextMovies);
+          return;
+        }
+      }
       abortMetadataRequests();
       const generation = nextGeneration();
       const nextKey = getHeroMovieKey(nextMovies[0], 0);
@@ -372,30 +386,31 @@ const HeroSection = ({
         const data = await fetchHomeHero({ signal: controller.signal });
         if (controller.signal.aborted) return;
 
-        const isMock = new URLSearchParams(window.location.search).get('heroMock') === '1';
-        setCatalogSource(isMock ? 'mock' : (data?.source === 'server' ? 'server' : 'fallback'));
+        const isMock = typeof window !== 'undefined' && isHeroTrailerMockEnabled(window.location.search, import.meta.env.DEV);
+        const resolvedSource = isMock ? 'mock' : (data?.source === 'server' ? 'server' : 'fallback');
+        setCatalogSource(resolvedSource);
 
         const rawMovies = Array.isArray(data.movies) && data.movies.length ? data.movies : dummyShowsData;
         const orderedMovies = rawMovies.slice(0, HERO_MAX_MOVIES);
 
         const validMovies = await validateMovieCandidates(orderedMovies, controller.signal);
         if (!controller.signal.aborted && validMovies.length) {
-          applyMovies(validMovies);
+          applyMovies(validMovies, { source: resolvedSource });
         } else if (!controller.signal.aborted && !moviesRef.current.length) {
           const fallbackMovies = selectBestHeroMovies(dummyShowsData);
           const validFallback = await validateMovieCandidates(fallbackMovies, controller.signal);
-          if (validFallback.length) applyMovies(validFallback);
+          if (validFallback.length) applyMovies(validFallback, { source: 'fallback' });
         }
       } catch (error) {
         if (error?.name !== 'AbortError' && import.meta.env.DEV) {
           console.warn('Hero load error:', error.message);
         }
         if (!controller.signal.aborted && !moviesRef.current.length) {
-          const isMock = new URLSearchParams(window.location.search).get('heroMock') === '1';
+          const isMock = typeof window !== 'undefined' && isHeroTrailerMockEnabled(window.location.search, import.meta.env.DEV);
           setCatalogSource(isMock ? 'mock' : 'fallback');
           const fallbackMovies = selectBestHeroMovies(dummyShowsData);
           const validMovies = await validateMovieCandidates(fallbackMovies, controller.signal);
-          if (validMovies.length) applyMovies(validMovies);
+          if (validMovies.length) applyMovies(validMovies, { source: 'fallback' });
         }
       } finally {
         if (!controller.signal.aborted) {
@@ -445,7 +460,9 @@ const HeroSection = ({
     resetToPoster(getHeroMovieKey(moviesRef.current[currentIndexRef.current], currentIndexRef.current));
   }, [isUserInitiated, reducedMotion, resetToPoster, saveData]);
 
-  const hasConfiguredNativeSource = Boolean(resolveConfiguredHeroVideoSource(currentMovie));
+  const hasConfiguredNativeSource = Boolean(resolveConfiguredHeroVideoSource(currentMovie, {
+    mockEnabled: typeof window !== 'undefined' && isHeroTrailerMockEnabled(window.location?.search, import.meta?.env?.DEV),
+  }));
   const isPlaybackIntended = playbackIntent !== HERO_PLAYBACK_INTENT.NONE;
   const playerEnabled = Boolean(
     machine.videoSource

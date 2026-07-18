@@ -119,7 +119,7 @@ export const resolveHeroVideoSource = (trailer) => (
   resolveNativeHeroVideoSource(trailer) || resolveYouTubeHeroVideoSource(trailer)
 );
 
-export const resolveConfiguredHeroVideoSource = (movie) => {
+export const resolveConfiguredHeroVideoSource = (movie, options = {}) => {
   if (!movie || typeof movie !== 'object') return null;
 
   const src = typeof movie.heroVideoUrl === 'string'
@@ -128,6 +128,14 @@ export const resolveConfiguredHeroVideoSource = (movie) => {
       ? movie.background_video_url.trim()
       : '';
   if (!src || isIframeVideoUrl(src)) return null;
+
+  const isMockUrl = src === '/mock/hero-trailer.mp4' || src.includes('/mock/hero-trailer.mp4');
+  if (isMockUrl) {
+    const mockEnabled = options.mockEnabled !== undefined
+      ? Boolean(options.mockEnabled)
+      : (typeof window !== 'undefined' && Boolean(import.meta?.env?.DEV) && new URLSearchParams(window.location.search).get('heroMock') === '1');
+    if (!mockEnabled) return null;
+  }
 
   if (movie.heroVideoStatus !== undefined && movie.heroVideoStatus !== 'ready') {
     return null;
@@ -146,17 +154,17 @@ export const resolveConfiguredHeroVideoSource = (movie) => {
 };
 
 
-export const canUseHeroBackgroundVideo = (movie, { mockEnabled = false } = {}) => (
-  Boolean(mockEnabled) || Boolean(resolveConfiguredHeroVideoSource(movie))
+export const canUseHeroBackgroundVideo = (movie, options = {}) => (
+  Boolean(options.mockEnabled) || Boolean(resolveConfiguredHeroVideoSource(movie, options))
 );
 
 /**
  * Returns true when the movie can potentially resolve a Hero trailer, either
  * because it already has a configured native source or because mock is enabled.
  */
-export const canUseNativeHeroVideo = (movie, { mockEnabled = false } = {}) => {
+export const canUseNativeHeroVideo = (movie, options = {}) => {
   if (!movie || typeof movie !== 'object') return false;
-  if (mockEnabled) return true;
-  return Boolean(resolveConfiguredHeroVideoSource(movie));
+  if (options.mockEnabled) return true;
+  return Boolean(resolveConfiguredHeroVideoSource(movie, options));
 };
 

@@ -172,3 +172,18 @@ test('production Hero stays on poster when a movie has only an iframe trailer', 
   assert.equal(canUseHeroBackgroundVideo(youtubeOnlyMovie, { mockEnabled: true }), true);
   assert.equal(canUseHeroBackgroundVideo({ heroVideoUrl: '/hero/movie.mp4' }), true);
 });
+
+test('resolveConfiguredHeroVideoSource rejects /mock/hero-trailer.mp4 when mockEnabled is false and accepts when true', () => {
+  const dummyMovie = {
+    heroVideoStatus: 'ready',
+    heroVideoMimeType: 'video/mp4',
+    heroVideoUrl: '/mock/hero-trailer.mp4',
+  };
+
+  assert.equal(resolveConfiguredHeroVideoSource(dummyMovie, { mockEnabled: false }), null);
+  assert.deepEqual(resolveConfiguredHeroVideoSource(dummyMovie, { mockEnabled: true }), {
+    kind: 'native',
+    src: '/mock/hero-trailer.mp4',
+    mimeType: 'video/mp4',
+  });
+});
