@@ -3,6 +3,8 @@ import connectDB from '../configs/db.js';
 import User from '../models/User.js';
 import { reconcileHeroAssets } from '../services/heroVideoService.js';
 import { getISOWeekKey, refreshWeeklyCatalog, rotateActiveCatalogSlot } from '../services/catalogRefreshService.js';
+import { createEnrichHeroVideosFunction } from './functions/enrichHeroVideos.js';
+
 
 // Gracefully handle missing Inngest keys (avoids crashing on Vercel)
 let inngest;
@@ -141,6 +143,8 @@ try {
         }
     );
 
+    const enrichHeroVideosJob = createEnrichHeroVideosFunction(inngest);
+
     // Export all functions for the Inngest serve handler
     functions = [
         syncUserCreation,
@@ -149,7 +153,8 @@ try {
         weeklyCatalogRefresh,
         requestedCatalogRefresh,
         rotateActiveCatalogSlotJob,
-        reconcileHeroAssetsJob
+        reconcileHeroAssetsJob,
+        enrichHeroVideosJob
     ];
 } catch (error) {
     console.warn('[Inngest] Initialization skipped — missing config:', error.message);
@@ -158,3 +163,4 @@ try {
 }
 
 export { inngest, functions };
+

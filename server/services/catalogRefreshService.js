@@ -5,7 +5,9 @@ import Movie from '../models/Movie.js';
 import CatalogBatch from '../models/CatalogBatch.js';
 import CatalogRefreshRun from '../models/CatalogRefreshRun.js';
 import SiteConfig from '../models/SiteConfig.js';
+import enrichCatalogHeroVideos from './heroVideoEnrichmentService.js';
 import { verifyCatalogV2Indexes } from '../configs/indexes.js';
+
 import {
     acquireFencedLock,
     releaseFencedLock,
@@ -717,9 +719,15 @@ export async function activateCatalogBatch(batchId, movies, {
     } finally {
         await session.endSession();
     }
+    try {
+        await enrichCatalogHeroVideos({ batchId });
+    } catch (error) {
+        console.warn(`[catalog-hero-enrich] Failed to enrich native videos for batch ${batchId}:`, error.message);
+    }
 }
 
 const normalizeMovieForPayload = (movie) => ({
+
     _id: String(movie._id),
     id: String(movie._id),
     title: movie.title,

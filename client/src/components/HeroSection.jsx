@@ -177,15 +177,18 @@ const HeroSection = ({
       trailerCacheRef.current.delete(targetKey);
     }
 
-    const isMockEnabled = typeof window !== 'undefined' && isHeroTrailerMockEnabled(window.location.search, import.meta.env.DEV);
+    const allowMockVideo = typeof window !== 'undefined' && (
+      isHeroTrailerMockEnabled(window.location.search, import.meta.env.DEV)
+      || (Boolean(import.meta.env.DEV) && catalogSource === 'server')
+    );
 
     const cachedSource = trailerCacheRef.current.get(targetKey);
-    if (cachedSource && (!manual || cachedSource.kind !== 'native' || cachedSource.src !== '/mock/hero-trailer.mp4' || isMockEnabled)) {
+    if (cachedSource && (!manual || cachedSource.kind !== 'native' || cachedSource.src !== '/mock/hero-trailer.mp4' || allowMockVideo)) {
       return cachedSource;
     }
 
-    const configuredSource = resolveConfiguredHeroVideoSource(targetMovie, { mockEnabled: isMockEnabled });
-    if (configuredSource && (!manual || configuredSource.src !== '/mock/hero-trailer.mp4' || isMockEnabled)) {
+    const configuredSource = resolveConfiguredHeroVideoSource(targetMovie, { mockEnabled: allowMockVideo });
+    if (configuredSource && (!manual || configuredSource.src !== '/mock/hero-trailer.mp4' || allowMockVideo)) {
       trailerCacheRef.current.set(targetKey, configuredSource);
       return configuredSource;
     }
@@ -215,7 +218,7 @@ const HeroSection = ({
     if (targetMovie && (targetMovie.heroVideoUrl || targetMovie.videoUrl)) {
       const src = String(targetMovie.heroVideoUrl || targetMovie.videoUrl).trim();
       const isMockUrl = src === '/mock/hero-trailer.mp4' || src.includes('/mock/hero-trailer.mp4');
-      if (!isMockUrl || isMockEnabled) {
+      if (!isMockUrl || allowMockVideo) {
         const fallbackSource = {
           kind: 'native',
           src,
@@ -460,8 +463,12 @@ const HeroSection = ({
     resetToPoster(getHeroMovieKey(moviesRef.current[currentIndexRef.current], currentIndexRef.current));
   }, [isUserInitiated, reducedMotion, resetToPoster, saveData]);
 
+  const allowMockVideo = typeof window !== 'undefined' && (
+    isHeroTrailerMockEnabled(window.location?.search, import.meta?.env?.DEV)
+    || (Boolean(import.meta?.env?.DEV) && catalogSource === 'server')
+  );
   const hasConfiguredNativeSource = Boolean(resolveConfiguredHeroVideoSource(currentMovie, {
-    mockEnabled: typeof window !== 'undefined' && isHeroTrailerMockEnabled(window.location?.search, import.meta?.env?.DEV),
+    mockEnabled: allowMockVideo,
   }));
   const isPlaybackIntended = playbackIntent !== HERO_PLAYBACK_INTENT.NONE;
   const playerEnabled = Boolean(
