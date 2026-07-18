@@ -158,7 +158,21 @@ async function installYouTubePlayer(page, {
       }
 
       playVideo() { this.startPlayback(); }
-      pauseVideo() { this.playerState = 2; }
+      pauseVideo() {
+        if (this.playerState === 2) return;
+        window.clearInterval(this.timerId);
+        this.timerId = null;
+        this.playerState = 2;
+        diagnostics.events.push({ kind: 'paused', player: this.instanceId, at: Date.now() - startedAt });
+        this.events.onStateChange?.({ data: 2, target: this });
+      }
+      endPlayback() {
+        window.clearInterval(this.timerId);
+        this.timerId = null;
+        this.playerState = 0;
+        diagnostics.events.push({ kind: 'ended', player: this.instanceId, at: Date.now() - startedAt });
+        this.events.onStateChange?.({ data: 0, target: this });
+      }
       mute() { this.muted = true; diagnostics.events.push({ kind: 'mute', player: this.instanceId, at: Date.now() - startedAt }); }
       unMute() { this.muted = false; diagnostics.events.push({ kind: 'unmute', player: this.instanceId, at: Date.now() - startedAt }); }
       isMuted() { return this.muted; }
@@ -369,7 +383,7 @@ test.describe('YouTube cinematic curtain reveal', () => {
 
     const hero = page.locator('.hero-section');
     const trailerToggle = hero.locator('.hero-action--secondary');
-    await expect(hero.locator('.hero-curtain-overlay')).toHaveCount(0, { timeout: 4_000 });
+    await expect(hero.locator('.hero-curtain-overlay')).toHaveCount(0, { timeout: 9_000 });
     await expect(trailerToggle).toContainText('Poster');
 
     const posterClickAt = await page.evaluate(() => Date.now() - window.__FAKE_YOUTUBE__.startedAt);
@@ -495,6 +509,81 @@ test.describe('YouTube cinematic curtain reveal', () => {
       return player.getCurrentTime() > firstTime;
     });
     expect(activePlayerAdvanced).toBe(true);
+  });
+
+  test('holds the ended poster for one second and uses a one-second prefetched continuation preview', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await installYouTubePlayer(page, { movies: HERO_MOVIES });
+    await page.goto('/');
+
+    const hero = page.locator('.hero-section');
+    const curtain = hero.locator('.hero-curtain-overlay');
+    await expect(curtain).toHaveCount(0, { timeout: 9_000 });
+    await expect(hero.locator('.hero-title')).toContainText('Cinematic Curtain Hero');
+
+    const endedAt = await page.evaluate(() => {
+      const at = Date.now() - window.__FAKE_YOUTUBE__.startedAt;
+      window.__FAKE_YOUTUBE__.players[0].endPlayback();
+      return at;
+    });
+
+    await expect(hero.locator('iframe')).toHaveCount(0);
+    await expect(hero.locator('.hero-poster-shell')).toHaveClass(/is-visible/);
+    await expect(hero.locator('.hero-title')).toContainText('Cinematic Curtain Hero');
+    await expect(hero.locator('.hero-title')).toContainText('Second Feature', { timeout: 2_500 });
+    await expect(hero.locator('iframe')).toHaveCount(1);
+    await expect(curtain).toHaveClass(/is-previewing/);
+    await expect(curtain).toHaveClass(/is-closing/, { timeout: 1_500 });
+
+    const handoffTiming = await page.evaluate((endedTimestamp) => {
+      const posterStates = window.__FAKE_YOUTUBE__.posterStates.filter((entry) => entry.at >= endedTimestamp);
+      const transition = posterStates.find((entry) => entry.transitioning);
+      const swap = posterStates.find((entry) => entry.title === 'Second Feature');
+      const curtainStates = window.__FAKE_YOUTUBE__.curtainStates.filter((entry) => entry.at >= endedTimestamp);
+      const previewing = curtainStates.find((entry) => entry.className.split(/\s+/).includes('is-previewing'));
+      const closing = curtainStates.find((entry) => entry.className.split(/\s+/).includes('is-closing'));
+      return {
+        endedPosterHold: transition.at - endedTimestamp,
+        posterSwapDelay: swap.at - transition.at,
+        continuationPreview: closing.at - previewing.at,
+      };
+    }, endedAt);
+
+    expect(handoffTiming.endedPosterHold).toBeGreaterThanOrEqual(850);
+    expect(handoffTiming.endedPosterHold).toBeLessThan(1_300);
+    expect(handoffTiming.posterSwapDelay).toBeGreaterThanOrEqual(300);
+    expect(handoffTiming.posterSwapDelay).toBeLessThan(700);
+    expect(handoffTiming.continuationPreview).toBeGreaterThanOrEqual(850);
+    expect(handoffTiming.continuationPreview).toBeLessThan(1_300);
+  });
+
+  test('keeps the curtain closed when playback becomes paused after visual verification', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await installYouTubePlayer(page);
+    await page.goto('/');
+
+    const hero = page.locator('.hero-section');
+    const curtain = hero.locator('.hero-curtain-overlay');
+    const playerShell = hero.locator('.hero-youtube-video');
+    await expect(curtain).toHaveClass(/is-closed/, { timeout: 6_000 });
+
+    await page.evaluate(() => window.__FAKE_YOUTUBE__.players[0].pauseVideo());
+    await page.waitForTimeout(1_300);
+    await expect(curtain).toHaveClass(/is-closed/);
+    await expect(playerShell).toHaveCSS('opacity', '0');
+    await expect(hero.locator('.hero-poster-shell')).toHaveClass(/is-visible/);
+
+    await page.evaluate(() => window.__FAKE_YOUTUBE__.players[0].playVideo());
+    await expect(curtain).toHaveClass(/is-opening/, { timeout: 2_000 });
+    await expect(curtain).toHaveCount(0, { timeout: 2_000 });
+
+    const resumedPlaybackAdvanced = await page.evaluate(async () => {
+      const player = window.__FAKE_YOUTUBE__.players[0];
+      const before = player.getCurrentTime();
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      return player.getCurrentTime() > before;
+    });
+    expect(resumedPlaybackAdvanced).toBe(true);
   });
 
   test('keeps the poster and manual play CTA when playback never advances', async ({ page }) => {

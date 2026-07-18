@@ -8,9 +8,10 @@ The Hero background has exactly two valid outcomes:
 
 ## YouTube curtain reveal
 - The only embedded provider is YouTube through the IFrame Player API.
-- Only the active movie may load a trailer or mount an iframe.
+- Only the active movie may mount a player or iframe. After an automatic trailer end, metadata for exactly the next movie may be prefetched without mounting inactive media.
 - Start metadata/player work immediately, preserve the unobscured poster for two seconds, then start playback muted while the cinematic curtain closes over three seconds.
 - Once the curtain is fully closed, hold it for one second; after that hold, open as soon as advancing playback is verified.
+- Invalidate an earlier visual-ready decision whenever playback pauses or buffers before reveal; the curtain may open only after a fresh continuous-advancement verification.
 - Keep the iframe transparent until playback is verified, then reveal it behind the opening curtain.
 - Unmute only after the curtain clears, ramping volume from 0 to 60 over 800ms.
 - The curtain is the sole loading-artifact mask; do not add center-button masks.
@@ -46,6 +47,7 @@ For an active desktop trailer:
 - the close transition must animate through `is-compacting` before final layout removal; do not snap `top` or secondary controls away on its first frame;
 - compact movie copy can expand again through pointer, keyboard focus, or title interaction and restore the thumbnail rail.
 - selecting `Poster` destroys the active iframe and restores the poster in the same render; while that explicit poster mode remains active, automatic trailer attempts stay disabled, carousel transitions begin every five seconds, and the image swaps 400ms into each transition.
+- after an automatic trailer end, keep that movie's poster for one second while prefetching only the next trailer metadata, then continue with a one-second poster preview; user-selected movie changes retain the full two-second preview.
 
 For a player failure or blocked autoplay:
 - the poster remains visible;
