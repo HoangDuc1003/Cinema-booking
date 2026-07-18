@@ -112,6 +112,7 @@ export const enrichCatalogHeroVideos = async ({ batchId, movieIds, force = false
 
     const moviesToEnrich = await Movie.find(filter).lean();
     if (!moviesToEnrich.length) {
+        await invalidateHeroCatalogCaches();
         return { success: true, enrichedCount: 0, totalCount: targetIds.length, message: 'All target movies already have ready native videos' };
     }
 
