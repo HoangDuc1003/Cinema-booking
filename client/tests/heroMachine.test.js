@@ -6,6 +6,8 @@ import {
   HERO_PHASES,
   HERO_PLAYBACK_STATUS,
   HERO_PLAYER_STATUS,
+  HERO_COMPACT_PLAYBACK_MS,
+  HERO_PREVIEW_PLAYBACK_MS,
   createInitialHeroState,
   getPlaybackRemaining,
   hasAdvancedPlayback,
@@ -121,8 +123,8 @@ test('the playback budget begins only after the 250ms stable-playing confirmatio
   state = heroReducer(state, { type: 'PLAYBACK_STABLE', generation: 1, now: 1_250 });
 
   assert.equal(state.playbackStartedAt, 1_250);
-  assert.equal(getPlaybackRemaining(state, 4_249).compactRemainingMs, 1);
-  assert.equal(getPlaybackRemaining(state, 4_250).compactRemainingMs, 0);
+  assert.equal(getPlaybackRemaining(state, 1_250 + HERO_COMPACT_PLAYBACK_MS - 1).compactRemainingMs, 1);
+  assert.equal(getPlaybackRemaining(state, 1_250 + HERO_COMPACT_PLAYBACK_MS).compactRemainingMs, 0);
 });
 
 test('timer actions are ignored before stable playback and after a pause', () => {
@@ -153,24 +155,28 @@ test('timer actions are ignored before stable playback and after a pause', () =>
   );
 });
 
-test('compact budget accumulates exactly 3000ms across pause and resume', () => {
+test('compact budget accumulates exactly 5000ms across pause and resume', () => {
   let state = requestTrailer(createInitialHeroState({ movieKey: 'movie-a' }), 1);
   state = heroReducer(state, { type: 'PLAYBACK_STABLE', generation: 1, now: 100 });
   state = heroReducer(state, { type: 'PLAYBACK_PAUSED', generation: 1, now: 600 });
 
-  assert.equal(state.compactRemainingMs, 2_500);
-  assert.equal(state.previewRemainingMs, 59_500);
+  assert.equal(state.compactRemainingMs, HERO_COMPACT_PLAYBACK_MS - 500);
+  assert.equal(state.previewRemainingMs, HERO_PREVIEW_PLAYBACK_MS - 500);
   assert.equal(state.playbackStartedAt, null);
 
   state = heroReducer(state, { type: 'PLAYBACK_STABLE', generation: 1, now: 1_000 });
-  assert.deepEqual(getPlaybackRemaining(state, 3_499), {
+  assert.deepEqual(getPlaybackRemaining(state, 1_000 + HERO_COMPACT_PLAYBACK_MS - 501), {
     compactRemainingMs: 1,
-    previewRemainingMs: 57_001,
+    previewRemainingMs: HERO_PREVIEW_PLAYBACK_MS - (HERO_COMPACT_PLAYBACK_MS - 1),
   });
 
-  state = heroReducer(state, { type: 'COMPACT_ELAPSED', generation: 1, now: 3_500 });
+  state = heroReducer(state, {
+    type: 'COMPACT_ELAPSED',
+    generation: 1,
+    now: 1_000 + HERO_COMPACT_PLAYBACK_MS - 500,
+  });
   assert.equal(state.compactRemainingMs, 0);
-  assert.equal(state.previewRemainingMs, 57_000);
+  assert.equal(state.previewRemainingMs, HERO_PREVIEW_PLAYBACK_MS - HERO_COMPACT_PLAYBACK_MS);
   assert.equal(state.phase, HERO_PHASES.TRAILER_COMPACT);
   assert.equal(state.hasCompacted, true);
 });

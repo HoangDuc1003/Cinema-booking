@@ -35,9 +35,10 @@ const HeroContent = ({
 }) => {
   const title = movie.title || movie.name || '';
   const isCompactEffective = compact || disclosureState === 'compact' || disclosureState === 'compacting';
+  const compactClass = isCompactEffective && disclosureState !== 'compacting' ? 'is-compact' : '';
   const isOverviewRevealedEffective = overviewRevealed || disclosureState === 'expanded' || disclosureState === 'expanding';
   const stateClass = disclosureState ? `is-${disclosureState}` : '';
-  const overviewHidden = isCompactEffective && !isOverviewRevealedEffective;
+  const overviewCollapsed = isCompactEffective && !isOverviewRevealedEffective;
 
   const contentKey = movieKey || movie.id || movie._id || title;
   const flyDirection = (index || 0) % 2 === 0 ? 'hero-fly-left' : 'hero-fly-right';
@@ -47,7 +48,7 @@ const HeroContent = ({
     : trailerActive
       ? 'Poster'
       : trailerFailed
-        ? 'Retry'
+        ? 'Play trailer'
         : 'Trailer';
 
   const showTrailerButton = trailerAvailable !== false || trailerActive || trailerLoading || trailerFailed;
@@ -62,8 +63,8 @@ const HeroContent = ({
 
   return (
     <div
-      className={`hero-content-zone ${isCompactEffective ? 'is-compact' : ''} ${isOverviewRevealedEffective ? 'is-overview-revealed' : ''} ${stateClass}`.trim()}
-      tabIndex={overviewHidden ? 0 : -1}
+      className={`hero-content-zone ${compactClass} ${isOverviewRevealedEffective ? 'is-overview-revealed' : ''} ${stateClass}`.trim()}
+      tabIndex={overviewCollapsed ? 0 : -1}
       onMouseEnter={(event) => {
         onPointerEnter?.(event);
         onReveal?.(event);
@@ -79,7 +80,7 @@ const HeroContent = ({
         onReveal?.();
       }}
       onBlurCapture={handleBlur}
-      aria-label={overviewHidden ? `Show description for ${title}` : undefined}
+      aria-label={overviewCollapsed ? `Show full description for ${title}` : undefined}
     >
       <h1
         key={`title-${contentKey}`}
@@ -119,13 +120,13 @@ const HeroContent = ({
           <span><Star className="hero-rating-icon" aria-hidden="true" />{rating}</span>
         </div>
 
-        <p className="hero-overview hero-fade-up d3" aria-hidden={overviewHidden}>
+        <p className="hero-overview hero-fade-up d3" aria-hidden="false">
           {movie.overview}
         </p>
 
         {trailerFailed && (
           <p className="hero-trailer-status hero-fade-up d3" role="status">
-            {`Trailer unavailable (${failureReason}). You can retry.`}
+            {`Trailer could not start automatically (${failureReason}). Use Play trailer to try again.`}
           </p>
         )}
 

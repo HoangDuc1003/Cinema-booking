@@ -32,4 +32,4 @@
 
 ## High-risk areas
 - Changes under `client/src/components/hero/` must follow the nearest `AGENTS.md`.
-- The Hero background is native video or poster only.
+- The Hero background is a verified YouTube IFrame Player trailer or poster fallback, as governed by the nearest `AGENTS.md`.

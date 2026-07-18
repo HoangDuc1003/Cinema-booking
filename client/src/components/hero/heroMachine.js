@@ -51,8 +51,8 @@ export const HERO_FAILURE_REASONS = Object.freeze({
   MISSING_VIDEO: 'missing-video',
 });
 
-export const HERO_PREVIEW_PLAYBACK_MS = 60_000;
-export const HERO_COMPACT_PLAYBACK_MS = 3_000;
+export const HERO_PREVIEW_PLAYBACK_MS = 50_000;
+export const HERO_COMPACT_PLAYBACK_MS = 5_000;
 export const HERO_BUFFERING_HYSTERESIS_MS = 450;
 export const HERO_PLAYING_HYSTERESIS_MS = 250;
 // Minimum quarantine after PLAYING + currentTime samples confirm real playback.
@@ -60,7 +60,7 @@ export const HERO_PLAYING_HYSTERESIS_MS = 250;
 // the poster stays above the player until this quarantine has elapsed AND samples
 // show continuous currentTime advancement without buffering.
 export const HERO_VISUAL_READY_CONFIRM_MS = 2_000;
-export const HERO_PLAYBACK_TIMEOUT_MS = 8_000;
+export const HERO_PLAYBACK_TIMEOUT_MS = 5_000;
 
 export const createInitialHeroState = ({ movieKey = '', generation = 0, audioPreference = HERO_AUDIO_STATUS.PREFERRED_ON } = {}) => ({
   phase: HERO_PHASES.POSTER,

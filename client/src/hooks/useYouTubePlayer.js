@@ -5,7 +5,8 @@ const YOUTUBE_API_TIMEOUT_MS = 12_000;
 const DEFAULT_HERO_VOLUME = 60;
 
 export const LOCKED_YOUTUBE_PLAYER_VARS = Object.freeze({
-  autoplay: 0,
+  autoplay: 1,
+  mute: 1,
   controls: 0,
   disablekb: 1,
   fs: 0,
@@ -14,6 +15,7 @@ export const LOCKED_YOUTUBE_PLAYER_VARS = Object.freeze({
   rel: 0,
   enablejsapi: 1,
   cc_load_policy: 0,
+  modestbranding: 1,
 });
 
 const LOCKED_PLAYER_VAR_KEYS = new Set(Object.keys(LOCKED_YOUTUBE_PLAYER_VARS));
@@ -150,7 +152,11 @@ export const disableCaptionsBestEffort = (player) => {
 
 const applyAudioPreference = (player, { muted, volume = DEFAULT_HERO_VOLUME }) => {
   try {
-    const safeVolume = Math.max(0, Math.min(100, Number(volume) || DEFAULT_HERO_VOLUME));
+    const requestedVolume = Number(volume);
+    const safeVolume = Math.max(
+      0,
+      Math.min(100, Number.isFinite(requestedVolume) ? requestedVolume : DEFAULT_HERO_VOLUME),
+    );
     player?.setVolume?.(safeVolume);
     if (muted) player?.mute?.();
     else player?.unMute?.();
@@ -375,9 +381,11 @@ export const useYouTubePlayer = ({
         createdPlayer = new window.YT.Player(element, {
           width: '100%',
           height: '100%',
+          videoId: requestRef.current.videoId || undefined,
           playerVars: {
             ...safePlayerVars,
             ...(origin ? { origin } : {}),
+            start: requestRef.current.startSeconds || undefined,
           },
           events: {
             onReady: (event) => {
@@ -405,12 +413,20 @@ export const useYouTubePlayer = ({
               readyRef.current = true;
               setPlayer(event.target);
               setIsReady(true);
+              if (requestRef.current.videoId) {
+                loadedRequestRef.current = {
+                  generation: requestRef.current.requestGeneration ?? implicitRequestRef.current.generation,
+                  videoId: requestRef.current.videoId,
+                  startSeconds: requestRef.current.startSeconds,
+                };
+              }
+              applyAudioPreference(event.target, { muted: true, volume: 0 });
+              syncPlaybackRequest(event.target);
               try {
                 onReadyRef.current?.(event.target, activeRequestRef.current);
               } catch (error) {
                 warnInDevelopment('[YouTube Player] Ready callback failed:', error);
               }
-              syncPlaybackRequest(event.target);
             },
             onApiChange: (event) => {
               if (!mountedRef.current || playerRef.current !== createdPlayer) return;

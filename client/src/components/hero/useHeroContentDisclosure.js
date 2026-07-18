@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { HERO_PHASES, HERO_PLAYBACK_STATUS } from './heroMachine';
-
-export const HERO_COMPACT_PLAYBACK_MS = 3_000;
-const COMPACTING_TRANSITION_MS = 520;
+import {
+  HERO_COMPACT_PLAYBACK_MS,
+  HERO_PHASES,
+  HERO_PLAYBACK_STATUS,
+} from './heroMachine';
+const COMPACTING_TRANSITION_MS = 720;
 const EXPANDING_TRANSITION_MS = 650;
 const POINTER_ENTER_DELAY_MS = 100;
 export const HERO_POINTER_HOLD_MS = 3_000;
@@ -88,7 +90,7 @@ export const useHeroContentDisclosure = ({
     }, COMPACTING_TRANSITION_MS);
   }, [clearAllTimers, reducedMotion, scheduleTimer]);
 
-  // Main 3-second stable playback compact rule
+  // Main five-second stable playback compact rule
   useEffect(() => {
     if (
       reducedMotion

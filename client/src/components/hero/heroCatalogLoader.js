@@ -1,6 +1,5 @@
 import { dummyShowsData } from '../../assets/assets';
 import { buildHeroImageCandidates } from './heroImages';
-import { isHeroTrailerMockEnabled, resolveConfiguredHeroVideoSource } from './heroMock';
 
 export const HERO_MAX_MOVIES = 5;
 export const HERO_CACHE_KEY = 'nitrocine:hero-catalog-cache-v1';
@@ -23,7 +22,6 @@ export const selectBestHeroMovies = (movies) => {
     const voteAverage = Number(m.vote_average) || 0;
     const voteCount = Number(m.vote_count) || 0;
     const hasBackdrop = Boolean(m.backdrop_path || m.backdrop_original);
-    const hasNative = Boolean(resolveConfiguredHeroVideoSource(m));
     const releaseYear = Number((m.release_date || '').slice(0, 4)) || 0;
     const isRecent = releaseYear >= new Date().getFullYear() - 1;
 
@@ -31,7 +29,6 @@ export const selectBestHeroMovies = (movies) => {
       + voteAverage * 10
       + (voteCount > 100 ? 15 : 0)
       + (hasBackdrop ? 30 : 0)
-      + (hasNative ? 50 : 0)
       + (isRecent ? 25 : 0);
 
     return { movie: m, score };
@@ -133,9 +130,6 @@ export const validateMovieCandidates = async (movies, signal) => {
       heroMobileImageUrl: heroMobileImageUrl || fallbackUrl,
       heroImageCandidates: putFirst(desktopCandidates, heroImageUrl || fallbackUrl),
       heroMobileImageCandidates: putFirst(mobileCandidates, heroMobileImageUrl || fallbackUrl),
-      heroVideoStatus: movie.heroVideoStatus || (movie.heroVideoUrl ? 'ready' : ''),
-      heroVideoMimeType: movie.heroVideoMimeType || (movie.heroVideoUrl ? 'video/mp4' : ''),
-      heroVideoUrl: movie.heroVideoUrl || '',
     };
   };
 
@@ -151,9 +145,7 @@ export const getInitialHeroMovies = () => {
         const parsed = JSON.parse(cached);
         const moviesList = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.movies) ? parsed.movies : null);
         if (moviesList && moviesList.length > 0) {
-          const isMockMode = Boolean(import.meta?.env?.DEV) && isHeroTrailerMockEnabled(window.location?.search, import.meta.env.DEV);
-          const hasMockUrl = moviesList.some((m) => String(m?.heroVideoUrl || '').includes('/mock/hero-trailer.mp4'));
-          if (!isMockMode && (parsed?.source === 'fallback' || parsed?.source === 'mock' || hasMockUrl)) {
+          if (parsed?.source === 'fallback' || parsed?.source === 'mock') {
             window.sessionStorage.removeItem(HERO_CACHE_KEY);
             return [];
           }
@@ -170,9 +162,7 @@ export const getInitialHeroMovies = () => {
 export const saveHeroMoviesCache = (movies, options = {}) => {
   try {
     if (typeof window !== 'undefined' && window.sessionStorage && Array.isArray(movies) && movies.length > 0) {
-      const isMockMode = Boolean(import.meta?.env?.DEV) && isHeroTrailerMockEnabled(window.location?.search, import.meta.env.DEV);
-      const hasMockUrl = movies.some((m) => String(m?.heroVideoUrl || '').includes('/mock/hero-trailer.mp4'));
-      if (options.source === 'fallback' || (!isMockMode && hasMockUrl)) {
+      if (options.source === 'fallback') {
         window.sessionStorage.removeItem(HERO_CACHE_KEY);
         return;
       }

@@ -11,9 +11,6 @@ import {
 const now = () => performance.now();
 
 const YOUTUBE_VIDEO_RATIO = 16 / 9;
-// Cinematic 2.39:1 content occupies only ~74.4% of YouTube's 16:9 frame.
-// Minimum overscan to hide both encoded black bars: 2.39 / (16/9) ≈ 1.345.
-// 1.38 adds ~3% safety margin without excessive content crop (~1.3% per edge).
 const YOUTUBE_OVERSCAN = 1.38;
 
 const calculateYouTubeCover = (containerW, containerH) => {
@@ -54,6 +51,7 @@ const HeroYouTubeVideo = ({
   generation,
   muted,
   volume = 60,
+  startSeconds = 15,
   onPlayerReady,
   onPlaybackRequested,
   onPlaybackPlaying,
@@ -284,6 +282,7 @@ const HeroYouTubeVideo = ({
     active,
     muted,
     volume,
+    startSeconds,
     requestGeneration: generation,
     onReady: handlePlayerReady,
     onStateChange: handleStateChange,
@@ -335,7 +334,6 @@ const HeroYouTubeVideo = ({
 
   useEffect(() => () => clearAllTimers(), [clearAllTimers]);
 
-  // Dynamic cover geometry via ResizeObserver
   const updateCoverLayout = useCallback(() => {
     const shell = shellRef.current;
     if (!shell) return;
@@ -373,7 +371,6 @@ const HeroYouTubeVideo = ({
     return () => observer.disconnect();
   }, [updateCoverLayout]);
 
-  // Recalculate on mount/generation change
   useEffect(() => {
     updateCoverLayout();
   }, [generation, updateCoverLayout]);
