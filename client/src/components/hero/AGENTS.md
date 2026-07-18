@@ -9,8 +9,8 @@ The Hero background has exactly two valid outcomes:
 ## YouTube curtain reveal
 - The only embedded provider is YouTube through the IFrame Player API.
 - Only the active movie may load a trailer or mount an iframe.
-- Start metadata/player work immediately, preserve the unobscured poster for one second, then start playback muted while the cinematic curtain closes over three seconds.
-- Open as soon as both the closing motion and advancing playback are verified; do not add a fixed hold.
+- Start metadata/player work immediately, preserve the unobscured poster for two seconds, then start playback muted while the cinematic curtain closes over three seconds.
+- Once the curtain is fully closed, hold it for one second; after that hold, open as soon as advancing playback is verified.
 - Keep the iframe transparent until playback is verified, then reveal it behind the opening curtain.
 - Unmute only after the curtain clears, ramping volume from 0 to 60 over 800ms.
 - The curtain is the sole loading-artifact mask; do not add center-button masks.

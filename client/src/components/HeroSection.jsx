@@ -37,8 +37,9 @@ const VIDEO_ENTER_DURATION_MS = 850;
 const HERO_POSTER_SWAP_DELAY_MS = 400;
 const HERO_POSTER_TRANSITION_MS = 1_200;
 const HERO_AUTO_CAROUSEL_MS = 5_000;
-const CURTAIN_POSTER_PREVIEW_MS = 1_000;
+const CURTAIN_POSTER_PREVIEW_MS = 2_000;
 const CURTAIN_CLOSE_DURATION_MS = 3_000;
+const CURTAIN_CLOSED_HOLD_MS = 1_000;
 const CURTAIN_OPEN_DURATION_MS = 1_000;
 const CURTAIN_REDUCED_MOTION_DURATION_MS = 200;
 const AUDIO_REVEAL_DELAY_MS = 200;
@@ -261,7 +262,10 @@ const HeroSection = ({
         if (generation !== generationRef.current || curtainStateRef.current !== 'closing') return;
         curtainStateRef.current = 'closed';
         setCurtainState('closed');
-        beginCurtainOpening(generation);
+        scheduleCinematicTimer(() => {
+          if (generation !== generationRef.current || curtainStateRef.current !== 'closed') return;
+          beginCurtainOpening(generation);
+        }, CURTAIN_CLOSED_HOLD_MS);
       }, curtainDuration);
     }, CURTAIN_POSTER_PREVIEW_MS);
   }, [beginCurtainOpening, reducedMotion, scheduleCinematicTimer]);

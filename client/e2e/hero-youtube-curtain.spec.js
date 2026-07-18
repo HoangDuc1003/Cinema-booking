@@ -243,8 +243,8 @@ test.describe('YouTube cinematic curtain reveal', () => {
       enablejsapi: 1,
     });
 
-    await expect(curtain).toHaveClass(/is-closing/, { timeout: 1_500 });
-    await expect(curtain).toHaveClass(/is-opening/, { timeout: 3_500 });
+    await expect(curtain).toHaveClass(/is-closing/, { timeout: 2_500 });
+    await expect(curtain).toHaveClass(/is-opening/, { timeout: 4_500 });
     await expect(curtain).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await expect(playerShell).toHaveClass(/is-visible/);
     await expect(playerShell).toHaveCSS('opacity', '1');
@@ -263,6 +263,9 @@ test.describe('YouTube cinematic curtain reveal', () => {
       const closingState = window.__FAKE_YOUTUBE__.curtainStates.find((entry) => (
         entry.className.split(/\s+/).includes('is-closing')
       ));
+      const closedState = window.__FAKE_YOUTUBE__.curtainStates.find((entry) => (
+        entry.className.split(/\s+/).includes('is-closed')
+      ));
       const openingState = window.__FAKE_YOUTUBE__.curtainStates.find((entry) => (
         entry.className.split(/\s+/).includes('is-opening')
       ));
@@ -276,7 +279,8 @@ test.describe('YouTube cinematic curtain reveal', () => {
       const playingEvent = window.__FAKE_YOUTUBE__.events.find((event) => event.kind === 'playing');
       return {
         posterPreviewDuration: closingState.at - previewingState.at,
-        closeDuration: openingState.at - closingState.at,
+        closeDuration: closedState.at - closingState.at,
+        closedHoldDuration: openingState.at - closedState.at,
         openDuration: openState.at - openingState.at,
         totalRevealDuration: openState.at - previewingState.at,
         closingAnimationDuration: closingState.animationDuration,
@@ -286,13 +290,15 @@ test.describe('YouTube cinematic curtain reveal', () => {
         fadeDuration: fullVolumeEvent.at - unmuteEvent.at,
       };
     });
-    expect(revealTiming.posterPreviewDuration).toBeGreaterThanOrEqual(850);
-    expect(revealTiming.posterPreviewDuration).toBeLessThan(1_300);
+    expect(revealTiming.posterPreviewDuration).toBeGreaterThanOrEqual(1_850);
+    expect(revealTiming.posterPreviewDuration).toBeLessThan(2_300);
     expect(revealTiming.closeDuration).toBeGreaterThanOrEqual(2_850);
     expect(revealTiming.closeDuration).toBeLessThan(3_400);
+    expect(revealTiming.closedHoldDuration).toBeGreaterThanOrEqual(850);
+    expect(revealTiming.closedHoldDuration).toBeLessThan(1_300);
     expect(revealTiming.openDuration).toBeGreaterThanOrEqual(900);
     expect(revealTiming.openDuration).toBeLessThan(1_350);
-    expect(revealTiming.totalRevealDuration).toBeLessThan(5_500);
+    expect(revealTiming.totalRevealDuration).toBeLessThan(7_500);
     expect(revealTiming.closingAnimationDuration).toBe('3s');
     expect(revealTiming.openingAnimationDuration).toBe('1s');
     expect(revealTiming.playbackStartedDuringPosterPreview).toBe(true);
@@ -308,7 +314,7 @@ test.describe('YouTube cinematic curtain reveal', () => {
     await page.goto('/');
 
     const curtain = page.locator('.hero-curtain-overlay');
-    await expect(curtain).toHaveCount(0, { timeout: 4_000 });
+    await expect(curtain).toHaveCount(0, { timeout: 5_000 });
 
     const curtainStates = await page.evaluate(() => window.__FAKE_YOUTUBE__.curtainStates);
     const previewingState = curtainStates.find((entry) => entry.className.split(/\s+/).includes('is-previewing'));
@@ -337,7 +343,7 @@ test.describe('YouTube cinematic curtain reveal', () => {
     await expect(curtain).toHaveClass(/is-previewing/);
     await expect(hero.locator('iframe')).toHaveCount(1);
     await expect(hero.locator('.hero-poster-shell')).toHaveClass(/is-visible/);
-    await page.waitForTimeout(650);
+    await page.waitForTimeout(1_650);
     await expect(curtain).toHaveClass(/is-previewing/);
 
     const beforeOpening = await page.evaluate(() => ({
@@ -347,7 +353,7 @@ test.describe('YouTube cinematic curtain reveal', () => {
     expect(beforeOpening).toEqual({ muted: true, unmuteCount: 0 });
 
     await expect(curtain).toHaveClass(/is-closing/, { timeout: 700 });
-    await expect(curtain).toHaveCount(0, { timeout: 6_500 });
+    await expect(curtain).toHaveCount(0, { timeout: 7_500 });
     const curtainStates = await page.evaluate(() => window.__FAKE_YOUTUBE__.curtainStates);
     expect(curtainStates.some((entry) => entry.className.split(/\s+/).includes('is-open'))).toBe(true);
     await expect.poll(async () => page.evaluate(() => {
@@ -473,13 +479,13 @@ test.describe('YouTube cinematic curtain reveal', () => {
 
     await thumbnails.nth(1).click();
     await expect(hero.locator('.hero-title')).toContainText('Second Feature');
-    await expect(hero.locator('.hero-curtain-overlay')).toHaveClass(/is-closing/, { timeout: 1_500 });
+    await expect(hero.locator('.hero-curtain-overlay')).toHaveClass(/is-closing/, { timeout: 2_500 });
     await expect(hero.locator('iframe')).toHaveCount(1);
 
     await page.waitForTimeout(1_300);
     await thumbnails.nth(0).click();
     await expect(hero.locator('.hero-title')).toContainText('Cinematic Curtain Hero');
-    await expect(hero.locator('.hero-curtain-overlay')).toHaveClass(/is-closing/, { timeout: 1_500 });
+    await expect(hero.locator('.hero-curtain-overlay')).toHaveClass(/is-closing/, { timeout: 2_500 });
     await expect(hero.locator('iframe')).toHaveCount(1, { timeout: 3_000 });
 
     const activePlayerAdvanced = await page.evaluate(async () => {
