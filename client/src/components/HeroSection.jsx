@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchHomeHero } from '../services/tmdb';
+import { fetchHomeHero, fetchMovieTrailers } from '../services/tmdb';
 import { dummyShowsData } from '../assets/assets';
 import HeroContent from './hero/HeroContent';
 import HeroMedia from './hero/HeroMedia';
@@ -168,22 +168,46 @@ const HeroSection = ({
     resetToPoster(currentMovieKey);
   }, [currentMovieKey, resetToPoster]);
 
-  const loadHeroVideoSource = useCallback((
+  const loadHeroVideoSource = useCallback(async (
     targetMovie,
     targetKey,
-    { force = false } = {},
+    { force = false, manual = false } = {},
   ) => {
     if (force) {
       trailerCacheRef.current.delete(targetKey);
     }
 
     const cachedSource = trailerCacheRef.current.get(targetKey);
-    if (cachedSource) return Promise.resolve(cachedSource);
+    if (cachedSource && (!manual || cachedSource.kind !== 'native' || cachedSource.src !== '/mock/hero-trailer.mp4')) {
+      return cachedSource;
+    }
 
     const configuredSource = resolveConfiguredHeroVideoSource(targetMovie);
+    if (configuredSource && (!manual || configuredSource.src !== '/mock/hero-trailer.mp4')) {
+      trailerCacheRef.current.set(targetKey, configuredSource);
+      return configuredSource;
+    }
+
+    if (manual) {
+      try {
+        const trailers = await fetchMovieTrailers(targetMovie);
+        if (Array.isArray(trailers) && trailers.length > 0 && trailers[0].videoId) {
+          const youtubeSource = {
+            kind: 'youtube',
+            videoId: trailers[0].videoId,
+            title: trailers[0].title || targetMovie?.title || targetMovie?.name || 'Movie Trailer',
+          };
+          trailerCacheRef.current.set(targetKey, youtubeSource);
+          return youtubeSource;
+        }
+      } catch (error) {
+        console.warn('Hero manual trailer fetch error', error);
+      }
+    }
+
     if (configuredSource) {
       trailerCacheRef.current.set(targetKey, configuredSource);
-      return Promise.resolve(configuredSource);
+      return configuredSource;
     }
 
     if (targetMovie && (targetMovie.heroVideoUrl || targetMovie.videoUrl)) {
@@ -193,10 +217,10 @@ const HeroSection = ({
         mimeType: targetMovie.heroVideoMimeType || 'video/mp4',
       };
       trailerCacheRef.current.set(targetKey, fallbackSource);
-      return Promise.resolve(fallbackSource);
+      return fallbackSource;
     }
 
-    return Promise.resolve(null);
+    return null;
   }, []);
 
   const startTrailerAttempt = useCallback(async ({ source = 'manual', forceMetadata = false } = {}) => {
@@ -238,6 +262,7 @@ const HeroSection = ({
     try {
       const videoSource = await loadHeroVideoSource(targetMovie, targetKey, {
         force: forceMetadata || retrying,
+        manual: source === 'manual',
       });
       if (!mountedRef.current || generation !== generationRef.current) return;
 

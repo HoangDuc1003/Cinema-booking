@@ -133,9 +133,9 @@ export const validateMovieCandidates = async (movies, signal) => {
       heroMobileImageUrl: heroMobileImageUrl || fallbackUrl,
       heroImageCandidates: putFirst(desktopCandidates, heroImageUrl || fallbackUrl),
       heroMobileImageCandidates: putFirst(mobileCandidates, heroMobileImageUrl || fallbackUrl),
-      heroVideoStatus: movie.heroVideoStatus || 'ready',
-      heroVideoMimeType: movie.heroVideoMimeType || 'video/mp4',
-      heroVideoUrl: movie.heroVideoUrl || '/mock/hero-trailer.mp4',
+      heroVideoStatus: movie.heroVideoStatus || (movie.heroVideoUrl ? 'ready' : ''),
+      heroVideoMimeType: movie.heroVideoMimeType || (movie.heroVideoUrl ? 'video/mp4' : ''),
+      heroVideoUrl: movie.heroVideoUrl || '',
     };
   };
 
