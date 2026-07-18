@@ -91,18 +91,34 @@ export const validateMovieCandidates = async (movies, signal) => {
   );
 
   const validateMovie = async (movie) => {
-    const desktopCandidates = buildHeroImageCandidates([
-      movie.backdrop_original,
-      movie.backdrop_w1280,
-      movie.backdrop_path,
-      movie.poster_path,
-    ], 'w1280');
-    const mobileCandidates = buildHeroImageCandidates([
-      movie.poster_path,
-      movie.backdrop_original,
-      movie.backdrop_w1280,
-      movie.backdrop_path,
-    ], 'w780');
+    const desktopCandidates = [
+      ...buildHeroImageCandidates([
+        movie.backdrop_original,
+        movie.backdrop_path,
+        movie.backdrop_w1280,
+        movie.poster_path,
+      ], 'original'),
+      ...buildHeroImageCandidates([
+        movie.backdrop_original,
+        movie.backdrop_w1280,
+        movie.backdrop_path,
+        movie.poster_path,
+      ], 'w1280'),
+    ];
+    const mobileCandidates = [
+      ...buildHeroImageCandidates([
+        movie.poster_path,
+        movie.backdrop_original,
+        movie.backdrop_w1280,
+        movie.backdrop_path,
+      ], 'original'),
+      ...buildHeroImageCandidates([
+        movie.poster_path,
+        movie.backdrop_original,
+        movie.backdrop_w1280,
+        movie.backdrop_path,
+      ], 'w780'),
+    ];
 
     const [heroImageUrl, heroMobileImageUrl] = await Promise.all([
       findFirstLoadable(desktopCandidates),
@@ -117,6 +133,9 @@ export const validateMovieCandidates = async (movies, signal) => {
       heroMobileImageUrl: heroMobileImageUrl || fallbackUrl,
       heroImageCandidates: putFirst(desktopCandidates, heroImageUrl || fallbackUrl),
       heroMobileImageCandidates: putFirst(mobileCandidates, heroMobileImageUrl || fallbackUrl),
+      heroVideoStatus: movie.heroVideoStatus || 'ready',
+      heroVideoMimeType: movie.heroVideoMimeType || 'video/mp4',
+      heroVideoUrl: movie.heroVideoUrl || '/mock/hero-trailer.mp4',
     };
   };
 

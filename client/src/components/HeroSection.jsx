@@ -85,6 +85,7 @@ const HeroSection = ({
   const playbackTimersRef = useRef(new Set());
   const carouselIntervalRef = useRef(null);
   const pendingVisualReadyRef = useRef(null);
+  const postTrailerHoldActiveRef = useRef(false);
 
   const isLargeScreen = useMediaQuery('(min-width: 1024px)');
   const isMobileScreen = useMediaQuery('(max-width: 767px)');
@@ -185,6 +186,16 @@ const HeroSection = ({
       return Promise.resolve(configuredSource);
     }
 
+    if (targetMovie && (targetMovie.heroVideoUrl || targetMovie.videoUrl)) {
+      const fallbackSource = {
+        kind: 'native',
+        src: String(targetMovie.heroVideoUrl || targetMovie.videoUrl).trim(),
+        mimeType: targetMovie.heroVideoMimeType || 'video/mp4',
+      };
+      trailerCacheRef.current.set(targetKey, fallbackSource);
+      return Promise.resolve(fallbackSource);
+    }
+
     return Promise.resolve(null);
   }, []);
 
@@ -193,6 +204,7 @@ const HeroSection = ({
     const targetMovie = moviesRef.current[currentIndexRef.current];
     if (!targetMovie) return;
 
+    postTrailerHoldActiveRef.current = false;
     const targetKey = getHeroMovieKey(targetMovie, currentIndexRef.current);
     const currentMachine = machineRef.current;
     const retrying = currentMachine.phase === HERO_PHASES.TRAILER_FAILED;
@@ -212,7 +224,7 @@ const HeroSection = ({
     setPlaybackIntent(intentValue);
 
     if (source === 'manual') setAutoplaySoundBlocked(false);
-    setMuted(true);
+    setMuted(source !== 'manual');
 
     const generation = nextGeneration();
     attemptLockRef.current = { generation, movieKey: targetKey };
@@ -262,6 +274,7 @@ const HeroSection = ({
     const normalizedIndex = ((targetIndex % availableMovies.length) + availableMovies.length) % availableMovies.length;
     if (normalizedIndex === currentIndexRef.current) return;
 
+    postTrailerHoldActiveRef.current = false;
     abortMetadataRequests({ includePrefetch: false });
     clearPlaybackTimers();
     pendingVisualReadyRef.current = null;
@@ -591,9 +604,11 @@ const HeroSection = ({
     ) {
       return undefined;
     }
+    const delay = postTrailerHoldActiveRef.current ? 2000 : HERO_AUTO_CAROUSEL_MS;
     const intervalId = window.setInterval(() => {
+      postTrailerHoldActiveRef.current = false;
       switchMovie(currentIndexRef.current + 1, { animate: true, continueTrailer: false });
-    }, HERO_AUTO_CAROUSEL_MS);
+    }, delay);
     carouselIntervalRef.current = intervalId;
     return () => {
       window.clearInterval(intervalId);
@@ -699,6 +714,7 @@ const HeroSection = ({
   const handleEnded = useCallback(({ generation }) => {
     if (generation !== generationRef.current) return;
     setMuted(true);
+    postTrailerHoldActiveRef.current = true;
     resetToPoster(machineRef.current.movieKey);
   }, [resetToPoster]);
 
