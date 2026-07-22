@@ -1,37 +1,18 @@
-import React, { useState, useEffect } from 'react'
+import React, { useCallback } from 'react'
 import { CalendarDays } from 'lucide-react'
 import { fetchUpcomingMovies } from '../services/tmdb'
 import MovieGrid from '../components/MovieGrid'
-import Loading from '../components/Loading'
-import { dummyShowsData } from '../assets/assets'
 import CatalogHeader from '../components/CatalogHeader'
 import CatalogPageShell from '../components/CatalogPageShell'
+import CatalogState from '../components/CatalogState'
+import useCatalogFeed from '../hooks/useCatalogFeed'
 
 const Release = () => {
-  const [movies, setMovies] = useState(() => dummyShowsData.slice(0, 10));
-  const [isLoading, setIsLoading] = useState(false);
-
-  useEffect(() => {
-    let mounted = true;
-
-    const loadMovies = async () => {
-      try {
-        const data = await fetchUpcomingMovies();
-        if (mounted) setMovies(Array.isArray(data) && data.length ? data : dummyShowsData.slice(0, 10));
-      } catch (error) {
-        if (error.name !== 'AbortError' && import.meta.env.DEV) console.warn('Release load error:', error.message);
-      } finally {
-        if (mounted) setIsLoading(false);
-      }
-    };
-
-    loadMovies();
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  if (isLoading && !movies.length) return <Loading />;
+  const loadMovies = useCallback(({ signal }) => fetchUpcomingMovies({
+    signal,
+    fallbackMode: 'none',
+  }), []);
+  const { movies, status, error, retry } = useCatalogFeed(loadMovies);
 
   return (
     <CatalogPageShell
@@ -41,17 +22,19 @@ const Release = () => {
           eyebrow="Coming soon"
           title="Upcoming Releases"
           description="Preview the films arriving next and keep your watchlist ready for their first big-screen showings."
-          count={movies.length}
+          count={status === 'ready' ? movies.length : 0}
           countLabel="movies"
+          ariaBusy={status === 'loading'}
         />
       )}
     >
-      <MovieGrid
-        movies={movies}
-        columns="grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
-        animated={true}
-        staggerDelay={10}
-      />
+      {status !== 'ready' ? (
+        <CatalogState status={status} error={error} onRetry={retry} />
+      ) : movies.length ? (
+        <MovieGrid movies={movies} columns="grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" staggerDelay={30} />
+      ) : (
+        <CatalogState status="empty" emptyIcon={CalendarDays} emptyTitle="Chưa có lịch phát hành" emptyDescription="Các phim sắp ra mắt sẽ xuất hiện tại đây." />
+      )}
     </CatalogPageShell>
   );
 };

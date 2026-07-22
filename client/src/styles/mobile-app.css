@@ -15,11 +15,12 @@
 
   .mobile-auth-entry {
     position: relative;
-    display: grid;
+    display: flex;
     overflow: hidden;
-    place-items: end center;
+    align-items: flex-end;
+    justify-content: center;
     background: #000;
-    padding: max(1.5rem, env(safe-area-inset-top)) 1.5rem max(2.5rem, env(safe-area-inset-bottom));
+    padding: .75rem max(.75rem, env(safe-area-inset-right)) max(.75rem, env(safe-area-inset-bottom)) max(.75rem, env(safe-area-inset-left));
   }
 
   .mobile-auth-entry__backdrop {
@@ -28,25 +29,49 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
-    opacity: 0.68;
+    object-position: 63% center;
+    opacity: .94;
+    transform: scale(1.01);
   }
 
   .mobile-auth-entry__shade {
     position: absolute;
     inset: 0;
-    background: linear-gradient(180deg, rgba(0,0,0,.08) 10%, rgba(0,0,0,.42) 48%, #000 86%);
+    background:
+      linear-gradient(180deg, rgba(2,4,9,.12) 4%, rgba(2,4,9,.08) 35%, rgba(2,4,9,.56) 64%, #050609 100%),
+      linear-gradient(90deg, rgba(0,0,0,.3), transparent 45%, rgba(0,0,0,.08));
+  }
+
+  .mobile-auth-entry__brand {
+    position: absolute;
+    z-index: 2;
+    top: max(1rem, calc(env(safe-area-inset-top) + .65rem));
+    left: max(1.1rem, calc(env(safe-area-inset-left) + .8rem));
+    display: flex;
+    min-height: 2.75rem;
+    align-items: center;
   }
 
   .mobile-auth-entry__content {
     position: relative;
     z-index: 1;
-    width: min(100%, 24rem);
-    padding-bottom: 8vh;
-    text-align: center;
+    width: min(100%, 27rem);
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,.14);
+    border-radius: 1.6rem;
+    background: linear-gradient(145deg, rgba(18,21,29,.84), rgba(7,8,12,.92));
+    box-shadow: 0 24px 70px rgba(0,0,0,.54), inset 0 1px rgba(255,255,255,.09);
+    padding: 1.35rem;
+    text-align: left;
+    backdrop-filter: blur(18px) saturate(1.15);
   }
 
-  .mobile-auth-entry__logo { width: 11rem; margin: 0 auto 1rem; }
-  .mobile-auth-entry__content p { margin: 0 auto 1.75rem; color: rgba(255,255,255,.72); line-height: 1.55; }
+  .mobile-auth-entry__logo { display: block; width: 9.5rem; height: auto; }
+  .mobile-auth-entry__eyebrow { color: var(--mobile-primary); font-size: .68rem; font-weight: 800; letter-spacing: .17em; text-transform: uppercase; }
+  .mobile-auth-entry__content h1 { max-width: 20rem; margin: .55rem 0 .7rem; font-size: clamp(1.75rem, 8.2vw, 2.35rem); font-weight: 850; line-height: 1.02; letter-spacing: -.035em; text-wrap: balance; }
+  .mobile-auth-entry__content p { margin: 0 0 1.2rem; color: rgba(255,255,255,.68); font-size: .88rem; line-height: 1.55; }
+  .mobile-auth-entry__content .mobile-primary-button { width: 100%; min-height: 3.25rem; padding-inline: 1.1rem; }
+  .mobile-auth-entry__content .mobile-primary-button svg { margin-left: auto; }
 
   .mobile-primary-button,
   .mobile-secondary-button,
@@ -150,6 +175,11 @@
   .mobile-app-home, .mobile-secondary-shell { min-height: 100dvh; overflow-x: clip; background: #000; }
   .mobile-app-home > main { padding-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom) + 1.5rem); }
   .mobile-secondary-shell > main { min-height: 100dvh; padding-top: 4.5rem; padding-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom) + 1rem); }
+  .mobile-secondary-shell > .mobile-catalog-main { padding: 0; }
+  .mobile-catalog-main .catalog-page-shell {
+    padding-top: calc(4.4rem + env(safe-area-inset-top));
+    padding-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom) + 1.25rem);
+  }
 
   .mobile-top-bar { position: fixed; z-index: 60; top: 0; right: 0; left: 0; display: flex; min-height: calc(3.75rem + env(safe-area-inset-top)); align-items: center; justify-content: space-between; padding: max(.7rem, env(safe-area-inset-top)) 1rem .7rem; transition: background-color 200ms ease, backdrop-filter 200ms ease; }
   .mobile-top-bar.is-scrolled { border-bottom: 1px solid rgba(255,255,255,.08); background: rgba(0,0,0,.78); backdrop-filter: blur(18px); }
@@ -186,7 +216,7 @@
   .mobile-movie-rail__track { display: flex; gap: .75rem; overflow-x: auto; overscroll-behavior-x: contain; padding: 0 1rem .5rem; scroll-padding-inline: 1rem; scroll-snap-type: x proximity; scrollbar-width: none; }
   .mobile-movie-rail__track::-webkit-scrollbar { display: none; }
   .mobile-movie-rail__card { flex: 0 0 38vw; max-width: 10rem; scroll-snap-align: start; }
-  .mobile-movie-rail__card > div { border-radius: .9rem; }
+  .mobile-movie-rail__card > .movie-card { border-radius: .9rem; }
 
   .mobile-bottom-nav { position: fixed; z-index: 70; right: 0; bottom: 0; left: 0; display: grid; min-height: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom)); grid-template-columns: repeat(4, 1fr); border-top: 1px solid rgba(255,255,255,.09); background: rgba(8,9,12,.9); padding: .45rem max(.25rem, env(safe-area-inset-right)) env(safe-area-inset-bottom) max(.25rem, env(safe-area-inset-left)); backdrop-filter: blur(20px); }
   .mobile-bottom-nav button { display: flex; min-width: 0; min-height: 3.5rem; flex-direction: column; align-items: center; justify-content: center; gap: .25rem; border-radius: .75rem; color: rgba(255,255,255,.5); font-size: .66rem; }
@@ -207,9 +237,36 @@
   }
 
   @media (max-width: 350px) {
+    .mobile-auth-entry__content { padding: 1.1rem; }
+    .mobile-auth-entry__content h1 { font-size: 1.65rem; }
     .mobile-profile-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .mobile-featured-card { width: 91vw; }
     .mobile-featured-card__content { right: 1rem; left: 1rem; }
+  }
+
+  @media (orientation: landscape) and (max-height: 650px) {
+    .mobile-auth-entry {
+      align-items: stretch;
+      justify-content: flex-end;
+      padding: max(.65rem, env(safe-area-inset-top)) max(.65rem, env(safe-area-inset-right)) max(.65rem, env(safe-area-inset-bottom)) 48%;
+    }
+
+    .mobile-auth-entry__backdrop { object-position: 48% center; }
+    .mobile-auth-entry__shade { background: linear-gradient(90deg, rgba(0,0,0,.12) 20%, rgba(3,4,8,.52) 49%, rgba(3,4,8,.92) 100%); }
+    .mobile-auth-entry__brand { top: max(.7rem, calc(env(safe-area-inset-top) + .4rem)); left: max(1rem, calc(env(safe-area-inset-left) + .65rem)); }
+    .mobile-auth-entry__logo { width: 8rem; }
+    .mobile-auth-entry__content {
+      display: flex;
+      width: 100%;
+      max-width: 28rem;
+      flex-direction: column;
+      justify-content: center;
+      border-radius: 1.35rem;
+      padding: clamp(1rem, 4vh, 1.5rem);
+    }
+    .mobile-auth-entry__content h1 { max-width: 19rem; margin-block: .35rem .45rem; font-size: clamp(1.35rem, 5.2vh, 2rem); }
+    .mobile-auth-entry__content p { margin-bottom: .75rem; font-size: .78rem; line-height: 1.4; }
+    .mobile-auth-entry__content .mobile-primary-button { min-height: 3rem; }
   }
 
   @media (prefers-reduced-motion: reduce) {

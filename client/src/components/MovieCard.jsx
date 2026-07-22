@@ -1,18 +1,28 @@
 import React, { useCallback, useState, useEffect } from 'react';
 import { StarIcon, Calendar, Clock, Play, Heart, Film } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import timeFormat from '../lib/timeFormat';
 import { fetchMovieDetails } from '../services/tmdb';
 
+const readStoredFavorites = () => {
+  try {
+    const value = JSON.parse(localStorage.getItem('nitro_favorites') || '[]');
+    return Array.isArray(value) ? value : [];
+  } catch {
+    return [];
+  }
+};
+
 const MovieCard = ({ movie, hydrateRuntime = true }) => {
-  const navigate = useNavigate();
   const [hasImageError, setHasImageError] = useState(false);
+  const movieId = movie._id || movie.id;
+  const movieHref = `/movies/${movieId}`;
 
   const handleNavigate = useCallback(() => {
-    navigate(`/movies/${movie._id || movie.id}`);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, [navigate, movie._id, movie.id]);
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    window.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' });
+  }, []);
 
   const releaseYear = movie.release_date ? new Date(movie.release_date).getFullYear() : 'N/A';
   const isNumeric = (v) => v != null && !isNaN(Number(v));
@@ -26,10 +36,10 @@ const MovieCard = ({ movie, hydrateRuntime = true }) => {
   const [isFavorited, setIsFavorited] = useState(false);
 
   useEffect(() => {
-    const favorites = JSON.parse(localStorage.getItem('nitro_favorites') || '[]');
+    const favorites = readStoredFavorites();
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setIsFavorited(favorites.some(f => f.id === movie.id));
-  }, [movie.id]);
+    setIsFavorited(favorites.some((favorite) => String(favorite.id || favorite._id) === String(movieId)));
+  }, [movieId]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -38,10 +48,10 @@ const MovieCard = ({ movie, hydrateRuntime = true }) => {
 
   const toggleFavorite = (e) => {
     e.stopPropagation();
-    const favorites = JSON.parse(localStorage.getItem('nitro_favorites') || '[]');
+    const favorites = readStoredFavorites();
     let newFavorites;
     if (isFavorited) {
-      newFavorites = favorites.filter(f => f.id !== movie.id);
+      newFavorites = favorites.filter((favorite) => String(favorite.id || favorite._id) !== String(movieId));
       toast.success('Removed from favorites');
     } else {
       newFavorites = [...favorites, movie];
@@ -53,22 +63,26 @@ const MovieCard = ({ movie, hydrateRuntime = true }) => {
   };
 
   useEffect(() => {
-    let mounted = true;
+    const controller = new AbortController();
     if (hydrateRuntime && runtimeMinutes == null) {
       const tmdbId = movie.id || (movie._id && !isNaN(Number(movie._id)) ? Number(movie._id) : null);
       if (tmdbId) {
-        fetchMovieDetails(tmdbId)
+        fetchMovieDetails(tmdbId, {
+          signal: controller.signal,
+          fallbackMode: 'none',
+        })
           .then((data) => {
-            if (!mounted) return;
+            if (controller.signal.aborted) return;
             if (isNumeric(data?.runtime)) setRuntimeMinutes(Number(data.runtime));
           })
           .catch(() => {});
       }
     }
-    return () => { mounted = false; };
+    return () => controller.abort();
   }, [hydrateRuntime, runtimeMinutes, movie.id, movie._id]);
 
-  const rating = movie.vote_average ? movie.vote_average.toFixed(1) : (movie.rating || '0.0');
+  const ratingValue = Number(movie.vote_average ?? movie.rating);
+  const rating = Number.isFinite(ratingValue) ? ratingValue.toFixed(1) : '0.0';
 
   const getImageUrl = (path) => {
     if (!path) return '';
@@ -78,79 +92,64 @@ const MovieCard = ({ movie, hydrateRuntime = true }) => {
 
   const imageSrc = getImageUrl(movie.poster_path || movie.backdrop_path || movie.poster);
   const showPosterFallback = !imageSrc || hasImageError;
+  const title = movie.title || movie.name || 'Untitled';
 
   return (
-    <div 
-      onClick={() => {handleNavigate(); window.scrollTo({top: 0,behavior:'smooth'})}}
-      className="relative w-full aspect-2/3 rounded-2xl overflow-hidden group cursor-pointer bg-gray-900 border border-gray-800 hover:border-pink-500/50 transition-colors duration-500 shadow-lg [will-change:transform]"
-    >
-      {showPosterFallback ? (
-        <div
-          className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-linear-to-br from-slate-900 via-slate-950 to-black px-6 text-center"
-          role="img"
-          aria-label={`Poster unavailable for ${movie.title}`}
-        >
-          <Film className="h-12 w-12 text-primary/75" aria-hidden="true" />
-          <span className="line-clamp-2 text-sm font-semibold text-white/75">{movie.title}</span>
-        </div>
-      ) : (
-        <img
-          src={imageSrc}
-          alt={movie.title}
-          loading="lazy"
-          decoding="async"
-          onError={() => setHasImageError(true)}
-          className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:scale-105 [will-change:transform]"
-        />
-      )}
-      
-      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors duration-500 z-10 pointer-events-none"></div>
-
-      {/* Rating badge */}
-      <div className="absolute top-3 right-3 bg-black/40 backdrop-blur-md px-2 py-1 rounded-md flex items-center gap-1.5 z-30 border border-white/10">
-        <StarIcon className="w-3.5 h-3.5 text-pink-500 fill-pink-500" />
-        <span className="text-white font-bold text-xs">{rating}</span>
-      </div>
-
-      {/* Favorite button */}
-      <button 
-        onClick={toggleFavorite}
-        className="absolute top-3 left-3 z-40 p-2 rounded-full bg-black/40 backdrop-blur-md border border-white/10 hover:bg-white/20 transition-all duration-300"
+    <article className="movie-card group">
+      <Link
+        to={movieHref}
+        onClick={handleNavigate}
+        className="movie-card__main"
+        aria-label={`Xem chi tiết ${title}`}
       >
-        <Heart className={`w-4 h-4 ${isFavorited ? 'text-pink-500 fill-pink-500' : 'text-white'}`} />
+        {showPosterFallback ? (
+          <span className="movie-card__fallback" role="img" aria-label={`Không có poster cho ${title}`}>
+            <Film aria-hidden="true" />
+            <span>{title}</span>
+          </span>
+        ) : (
+          <img
+            src={imageSrc}
+            alt={`Poster ${title}`}
+            loading="lazy"
+            decoding="async"
+            onError={() => setHasImageError(true)}
+            className="movie-card__poster"
+          />
+        )}
+
+        <span className="movie-card__scrim" aria-hidden="true" />
+        <span className="movie-card__play" aria-hidden="true"><Play /></span>
+
+        <span className="movie-card__info">
+          <span className="movie-card__title">{title}</span>
+          <span className="movie-card__meta">
+            <span><Calendar aria-hidden="true" />{releaseYear}</span>
+            {runtimeMinutes != null && <span><Clock aria-hidden="true" />{timeFormat(runtimeMinutes)}</span>}
+          </span>
+        </span>
+      </Link>
+
+      <span className="movie-card__rating" aria-label={`Điểm ${rating}`}>
+        <StarIcon aria-hidden="true" />
+        {rating}
+      </span>
+
+      <button
+        type="button"
+        onClick={toggleFavorite}
+        className="movie-card__favorite"
+        aria-label={isFavorited ? `Bỏ ${title} khỏi yêu thích` : `Thêm ${title} vào yêu thích`}
+        aria-pressed={isFavorited}
+      >
+        <Heart aria-hidden="true" className={isFavorited ? 'is-favorited' : ''} />
       </button>
 
-      {/* Play button */}
-      <div className="absolute inset-0 flex items-center justify-center pb-12 z-49 pointer-events-none">
-        <div className="w-16 h-16 rounded-full bg-white/10 backdrop-blur-xl border border-white/30 shadow-[0_8px_32px_rgba(255,255,255,0.2)] flex items-center justify-center opacity-0 scale-75 group-hover:opacity-100 group-hover:scale-100 transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] [will-change:transform,opacity]">
-          <Play className="w-6 h-6 text-white fill-white ml-1" />
-        </div>
-      </div>
-
-      {/* Bottom info */}
-      <div className="absolute bottom-0 left-0 w-full flex flex-col justify-end p-4 pt-10 z-30 translate-y-6 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] [will-change:transform,opacity]">
-        <h3 className="text-white font-bold text-lg truncate mb-1.5 drop-shadow-md">
-          {movie.title}
-        </h3>
-        
-        <div className="flex items-center gap-3 text-xs text-gray-300 mb-3">
-          <div className="flex items-center gap-1.5">
-            <Calendar className="w-3.5 h-3.5 text-pink-500" />
-            <span className="font-medium">{releaseYear}</span>
-          </div>
-          {runtimeMinutes != null && (
-            <div className="flex items-center gap-1.5">
-              <Clock className="w-3.5 h-3.5 text-pink-500" />
-              <span className="font-medium">{timeFormat(runtimeMinutes)}</span>
-            </div>
-          )}
-        </div>
-        
-        <button className="w-full py-2.5 text-sm bg-pink-500 backdrop-blur-xl border border-pink-300 shadow-[0_8px_32px_rgba(255,255,255,0.2)] flex items-center justify-center text-white rounded-xl font-bold transition-all hover:shadow-[0_0_25px_rgba(219,39,119,0.5)] hover:bg-pink-600 active:scale-95 pointer-events-auto cursor-pointer">
-          Buy Ticket
-        </button>
-      </div>
-    </div>
+      <Link to={movieHref} onClick={handleNavigate} className="movie-card__cta">
+        <Play aria-hidden="true" />
+        Đặt vé
+      </Link>
+    </article>
   );
 };
 

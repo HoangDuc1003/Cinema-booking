@@ -232,12 +232,26 @@ test.describe('YouTube cinematic curtain reveal', () => {
     const curtain = hero.locator('.hero-curtain-overlay');
     const playerShell = hero.locator('.hero-youtube-video');
 
-    await expect(curtain).toHaveClass(/is-previewing/);
-    await expect(hero.locator('iframe')).toHaveCount(1);
-    await expect(hero.locator('video')).toHaveCount(0);
-    await expect(playerShell).not.toHaveClass(/is-visible/);
-    await expect(playerShell).toHaveCSS('opacity', '0');
-    await expect(hero.locator('.hero-poster-shell')).toHaveClass(/is-visible/);
+    await expect.poll(async () => page.evaluate(() => {
+      const curtainElement = document.querySelector('.hero-curtain-overlay');
+      const playerElement = document.querySelector('.hero-youtube-video');
+      const posterElement = document.querySelector('.hero-poster-shell');
+      return {
+        curtainPreviewing: curtainElement?.classList.contains('is-previewing') ?? false,
+        iframeCount: document.querySelectorAll('.hero-section iframe').length,
+        nativeVideoCount: document.querySelectorAll('.hero-section video').length,
+        playerVisible: playerElement?.classList.contains('is-visible') ?? false,
+        playerOpacity: playerElement ? getComputedStyle(playerElement).opacity : null,
+        posterVisible: posterElement?.classList.contains('is-visible') ?? false,
+      };
+    }), { timeout: 2_500 }).toEqual({
+      curtainPreviewing: true,
+      iframeCount: 1,
+      nativeVideoCount: 0,
+      playerVisible: false,
+      playerOpacity: '0',
+      posterVisible: true,
+    });
 
     const beforeReveal = await page.evaluate(() => ({
       time: window.__FAKE_YOUTUBE__.players[0].getCurrentTime(),
@@ -258,7 +272,7 @@ test.describe('YouTube cinematic curtain reveal', () => {
     });
 
     await expect(curtain).toHaveClass(/is-closing/, { timeout: 2_500 });
-    await expect(curtain).toHaveClass(/is-opening/, { timeout: 4_500 });
+    await expect(curtain).toHaveClass(/is-opening/, { timeout: 5_500 });
     await expect(curtain).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await expect(playerShell).toHaveClass(/is-visible/);
     await expect(playerShell).toHaveCSS('opacity', '1');
@@ -306,14 +320,14 @@ test.describe('YouTube cinematic curtain reveal', () => {
     });
     expect(revealTiming.posterPreviewDuration).toBeGreaterThanOrEqual(1_850);
     expect(revealTiming.posterPreviewDuration).toBeLessThan(2_300);
-    expect(revealTiming.closeDuration).toBeGreaterThanOrEqual(2_850);
-    expect(revealTiming.closeDuration).toBeLessThan(3_400);
+    expect(revealTiming.closeDuration).toBeGreaterThanOrEqual(3_850);
+    expect(revealTiming.closeDuration).toBeLessThan(4_400);
     expect(revealTiming.closedHoldDuration).toBeGreaterThanOrEqual(850);
     expect(revealTiming.closedHoldDuration).toBeLessThan(1_300);
     expect(revealTiming.openDuration).toBeGreaterThanOrEqual(900);
     expect(revealTiming.openDuration).toBeLessThan(1_350);
-    expect(revealTiming.totalRevealDuration).toBeLessThan(7_500);
-    expect(revealTiming.closingAnimationDuration).toBe('3s');
+    expect(revealTiming.totalRevealDuration).toBeLessThan(8_500);
+    expect(revealTiming.closingAnimationDuration).toBe('4s');
     expect(revealTiming.openingAnimationDuration).toBe('1s');
     expect(revealTiming.playbackStartedDuringPosterPreview).toBe(true);
     expect(revealTiming.audioDelay).toBeGreaterThanOrEqual(150);
@@ -386,8 +400,13 @@ test.describe('YouTube cinematic curtain reveal', () => {
     await expect(hero.locator('.hero-curtain-overlay')).toHaveCount(0, { timeout: 9_000 });
     await expect(trailerToggle).toContainText('Poster');
 
-    const posterClickAt = await page.evaluate(() => Date.now() - window.__FAKE_YOUTUBE__.startedAt);
+    await trailerToggle.evaluate((button) => {
+      button.addEventListener('click', () => {
+        window.__FAKE_YOUTUBE__.posterClickAt = Date.now() - window.__FAKE_YOUTUBE__.startedAt;
+      }, { once: true });
+    });
     await trailerToggle.click();
+    const posterClickAt = await page.evaluate(() => window.__FAKE_YOUTUBE__.posterClickAt);
 
     await expect(trailerToggle).toContainText('Trailer');
     await expect(hero.locator('iframe')).toHaveCount(0);
@@ -442,7 +461,7 @@ test.describe('YouTube cinematic curtain reveal', () => {
     await expect(thumbnails).toHaveCount(5);
     await expect(hero.locator('iframe')).toHaveCount(1);
     await expect(hero.locator('video')).toHaveCount(0);
-    await expect(content).toHaveClass(/(?:^|\s)is-compact(?:\s|$)/, { timeout: 12_000 });
+    await expect(content).toHaveClass(/(?:^|\s)is-compact(?:\s|$)/, { timeout: 15_000 });
 
     await expect(overview).toBeVisible();
     await expect(overview).toHaveAttribute('aria-hidden', 'false');
@@ -493,13 +512,13 @@ test.describe('YouTube cinematic curtain reveal', () => {
 
     await thumbnails.nth(1).click();
     await expect(hero.locator('.hero-title')).toContainText('Second Feature');
-    await expect(hero.locator('.hero-curtain-overlay')).toHaveClass(/is-closing/, { timeout: 2_500 });
+    await expect(hero.locator('.hero-curtain-overlay')).toHaveClass(/is-closing/, { timeout: 3_500 });
     await expect(hero.locator('iframe')).toHaveCount(1);
 
     await page.waitForTimeout(1_300);
     await thumbnails.nth(0).click();
     await expect(hero.locator('.hero-title')).toContainText('Cinematic Curtain Hero');
-    await expect(hero.locator('.hero-curtain-overlay')).toHaveClass(/is-closing/, { timeout: 2_500 });
+    await expect(hero.locator('.hero-curtain-overlay')).toHaveClass(/is-closing/, { timeout: 3_500 });
     await expect(hero.locator('iframe')).toHaveCount(1, { timeout: 3_000 });
 
     const activePlayerAdvanced = await page.evaluate(async () => {
@@ -565,7 +584,7 @@ test.describe('YouTube cinematic curtain reveal', () => {
     const hero = page.locator('.hero-section');
     const curtain = hero.locator('.hero-curtain-overlay');
     const playerShell = hero.locator('.hero-youtube-video');
-    await expect(curtain).toHaveClass(/is-closed/, { timeout: 6_000 });
+    await expect(curtain).toHaveClass(/is-closed/, { timeout: 7_500 });
 
     await page.evaluate(() => window.__FAKE_YOUTUBE__.players[0].pauseVideo());
     await page.waitForTimeout(1_300);

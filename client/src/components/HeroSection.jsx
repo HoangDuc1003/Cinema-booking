@@ -1,7 +1,11 @@
 import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { RefreshCw } from 'lucide-react';
 import { fetchHomeHero, fetchMovieTrailers } from '../services/tmdb';
-import { dummyShowsData } from '../assets/assets';
+import {
+  getClientHeroDayKey,
+  millisecondsUntilNextLocalMidnight,
+} from '../services/heroCatalogOffset';
 import HeroContent from './hero/HeroContent';
 import CinematicCurtain from './hero/CinematicCurtain';
 import HeroMedia from './hero/HeroMedia';
@@ -27,7 +31,6 @@ import {
   getInitialHeroMovies,
   getNow,
   saveHeroMoviesCache,
-  selectBestHeroMovies,
   validateMovieCandidates,
 } from './hero/heroCatalogLoader';
 import { useMediaQuery, useSaveData } from './hero/useHeroEnvironment';
@@ -40,8 +43,8 @@ const HERO_AUTO_CAROUSEL_MS = 5_000;
 const HERO_ENDED_POSTER_HOLD_MS = 1_000;
 const CURTAIN_POSTER_PREVIEW_MS = 2_000;
 const CURTAIN_PREFETCHED_PREVIEW_MS = Math.max(0, CURTAIN_POSTER_PREVIEW_MS - HERO_ENDED_POSTER_HOLD_MS);
-const CURTAIN_CLOSE_DURATION_MS = 3_500;
-const CURTAIN_CLOSED_HOLD_MS = 2_000;
+const CURTAIN_CLOSE_DURATION_MS = 4_000;
+const CURTAIN_CLOSED_HOLD_MS = 1_000;
 const CURTAIN_OPEN_DURATION_MS = 1_000;
 const CURTAIN_REDUCED_MOTION_DURATION_MS = 200;
 const AUDIO_REVEAL_DELAY_MS = 200;
@@ -60,15 +63,22 @@ const HeroSection = ({
   autoPreview = false,
 }) => {
   const navigate = useNavigate();
-  const initialMoviesList = getInitialHeroMovies();
+  const [initialCatalog] = useState(() => {
+    const dayKey = getClientHeroDayKey();
+    return { dayKey, movies: getInitialHeroMovies(dayKey) };
+  });
+  const initialMoviesList = initialCatalog.movies;
+  const [heroDayKey, setHeroDayKey] = useState(initialCatalog.dayKey);
   const [movies, setMovies] = useState(initialMoviesList);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [heroCatalogSettled, setHeroCatalogSettled] = useState(false);
+  const [heroCatalogSettled, setHeroCatalogSettled] = useState(initialMoviesList.length > 0);
+  const [heroCatalogError, setHeroCatalogError] = useState(null);
+  const [heroReloadToken, setHeroReloadToken] = useState(0);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [playbackIntent, setPlaybackIntent] = useState(HERO_PLAYBACK_INTENT.NONE);
   const [muted, setMuted] = useState(true);
   const [manualPosterMode, setManualPosterMode] = useState(false);
-  const [catalogSource, setCatalogSource] = useState('fallback');
+  const [catalogSource, setCatalogSource] = useState(initialMoviesList.length ? 'server' : 'loading');
   const [revealedGeneration, setRevealedGeneration] = useState(null);
   const [curtainState, setCurtainState] = useState('closed');
   const [curtainMounted, setCurtainMounted] = useState(false);
@@ -579,18 +589,48 @@ const HeroSection = ({
   }, [abortMetadataRequests, cancelFade, clearCinematicTimers, clearEndedHandoffTimer, clearPlaybackTimers, clearTransitionTimers]);
 
   useEffect(() => {
+    let midnightTimerId;
+
+    const scheduleNextDay = () => {
+      window.clearTimeout(midnightTimerId);
+      const nextDelay = millisecondsUntilNextLocalMidnight(new Date());
+      midnightTimerId = window.setTimeout(() => {
+        const nextDayKey = getClientHeroDayKey();
+        setHeroDayKey((currentDayKey) => (
+          currentDayKey === nextDayKey ? currentDayKey : nextDayKey
+        ));
+        scheduleNextDay();
+      }, Math.min(nextDelay + 75, 2_147_483_000));
+    };
+
+    const handleDayVisibility = () => {
+      if (document.hidden) return;
+      const nextDayKey = getClientHeroDayKey();
+      setHeroDayKey((currentDayKey) => (
+        currentDayKey === nextDayKey ? currentDayKey : nextDayKey
+      ));
+      scheduleNextDay();
+    };
+
+    scheduleNextDay();
+    document.addEventListener('visibilitychange', handleDayVisibility);
+    return () => {
+      window.clearTimeout(midnightTimerId);
+      document.removeEventListener('visibilitychange', handleDayVisibility);
+    };
+  }, []);
+
+  useEffect(() => {
     const controller = new AbortController();
     const applyMovies = (nextMovies, { source = 'server' } = {}) => {
       if (!nextMovies.length) return;
-      saveHeroMoviesCache(nextMovies, { source });
+      saveHeroMoviesCache(nextMovies, { source, dayKey: heroDayKey });
       const isSameMovies = moviesRef.current.length === nextMovies.length
         && moviesRef.current.every((m, idx) => getHeroMovieKey(m, idx) === getHeroMovieKey(nextMovies[idx], idx));
-      if (attemptLockRef.current || machineRef.current.phase !== HERO_PHASES.POSTER) {
-        if (isSameMovies) {
-          moviesRef.current = nextMovies;
-          setMovies(nextMovies);
-          return;
-        }
+      if (isSameMovies) {
+        moviesRef.current = nextMovies;
+        setMovies(nextMovies);
+        return;
       }
       abortMetadataRequests();
       prepareCinematicAttempt({ mountCurtain: false });
@@ -605,33 +645,39 @@ const HeroSection = ({
     };
 
     const loadHero = async () => {
+      setHeroCatalogError(null);
+      if (!moviesRef.current.length) {
+        setCatalogSource('loading');
+        setHeroCatalogSettled(false);
+      }
       try {
-        const data = await fetchHomeHero({ signal: controller.signal });
+        const data = await fetchHomeHero({
+          signal: controller.signal,
+          fallbackMode: 'none',
+        });
         if (controller.signal.aborted) return;
 
-        const resolvedSource = data?.source === 'server' ? 'server' : 'fallback';
-        setCatalogSource(resolvedSource);
-
-        const rawMovies = Array.isArray(data.movies) && data.movies.length ? data.movies : dummyShowsData;
-        const orderedMovies = rawMovies.slice(0, HERO_MAX_MOVIES);
+        if (data?.source !== 'server') {
+          throw new Error('Hero response did not come from the server.');
+        }
+        const orderedMovies = Array.isArray(data.movies)
+          ? data.movies.slice(0, HERO_MAX_MOVIES)
+          : [];
 
         const validMovies = await validateMovieCandidates(orderedMovies, controller.signal);
         if (!controller.signal.aborted && validMovies.length) {
-          applyMovies(validMovies, { source: resolvedSource });
-        } else if (!controller.signal.aborted && !moviesRef.current.length) {
-          const fallbackMovies = selectBestHeroMovies(dummyShowsData);
-          const validFallback = await validateMovieCandidates(fallbackMovies, controller.signal);
-          if (validFallback.length) applyMovies(validFallback, { source: 'fallback' });
+          setCatalogSource('server');
+          applyMovies(validMovies, { source: 'server' });
+        } else if (!controller.signal.aborted) {
+          throw new Error('Hero returned no movies with usable artwork.');
         }
       } catch (error) {
         if (error?.name !== 'AbortError' && import.meta.env.DEV) {
           console.warn('Hero load error:', error.message);
         }
         if (!controller.signal.aborted && !moviesRef.current.length) {
-          setCatalogSource('fallback');
-          const fallbackMovies = selectBestHeroMovies(dummyShowsData);
-          const validMovies = await validateMovieCandidates(fallbackMovies, controller.signal);
-          if (validMovies.length) applyMovies(validMovies, { source: 'fallback' });
+          setCatalogSource('error');
+          setHeroCatalogError(error);
         }
       } finally {
         if (!controller.signal.aborted) {
@@ -642,7 +688,7 @@ const HeroSection = ({
 
     void loadHero();
     return () => controller.abort();
-  }, [abortMetadataRequests, nextGeneration, prepareCinematicAttempt]);
+  }, [abortMetadataRequests, heroDayKey, heroReloadToken, nextGeneration, prepareCinematicAttempt]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -1074,14 +1120,41 @@ const HeroSection = ({
       return (
         <section
           ref={rootRef}
-          className={`hero-section ${disclosure.isCompact ? 'is-compact' : ''}`.trim()}
+          className="hero-section hero-catalog-state"
           aria-label="Featured movie loading"
+          aria-busy="true"
+          data-catalog-source="loading"
+          data-catalog-day={heroDayKey}
         >
-          <div className="hero-poster-shell is-visible animate-pulse bg-white/5" style={{ minHeight: '480px' }} />
+          <div className="hero-catalog-state__backdrop is-loading" aria-hidden="true" />
+          <div className="hero-catalog-state__skeleton" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </div>
         </section>
       );
     }
-    return null;
+    return (
+      <section
+        ref={rootRef}
+        className="hero-section hero-catalog-state"
+        aria-label="Featured movie unavailable"
+        data-catalog-source="error"
+        data-catalog-day={heroDayKey}
+      >
+        <div className="hero-catalog-state__backdrop" aria-hidden="true" />
+        <div className="hero-catalog-state__error" role="alert">
+          <p className="hero-catalog-state__eyebrow">NitroCine</p>
+          <h1>Chưa thể tải phim nổi bật</h1>
+          <p>{heroCatalogError?.message || 'Kết nối đến máy chủ đang gián đoạn. Vui lòng thử lại.'}</p>
+          <button type="button" onClick={() => setHeroReloadToken((token) => token + 1)}>
+            <RefreshCw aria-hidden="true" />
+            Thử lại
+          </button>
+        </div>
+      </section>
+    );
   }
 
   const desktopImageCandidates = currentMovie.heroImageCandidates?.length
@@ -1116,6 +1189,7 @@ const HeroSection = ({
       aria-label="Featured movie"
       data-video-visible={videoVisible ? 'true' : 'false'}
       data-catalog-source={catalogSource}
+      data-catalog-day={heroDayKey}
     >
       <HeroMedia
         key={`media-${currentMovieKey}-${posterCandidates.join('|')}`}

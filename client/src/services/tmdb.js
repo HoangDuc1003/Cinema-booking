@@ -9,6 +9,8 @@ export { resolveClientHeroOffset } from './heroCatalogOffset.js';
 const API_BASE = (import.meta.env.VITE_BASE_URL || '').replace(/\/$/, '');
 const IMAGE_BASE = 'https://image.tmdb.org/t/p';
 const API_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS) || 4500;
+const TRAILER_CACHE_TTL_MS = 30_000;
+const trailerResponseCache = new Map();
 
 const fallbackMovies = (limit = dummyShowsData.length) => dummyShowsData.slice(0, limit);
 
@@ -52,7 +54,7 @@ const fetchBackendJson = async (path, options = {}) => {
     return payload.data;
 };
 
-export const fetchHomeHero = async ({ signal, offset } = {}) => {
+export const fetchHomeHero = async ({ signal, offset, fallbackMode = 'mock' } = {}) => {
     try {
         const activeOffset = typeof offset === 'number' && Number.isFinite(offset) && offset >= 0
             ? offset
@@ -64,14 +66,19 @@ export const fetchHomeHero = async ({ signal, offset } = {}) => {
             throw new Error(payload?.message || `Hero request failed (${response.status})`);
         }
 
+        const serverMovies = onlyMoviesWithImages(Array.isArray(payload.movies) ? payload.movies : []);
+        if (!serverMovies.length && fallbackMode === 'none') {
+            throw new Error('Hero returned no usable server movies.');
+        }
         const data = {
             settings: payload.settings || {},
-            movies: onlyMoviesWithImages(Array.isArray(payload.movies) && payload.movies.length ? payload.movies : fallbackMovies(5)),
-            source: Array.isArray(payload.movies) && payload.movies.length ? 'server' : 'fallback',
+            movies: serverMovies.length ? serverMovies : onlyMoviesWithImages(fallbackMovies(5)),
+            source: serverMovies.length ? 'server' : 'fallback',
         };
         return data;
     } catch (error) {
         if (signal?.aborted) throw error;
+        if (fallbackMode === 'none') throw error;
         return {
             settings: { mode: 'fallback', effectiveMode: 'fallback' },
             movies: onlyMoviesWithImages(fallbackMovies(5)),
@@ -83,9 +90,37 @@ export const fetchHomeHero = async ({ signal, offset } = {}) => {
 export const fetchMovieTrailers = async (movie, { signal } = {}) => {
     const movieId = getTmdbMovieId(movie);
     if (!movieId) return [];
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
-    const data = await fetchBackendJson(`/movie/${encodeURIComponent(movieId)}/videos`, { signal });
-    const videos = Array.isArray(data.results) ? data.results : [];
+    let cached = trailerResponseCache.get(movieId);
+    if (cached?.promise) {
+        cached = await cached.promise;
+    }
+
+    let response;
+    if (cached && Date.now() - cached.cachedAt < TRAILER_CACHE_TTL_MS) {
+        response = cached;
+    } else {
+        const request = fetchBackendJson(`/movie/${encodeURIComponent(movieId)}/videos`, { signal })
+            .then((data) => ({
+                cachedAt: Date.now(),
+                title: data.title || '',
+                videos: Array.isArray(data.results) ? data.results : [],
+            }));
+        trailerResponseCache.set(movieId, { promise: request });
+        try {
+            response = await request;
+            trailerResponseCache.set(movieId, response);
+        } catch (error) {
+            if (trailerResponseCache.get(movieId)?.promise === request) {
+                trailerResponseCache.delete(movieId);
+            }
+            throw error;
+        }
+    }
+
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    const { videos, title: responseTitle } = response;
 
     return videos
         .filter((video) => video.site?.toLowerCase() === 'youtube')
@@ -100,7 +135,7 @@ export const fetchMovieTrailers = async (movie, { signal } = {}) => {
         })
         .map((video) => ({
             id: `${movieId}_${video.videoId}`,
-            title: movie?.title || movie?.name || data.title || 'Movie Trailer',
+            title: movie?.title || movie?.name || responseTitle || 'Movie Trailer',
             release_date: movie?.release_date || '',
             vote_average: movie?.vote_average,
             videoId: video.videoId,
@@ -186,8 +221,8 @@ export const fetchPopularMovies = async (options = { includeDetails: false, deta
             title: movie.title,
             overview: movie.overview,
             adult: movie.adult || false,
-            poster_path: movie.poster_path ? `${IMAGE_BASE}/w500${movie.poster_path}` : null,
-            backdrop_path: movie.backdrop_path ? `${IMAGE_BASE}/w780${movie.backdrop_path}` : null,
+            poster_path: getTmdbImageUrl(movie.poster_path, 'w500'),
+            backdrop_path: getTmdbImageUrl(movie.backdrop_path, 'w780'),
             release_date: movie.release_date,
             vote_average: movie.vote_average,
             vote_count: movie.vote_count,
@@ -210,9 +245,9 @@ export const fetchPopularMovies = async (options = { includeDetails: false, deta
                     results[i] = {
                         ...results[i],
                         runtime: d.runtime ?? results[i].runtime,
-                        backdrop_original: d.backdrop_path ? `${IMAGE_BASE}/w1280${d.backdrop_path}` : results[i].backdrop_path,
-                        backdrop_w1280: d.backdrop_path ? `${IMAGE_BASE}/w1280${d.backdrop_path}` : results[i].backdrop_path,
-                        poster_path: d.poster_path ? `${IMAGE_BASE}/w500${d.poster_path}` : results[i].poster_path,
+                        backdrop_original: getTmdbImageUrl(d.backdrop_path, 'w1280') || results[i].backdrop_path,
+                        backdrop_w1280: getTmdbImageUrl(d.backdrop_path, 'w1280') || results[i].backdrop_path,
+                        poster_path: getTmdbImageUrl(d.poster_path, 'w500') || results[i].poster_path,
                         vote_average: d.vote_average ?? results[i].vote_average,
                         genres: d.genres ?? []
                     };
@@ -230,12 +265,14 @@ export const fetchPopularMovies = async (options = { includeDetails: false, deta
 
         return results;
     } catch (error) {
+        if (options?.signal?.aborted || error?.name === 'AbortError') throw error;
+        if (options?.fallbackMode === 'none') throw error;
         console.error('Error:', error);
         return onlyMoviesWithImages(fallbackMovies(20));
     }
 }
 
-export const fetchMovieDetails = async (id) => {
+export const fetchMovieDetails = async (id, { signal, fallbackMode = 'mock' } = {}) => {
     try {
         const cacheKey = `tmdb_movie_details_${id}`;
         const CACHE_TTL_24H = 1000 * 60 * 60 * 24; // 24 hours in milliseconds
@@ -253,7 +290,7 @@ export const fetchMovieDetails = async (id) => {
             // Cache read error, proceed with API call
         }
 
-        const data = await fetchBackendJson(`/movie/${encodeURIComponent(id)}`);
+        const data = await fetchBackendJson(`/movie/${encodeURIComponent(id)}`, { signal });
 
         // Cache the result
         try {
@@ -264,6 +301,8 @@ export const fetchMovieDetails = async (id) => {
 
         return { ...data };
     } catch (e) {
+        if (signal?.aborted || e?.name === 'AbortError') throw e;
+        if (fallbackMode === 'none') throw e;
         console.error('fetchMovieDetails error', e);
         const fallback = dummyShowsData.find((movie) => String(movie._id || movie.id) === String(id));
         return fallback || null;
@@ -277,29 +316,33 @@ export const fetchLatestTrailers = async (opts = { limit: 10 }) => {
     } catch { return []; }
 };
 
-export const fetchUpcomingMovies = async ({ signal } = {}) => {
+export const fetchUpcomingMovies = async ({ signal, fallbackMode = 'mock' } = {}) => {
     try {
         const data = await fetchBackendJson('/upcoming?page=1', { signal });
         return onlyMoviesWithImages(data.results.map(movie => ({
             ...movie,
-            poster_path: movie.poster_path ? `${IMAGE_BASE}/w500${movie.poster_path}` : null,
-            backdrop_path: movie.backdrop_path ? `${IMAGE_BASE}/w780${movie.backdrop_path}` : null,
+            poster_path: getTmdbImageUrl(movie.poster_path, 'w500'),
+            backdrop_path: getTmdbImageUrl(movie.backdrop_path, 'w780'),
         })));
     } catch (error) {
+        if (signal?.aborted || error?.name === 'AbortError') throw error;
+        if (fallbackMode === 'none') throw error;
         console.error(error);
         return onlyMoviesWithImages(fallbackMovies(12));
     }
 }
 
-export const fetchNowPlayingMovies = async () => {
+export const fetchNowPlayingMovies = async ({ signal, fallbackMode = 'mock' } = {}) => {
     try {
-        const data = await fetchBackendJson('/now-playing?page=1');
+        const data = await fetchBackendJson('/now-playing?page=1', { signal });
         return onlyMoviesWithImages(data.results.map(movie => ({
             ...movie,
-            poster_path: movie.poster_path ? `${IMAGE_BASE}/w500${movie.poster_path}` : null,
-            backdrop_path: movie.backdrop_path ? `${IMAGE_BASE}/w780${movie.backdrop_path}` : null,
+            poster_path: getTmdbImageUrl(movie.poster_path, 'w500'),
+            backdrop_path: getTmdbImageUrl(movie.backdrop_path, 'w780'),
         })));
     } catch (error) {
+        if (signal?.aborted || error?.name === 'AbortError') throw error;
+        if (fallbackMode === 'none') throw error;
         console.error(error);
         return onlyMoviesWithImages(fallbackMovies(12));
     }
@@ -315,8 +358,8 @@ export const searchMovies = async (query, { signal } = {}) => {
         id: movie.id,
         title: movie.title,
         overview: movie.overview,
-        poster_path: movie.poster_path ? `${IMAGE_BASE}/w500${movie.poster_path}` : null,
-        backdrop_path: movie.backdrop_path ? `${IMAGE_BASE}/w780${movie.backdrop_path}` : null,
+        poster_path: getTmdbImageUrl(movie.poster_path, 'w500'),
+        backdrop_path: getTmdbImageUrl(movie.backdrop_path, 'w780'),
         release_date: movie.release_date,
         vote_average: movie.vote_average,
         vote_count: movie.vote_count,

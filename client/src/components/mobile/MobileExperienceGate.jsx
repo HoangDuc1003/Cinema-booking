@@ -34,10 +34,12 @@ const MobileGateContent = ({ children }) => {
   }
   if (location.pathname === '/') return <MobileHome data={homeData} />;
 
+  const isCatalogRoute = ['/movies', '/theater', '/releases', '/favorite'].includes(location.pathname);
+
   return (
     <div className="mobile-secondary-shell">
       <MobileTopBar />
-      <main>{children}</main>
+      <main className={isCatalogRoute ? 'mobile-catalog-main' : ''}>{children}</main>
       <MobileBottomNav />
     </div>
   );
@@ -50,4 +52,3 @@ const MobileExperienceGate = ({ children }) => (
 );
 
 export default MobileExperienceGate;
-

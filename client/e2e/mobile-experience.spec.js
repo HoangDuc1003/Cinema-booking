@@ -81,6 +81,38 @@ test.describe('mobile application experience', () => {
     await page.screenshot({ path: evidence('01-signed-out-390x844.png'), fullPage: true });
   });
 
+  test('signed-out landing stays usable on compact portrait and low landscape screens', async ({ page }) => {
+    await setProfileFixture(page, { signedIn: false });
+    const viewports = [
+      { width: 320, height: 568 },
+      { width: 430, height: 932 },
+      { width: 740, height: 360 },
+    ];
+
+    for (const viewport of viewports) {
+      await page.setViewportSize(viewport);
+      await page.goto('/');
+      const entry = page.getByTestId('mobile-auth-entry');
+      const button = page.getByRole('button', { name: 'Đăng nhập để tiếp tục' });
+      await expect(entry).toBeVisible();
+      await expect(button).toBeVisible();
+      const geometry = await page.evaluate(() => {
+        const content = document.querySelector('.mobile-auth-entry__content').getBoundingClientRect();
+        const cta = document.querySelector('.mobile-auth-entry__content button').getBoundingClientRect();
+        return {
+          contentLeft: content.left,
+          ctaHeight: cta.height,
+          overflow: document.documentElement.scrollWidth > window.innerWidth,
+        };
+      });
+      expect(geometry.ctaHeight).toBeGreaterThanOrEqual(48);
+      expect(geometry.overflow).toBe(false);
+      if (viewport.width > viewport.height) {
+        expect(geometry.contentLeft).toBeGreaterThanOrEqual(viewport.width * 0.45);
+      }
+    }
+  });
+
   test('profile picker is keyboard accessible and launch is data driven', async ({ page }) => {
     await openPicker(page);
     await expect(page.getByRole('heading', { name: 'Chọn hồ sơ của bạn' })).toBeVisible();

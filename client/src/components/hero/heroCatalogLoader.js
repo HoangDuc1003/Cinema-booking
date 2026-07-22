@@ -1,8 +1,9 @@
-import { dummyShowsData } from '../../assets/assets';
-import { buildHeroImageCandidates } from './heroImages';
+import { buildHeroImageCandidates } from './heroImages.js';
+import { getClientHeroDayKey } from '../../services/heroCatalogOffset.js';
 
 export const HERO_MAX_MOVIES = 5;
 export const HERO_CACHE_KEY = 'nitrocine:hero-catalog-cache-v1';
+export const HERO_CACHE_VERSION = 3;
 
 export const getNow = () => performance.now();
 
@@ -13,29 +14,6 @@ export const formatRuntime = (minutes) => {
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
   return `${hours}h ${remainingMinutes}m`;
-};
-
-export const selectBestHeroMovies = (movies) => {
-  if (!Array.isArray(movies) || !movies.length) return dummyShowsData.slice(0, HERO_MAX_MOVIES);
-  const scored = movies.map((m) => {
-    const popularity = Number(m.popularity) || 0;
-    const voteAverage = Number(m.vote_average) || 0;
-    const voteCount = Number(m.vote_count) || 0;
-    const hasBackdrop = Boolean(m.backdrop_path || m.backdrop_original);
-    const releaseYear = Number((m.release_date || '').slice(0, 4)) || 0;
-    const isRecent = releaseYear >= new Date().getFullYear() - 1;
-
-    const score = popularity * 0.3
-      + voteAverage * 10
-      + (voteCount > 100 ? 15 : 0)
-      + (hasBackdrop ? 30 : 0)
-      + (isRecent ? 25 : 0);
-
-    return { movie: m, score };
-  });
-
-  scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, HERO_MAX_MOVIES).map((item) => item.movie);
 };
 
 export const canLoadImage = (url, signal, timeoutMs = 6_000) => new Promise((resolve) => {
@@ -137,20 +115,20 @@ export const validateMovieCandidates = async (movies, signal) => {
   return results.filter(Boolean);
 };
 
-export const getInitialHeroMovies = () => {
+export const getInitialHeroMovies = (dayKey = getClientHeroDayKey()) => {
   try {
     if (typeof window !== 'undefined' && window.sessionStorage) {
       const cached = window.sessionStorage.getItem(HERO_CACHE_KEY);
       if (cached) {
         const parsed = JSON.parse(cached);
-        const moviesList = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.movies) ? parsed.movies : null);
-        if (moviesList && moviesList.length > 0) {
-          if (parsed?.source === 'fallback' || parsed?.source === 'mock') {
-            window.sessionStorage.removeItem(HERO_CACHE_KEY);
-            return [];
-          }
+        const moviesList = Array.isArray(parsed?.movies) ? parsed.movies : null;
+        const cacheIsCurrent = parsed?.version === HERO_CACHE_VERSION
+          && parsed?.source === 'server'
+          && parsed?.dayKey === dayKey;
+        if (cacheIsCurrent && moviesList?.length > 0) {
           return moviesList;
         }
+        window.sessionStorage.removeItem(HERO_CACHE_KEY);
       }
     }
   } catch {
@@ -162,13 +140,14 @@ export const getInitialHeroMovies = () => {
 export const saveHeroMoviesCache = (movies, options = {}) => {
   try {
     if (typeof window !== 'undefined' && window.sessionStorage && Array.isArray(movies) && movies.length > 0) {
-      if (options.source === 'fallback') {
+      if (options.source !== 'server') {
         window.sessionStorage.removeItem(HERO_CACHE_KEY);
         return;
       }
       const payload = {
-        version: 2,
-        source: options.source || 'server',
+        version: HERO_CACHE_VERSION,
+        source: 'server',
+        dayKey: options.dayKey || getClientHeroDayKey(),
         movies,
       };
       window.sessionStorage.setItem(HERO_CACHE_KEY, JSON.stringify(payload));
