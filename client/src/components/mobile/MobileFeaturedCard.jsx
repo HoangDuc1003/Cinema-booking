@@ -23,10 +23,10 @@ const MobileFeaturedCard = ({ movie }) => {
           {movie.release_date && <span>{String(movie.release_date).slice(0, 4)}</span>}
         </div>
         <h1>{movie.title}</h1>
-        <p>{movie.overview || 'Khám phá câu chuyện đang được yêu thích tại NitroCine.'}</p>
+        <p>{movie.overview || 'Discover a story audiences are loving at NitroCine.'}</p>
         <div className="mobile-featured-card__actions">
-          <button type="button" className="mobile-primary-button" onClick={goToMovie}><Ticket /> Đặt vé</button>
-          <button type="button" className="mobile-secondary-button" onClick={goToMovie}><Info /> Chi tiết</button>
+          <button type="button" className="mobile-primary-button" onClick={goToMovie}><Ticket /> Book tickets</button>
+          <button type="button" className="mobile-secondary-button" onClick={goToMovie}><Info /> Details</button>
         </div>
       </div>
     </article>
@@ -34,4 +34,3 @@ const MobileFeaturedCard = ({ movie }) => {
 };
 
 export default MobileFeaturedCard;
-

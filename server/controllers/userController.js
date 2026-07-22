@@ -23,7 +23,7 @@ const getDisplayName = (user) => (
     || user.firstName
     || user.username
     || user.primaryEmailAddress?.emailAddress?.split('@')[0]
-    || 'Bạn'
+    || 'You'
 );
 
 const persistProfiles = async (client, userId, user, profiles) => {

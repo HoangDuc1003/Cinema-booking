@@ -3,7 +3,6 @@ import { StarIcon, Calendar, Clock, Play, Heart, Film } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Link } from 'react-router-dom';
 import timeFormat from '../lib/timeFormat';
-import { fetchMovieDetails } from '../services/tmdb';
 
 const readStoredFavorites = () => {
   try {
@@ -14,7 +13,7 @@ const readStoredFavorites = () => {
   }
 };
 
-const MovieCard = ({ movie, hydrateRuntime = true }) => {
+const MovieCard = ({ movie }) => {
   const [hasImageError, setHasImageError] = useState(false);
   const movieId = movie._id || movie.id;
   const movieHref = `/movies/${movieId}`;
@@ -27,11 +26,11 @@ const MovieCard = ({ movie, hydrateRuntime = true }) => {
   const releaseYear = movie.release_date ? new Date(movie.release_date).getFullYear() : 'N/A';
   const isNumeric = (v) => v != null && !isNaN(Number(v));
 
-  const [runtimeMinutes, setRuntimeMinutes] = useState(() => {
+  const runtimeMinutes = (() => {
     if (isNumeric(movie.runtime)) return Number(movie.runtime);
     if (isNumeric(movie.duration)) return Number(movie.duration);
     return null;
-  });
+  })();
 
   const [isFavorited, setIsFavorited] = useState(false);
 
@@ -62,25 +61,6 @@ const MovieCard = ({ movie, hydrateRuntime = true }) => {
     window.dispatchEvent(new Event('favoritesUpdated'));
   };
 
-  useEffect(() => {
-    const controller = new AbortController();
-    if (hydrateRuntime && runtimeMinutes == null) {
-      const tmdbId = movie.id || (movie._id && !isNaN(Number(movie._id)) ? Number(movie._id) : null);
-      if (tmdbId) {
-        fetchMovieDetails(tmdbId, {
-          signal: controller.signal,
-          fallbackMode: 'none',
-        })
-          .then((data) => {
-            if (controller.signal.aborted) return;
-            if (isNumeric(data?.runtime)) setRuntimeMinutes(Number(data.runtime));
-          })
-          .catch(() => {});
-      }
-    }
-    return () => controller.abort();
-  }, [hydrateRuntime, runtimeMinutes, movie.id, movie._id]);
-
   const ratingValue = Number(movie.vote_average ?? movie.rating);
   const rating = Number.isFinite(ratingValue) ? ratingValue.toFixed(1) : '0.0';
 
@@ -100,10 +80,10 @@ const MovieCard = ({ movie, hydrateRuntime = true }) => {
         to={movieHref}
         onClick={handleNavigate}
         className="movie-card__main"
-        aria-label={`Xem chi tiết ${title}`}
+        aria-label={`View details for ${title}`}
       >
         {showPosterFallback ? (
-          <span className="movie-card__fallback" role="img" aria-label={`Không có poster cho ${title}`}>
+          <span className="movie-card__fallback" role="img" aria-label={`No poster available for ${title}`}>
             <Film aria-hidden="true" />
             <span>{title}</span>
           </span>
@@ -130,7 +110,7 @@ const MovieCard = ({ movie, hydrateRuntime = true }) => {
         </span>
       </Link>
 
-      <span className="movie-card__rating" aria-label={`Điểm ${rating}`}>
+      <span className="movie-card__rating" aria-label={`Rating ${rating}`}>
         <StarIcon aria-hidden="true" />
         {rating}
       </span>
@@ -139,7 +119,7 @@ const MovieCard = ({ movie, hydrateRuntime = true }) => {
         type="button"
         onClick={toggleFavorite}
         className="movie-card__favorite"
-        aria-label={isFavorited ? `Bỏ ${title} khỏi yêu thích` : `Thêm ${title} vào yêu thích`}
+        aria-label={isFavorited ? `Remove ${title} from favorites` : `Add ${title} to favorites`}
         aria-pressed={isFavorited}
       >
         <Heart aria-hidden="true" className={isFavorited ? 'is-favorited' : ''} />
@@ -147,7 +127,7 @@ const MovieCard = ({ movie, hydrateRuntime = true }) => {
 
       <Link to={movieHref} onClick={handleNavigate} className="movie-card__cta">
         <Play aria-hidden="true" />
-        Đặt vé
+        Book tickets
       </Link>
     </article>
   );

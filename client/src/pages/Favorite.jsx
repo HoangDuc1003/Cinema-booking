@@ -41,7 +41,6 @@ const Favorite = () => {
       {movies.length > 0 ? (
             <MovieGrid
               movies={movies}
-              columns="grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
               animated={true}
               staggerDelay={30}
             />
@@ -49,8 +48,8 @@ const Favorite = () => {
             <CatalogState
               status="empty"
               emptyIcon={Heart}
-              emptyTitle="Bộ sưu tập đang chờ bạn"
-              emptyDescription="Chạm vào biểu tượng trái tim trên thẻ phim để lưu phim yêu thích tại đây."
+              emptyTitle="Your collection is waiting"
+              emptyDescription="Select the heart icon on a movie card to save your favorites here."
             />
           )}
     </CatalogPageShell>

@@ -26,14 +26,14 @@ const MobileTopBar = () => {
 
   return (
     <header className={`mobile-top-bar ${scrolled ? 'is-scrolled' : ''}`} data-testid="mobile-top-bar">
-      <button type="button" className="mobile-brand-button" onClick={() => navigate('/')} aria-label="Trang chủ NitroCine">
+      <button type="button" className="mobile-brand-button" onClick={() => navigate('/')} aria-label="NitroCine home">
         <img src={assets.logo} alt="" />
-        <span>Trang chủ</span>
+        <span>Home</span>
       </button>
-      <nav aria-label="Tác vụ nhanh">
-        <button type="button" className="mobile-icon-button" onClick={() => navigate('/movies')} aria-label="Tìm kiếm phim"><Search /></button>
-        <button type="button" className="mobile-icon-button" onClick={() => navigate('/my-bookings')} aria-label="Vé của tôi"><Ticket /></button>
-        <button type="button" className="mobile-profile-button" onClick={switchProfile} aria-label="Chuyển hồ sơ">
+      <nav aria-label="Quick actions">
+        <button type="button" className="mobile-icon-button" onClick={() => navigate('/movies')} aria-label="Search movies"><Search /></button>
+        <button type="button" className="mobile-icon-button" onClick={() => navigate('/my-bookings')} aria-label="My tickets"><Ticket /></button>
+        <button type="button" className="mobile-profile-button" onClick={switchProfile} aria-label="Switch profile">
           <ProfileAvatar avatarId={activeProfile?.avatarId} name={activeProfile?.name} />
         </button>
       </nav>
@@ -42,4 +42,3 @@ const MobileTopBar = () => {
 };
 
 export default MobileTopBar;
-

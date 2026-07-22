@@ -24,10 +24,9 @@ const ProfileLaunchScreen = ({ profile, criticalReady, onComplete }) => {
     <main className="mobile-profile-launch" data-testid="profile-launch">
       <ProfileAvatar avatarId={profile?.avatarId} name={profile?.name} className="mobile-profile-launch__avatar" />
       <span className="mobile-launch-ring" aria-hidden="true" />
-      <p role="status" aria-live="polite">Đang tải trang chủ</p>
+      <p role="status" aria-live="polite">Loading home</p>
     </main>
   );
 };
 
 export default ProfileLaunchScreen;
-

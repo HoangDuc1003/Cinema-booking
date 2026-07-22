@@ -13,14 +13,13 @@ const MobileHome = ({ data }) => (
       <MobileCategoryChips />
       <MobileFeaturedCard movie={data.featured} />
       {data.error && <p className="mobile-home-error" role="status">{data.error}</p>}
-      <MobileMovieRail title="Lựa chọn hàng đầu hôm nay cho bạn" movies={data.recommendations} />
-      <MobileMovieRail title="Đang chiếu" movies={data.nowShowing} />
-      <MobileMovieRail title="Phổ biến" movies={data.popular} />
-      <MobileMovieRail title="Sắp ra mắt" movies={data.upcoming} viewAllPath="/releases" />
+      <MobileMovieRail title="Today's top picks for you" movies={data.recommendations} />
+      <MobileMovieRail title="Now showing" movies={data.nowShowing} />
+      <MobileMovieRail title="Popular" movies={data.popular} />
+      <MobileMovieRail title="Coming soon" movies={data.upcoming} viewAllPath="/releases" />
     </main>
     <MobileBottomNav />
   </div>
 );
 
 export default MobileHome;
-

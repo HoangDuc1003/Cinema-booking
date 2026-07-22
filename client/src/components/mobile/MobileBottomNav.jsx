@@ -8,12 +8,12 @@ const MobileBottomNav = () => {
   const navigate = useNavigate();
   const { switchProfile } = useProfiles();
   const items = [
-    { label: 'Trang chủ', path: '/', icon: Home },
-    { label: 'Tìm kiếm', path: '/movies', icon: Search },
-    { label: 'Vé của tôi', path: '/my-bookings', icon: Ticket },
+    { label: 'Home', path: '/', icon: Home },
+    { label: 'Search', path: '/movies', icon: Search },
+    { label: 'My tickets', path: '/my-bookings', icon: Ticket },
   ];
   return (
-    <nav className="mobile-bottom-nav" aria-label="Điều hướng chính" data-testid="mobile-bottom-nav">
+    <nav className="mobile-bottom-nav" aria-label="Main navigation" data-testid="mobile-bottom-nav">
       {items.map(({ label, path, icon: Icon }) => {
         const active = location.pathname === path;
         return (
@@ -22,7 +22,7 @@ const MobileBottomNav = () => {
           </button>
         );
       })}
-      <button type="button" onClick={switchProfile}><UserRound aria-hidden="true" /><span>Hồ sơ</span></button>
+      <button type="button" onClick={switchProfile}><UserRound aria-hidden="true" /><span>Profile</span></button>
     </nav>
   );
 };

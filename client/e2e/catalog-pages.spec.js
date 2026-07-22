@@ -55,10 +55,10 @@ for (const catalogCase of catalogCases) {
     await expect(page.locator('.catalog-card-skeleton').first()).toBeVisible();
     await expect(page.getByText('In the Lost Lands', { exact: true })).toHaveCount(0);
     releaseFirstRequest();
-    await expect(page.getByRole('heading', { name: 'Chưa thể tải danh sách phim' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Unable to load movies' })).toBeVisible();
     await expect(page.getByText('In the Lost Lands', { exact: true })).toHaveCount(0);
 
-    await page.getByRole('button', { name: 'Thử lại' }).click();
+    await page.getByRole('button', { name: 'Try again' }).click();
     await expect(page.locator('.movie-card')).toHaveCount(6);
     await expect(page.getByText('Server catalog 1', { exact: true })).toBeVisible();
     await expect(page.getByText('In the Lost Lands', { exact: true })).toHaveCount(0);
@@ -80,5 +80,48 @@ test('Favorites initializes from real localStorage with no loading flash', async
 test('Favorites renders a shared empty state when localStorage is empty', async ({ page }) => {
   await page.goto('/favorite');
   await expect(page.locator('.catalog-card-skeleton')).toHaveCount(0);
-  await expect(page.getByRole('heading', { name: 'Bộ sưu tập đang chờ bạn' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Your collection is waiting' })).toBeVisible();
+});
+
+test('MovieCard restores the poster overlay without per-card detail requests', async ({ page }) => {
+  let detailRequests = 0;
+  await fulfillImages(page);
+  page.on('request', (request) => {
+    if (/\/api\/show\/tmdb\/movie\/\d+(?:\?|$)/.test(request.url())) detailRequests += 1;
+  });
+  await page.route('**/api/show/tmdb/popular**', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, data: { results: serverMovies } }),
+  }));
+
+  await page.goto('/movies');
+  const firstCard = page.locator('.movie-card').first();
+  const cardInfo = firstCard.locator('.movie-card__info');
+  const cardCta = firstCard.locator('.movie-card__cta');
+  await expect(firstCard).toBeVisible();
+  await expect(cardInfo).toHaveCSS('opacity', '0');
+  await expect(cardCta).toHaveCSS('opacity', '0');
+
+  await firstCard.hover();
+  await expect(cardInfo).toHaveCSS('opacity', '1');
+  await expect(cardCta).toHaveCSS('opacity', '1');
+  await page.waitForTimeout(350);
+  expect(detailRequests).toBe(0);
+});
+
+test('MovieCard exposes its content when reduced motion is requested', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await fulfillImages(page);
+  await page.route('**/api/show/tmdb/popular**', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, data: { results: serverMovies } }),
+  }));
+  await page.goto('/movies');
+
+  const firstCard = page.locator('.movie-card').first();
+  await expect(firstCard.locator('.movie-card__info')).toHaveCSS('opacity', '1');
+  await expect(firstCard.locator('.movie-card__cta')).toHaveCSS('opacity', '1');
+  await expect(firstCard).toHaveCSS('transition-duration', '0s');
 });

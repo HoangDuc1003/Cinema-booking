@@ -68,10 +68,10 @@ const ProfileEditor = ({ profile, onClose }) => {
   return (
     <div className="mobile-profile-dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <div ref={dialogRef} className="mobile-profile-dialog" role="dialog" aria-modal="true" aria-labelledby="profile-editor-title">
-        <button type="button" className="mobile-icon-button mobile-profile-dialog__close" onClick={onClose} aria-label="Đóng chỉnh sửa hồ sơ"><X /></button>
-        <h2 id="profile-editor-title">{profile ? 'Chỉnh sửa hồ sơ' : 'Thêm hồ sơ'}</h2>
+        <button type="button" className="mobile-icon-button mobile-profile-dialog__close" onClick={onClose} aria-label="Close profile editor"><X /></button>
+        <h2 id="profile-editor-title">{profile ? 'Edit profile' : 'Add profile'}</h2>
         <form onSubmit={submit}>
-          <label htmlFor="mobile-profile-name">Tên hồ sơ</label>
+          <label htmlFor="mobile-profile-name">Profile name</label>
           <input
             ref={nameRef}
             id="mobile-profile-name"
@@ -82,13 +82,13 @@ const ProfileEditor = ({ profile, onClose }) => {
             onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
           />
           <fieldset>
-            <legend>Chọn ảnh đại diện</legend>
+            <legend>Choose an avatar</legend>
             <div className="mobile-avatar-options">
               {PROFILE_AVATARS.map((avatarId) => (
                 <button
                   type="button"
                   key={avatarId}
-                  aria-label={`Chọn ảnh ${avatarId}`}
+                  aria-label={`Choose avatar ${avatarId}`}
                   aria-pressed={form.avatarId === avatarId}
                   onClick={() => setForm((current) => ({ ...current, avatarId }))}
                 >
@@ -99,13 +99,13 @@ const ProfileEditor = ({ profile, onClose }) => {
           </fieldset>
           <label className="mobile-kids-toggle">
             <input type="checkbox" checked={form.isKids === true} onChange={(event) => setForm((current) => ({ ...current, isKids: event.target.checked }))} />
-            Hồ sơ trẻ em
+            Kids profile
           </label>
           <div className="mobile-profile-dialog__actions">
             {profile && profiles.length > 1 && (
-              <button type="button" className="mobile-danger-button" onClick={remove} disabled={saving}><Trash2 /> Xóa</button>
+              <button type="button" className="mobile-danger-button" onClick={remove} disabled={saving}><Trash2 /> Delete</button>
             )}
-            <button type="submit" className="mobile-primary-button" disabled={saving}>{saving ? 'Đang lưu…' : 'Lưu hồ sơ'}</button>
+            <button type="submit" className="mobile-primary-button" disabled={saving}>{saving ? 'Saving…' : 'Save profile'}</button>
           </div>
         </form>
       </div>
@@ -139,8 +139,8 @@ const ProfilePicker = () => {
       <div className="mobile-profile-picker__glow" />
       <img src={assets.logo} alt="NitroCine" className="mobile-profile-picker__logo" />
       <div className="mobile-profile-picker__content">
-        <h1>Chọn hồ sơ của bạn</h1>
-        <p className="mobile-muted-copy">Trải nghiệm phim được cá nhân hóa cho từng người xem.</p>
+        <h1>Choose your profile</h1>
+        <p className="mobile-muted-copy">A personalized movie experience for every viewer.</p>
         {error && <p role="alert" className="mobile-error-copy">{error}</p>}
         <div className="mobile-profile-grid">
           {profiles.map((profile) => (
@@ -149,7 +149,7 @@ const ProfilePicker = () => {
                 type="button"
                 data-profile-editor-trigger={profile.id}
                 onClick={() => editMode ? openEditor(profile) : selectProfile(profile)}
-                aria-label={`${editMode ? 'Chỉnh sửa' : 'Chọn'} hồ sơ ${profile.name}`}
+                aria-label={`${editMode ? 'Edit' : 'Choose'} profile ${profile.name}`}
               >
                 <ProfileAvatar avatarId={profile.avatarId} name={profile.name} />
                 {editMode && <span className="mobile-profile-tile__edit" aria-hidden="true"><Pencil /></span>}
@@ -159,13 +159,13 @@ const ProfilePicker = () => {
           ))}
           {editMode && profiles.length < 5 && (
             <div className="mobile-profile-tile">
-              <button type="button" data-profile-editor-trigger="add-profile" onClick={() => openEditor(null)} aria-label="Thêm hồ sơ" className="mobile-profile-add"><Plus /></button>
-              <span>Thêm hồ sơ</span>
+              <button type="button" data-profile-editor-trigger="add-profile" onClick={() => openEditor(null)} aria-label="Add profile" className="mobile-profile-add"><Plus /></button>
+              <span>Add profile</span>
             </div>
           )}
         </div>
         <button ref={editTriggerRef} type="button" className="mobile-secondary-button" onClick={() => setEditMode((current) => !current)}>
-          <Pencil /> {editMode ? 'Xong' : 'Quản lý hồ sơ'}
+          <Pencil /> {editMode ? 'Done' : 'Manage profiles'}
         </button>
       </div>
       {editingProfile !== undefined && <ProfileEditor profile={editingProfile} onClose={closeEditor} />}

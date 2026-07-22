@@ -40,7 +40,7 @@ const useMobileHomeData = ({ enabled = true } = {}) => {
         hero,
         nowShowing,
         criticalStatus: 'settled',
-        error: !hero && !nowShowing.length ? 'Dữ liệu phim hiện chưa sẵn sàng.' : '',
+        error: !hero && !nowShowing.length ? 'Movie data is not available yet.' : '',
       }));
 
       deferredTimer = window.setTimeout(() => {

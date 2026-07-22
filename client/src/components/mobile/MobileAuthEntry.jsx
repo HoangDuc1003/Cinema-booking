@@ -10,11 +10,11 @@ const MobileAuthEntry = ({ onSignIn }) => (
       <img src={assets.logo} alt="NitroCine" className="mobile-auth-entry__logo" />
     </div>
     <section className="mobile-auth-entry__content" aria-labelledby="mobile-auth-title">
-      <span className="mobile-auth-entry__eyebrow">Rạp phim trong tầm tay</span>
-      <h1 id="mobile-auth-title">Mỗi tối, một câu chuyện đáng nhớ.</h1>
-      <p>Khám phá phim mới, chọn suất chiếu và đặt chỗ cho buổi tối của bạn.</p>
+      <span className="mobile-auth-entry__eyebrow">Cinema at your fingertips</span>
+      <h1 id="mobile-auth-title">A memorable story, every night.</h1>
+      <p>Discover new movies, choose a showtime, and reserve the perfect seats for your night out.</p>
       <button type="button" onClick={onSignIn} className="mobile-primary-button">
-        Đăng nhập để tiếp tục
+        Sign in to continue
         <ArrowRight aria-hidden="true" />
       </button>
     </section>

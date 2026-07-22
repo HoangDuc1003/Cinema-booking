@@ -68,7 +68,6 @@ const FeatureSection = () => {
           columns="grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
           animated={true}
           staggerDelay={80}
-          hydrateRuntime={false}
         />
       ) : (
         <p className="rounded-2xl border border-white/10 bg-white/5 px-6 py-10 text-center text-sm text-gray-400">

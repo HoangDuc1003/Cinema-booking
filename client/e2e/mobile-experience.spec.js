@@ -6,7 +6,7 @@ const movies = Array.from({ length: 12 }, (_, index) => ({
   _id: String(1000 + index),
   id: 1000 + index,
   title: index === 0 ? 'Nitro Night' : `Movie ${index + 1}`,
-  overview: 'Một hành trình điện ảnh dành cho màn hình lớn và những khoảnh khắc đáng nhớ.',
+  overview: 'A cinematic journey made for the big screen and unforgettable moments.',
   poster_path: poster,
   backdrop_path: poster,
   release_date: '2026-07-16',
@@ -61,7 +61,7 @@ const openPicker = async (page, viewport = { width: 390, height: 844 }) => {
 
 const enterHome = async (page, viewport = { width: 390, height: 844 }) => {
   await openPicker(page, viewport);
-  await page.getByRole('button', { name: 'Chọn hồ sơ Hoàng' }).click();
+  await page.getByRole('button', { name: 'Choose profile Hoàng' }).click();
   await expect(page.getByTestId('profile-launch')).toBeVisible();
   await expect(page.getByTestId('mobile-home')).toBeVisible({ timeout: 4_000 });
 };
@@ -73,7 +73,7 @@ test.describe('mobile application experience', () => {
     await page.goto('/');
     await expect(page.getByTestId('mobile-auth-entry')).toBeVisible();
     await expect.poll(() => page.locator('.mobile-auth-entry__backdrop').evaluate((image) => image.complete && image.naturalWidth > 0)).toBe(true);
-    await expect(page.getByRole('button', { name: 'Đăng nhập' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible();
     await expect(page.locator('.app-navbar')).toHaveCount(0);
     await expect(page.locator('footer')).toHaveCount(0);
     await expect(page.getByTestId('mobile-bottom-nav')).toHaveCount(0);
@@ -93,7 +93,7 @@ test.describe('mobile application experience', () => {
       await page.setViewportSize(viewport);
       await page.goto('/');
       const entry = page.getByTestId('mobile-auth-entry');
-      const button = page.getByRole('button', { name: 'Đăng nhập để tiếp tục' });
+      const button = page.getByRole('button', { name: 'Sign in to continue' });
       await expect(entry).toBeVisible();
       await expect(button).toBeVisible();
       const geometry = await page.evaluate(() => {
@@ -115,13 +115,13 @@ test.describe('mobile application experience', () => {
 
   test('profile picker is keyboard accessible and launch is data driven', async ({ page }) => {
     await openPicker(page);
-    await expect(page.getByRole('heading', { name: 'Chọn hồ sơ của bạn' })).toBeVisible();
-    const profile = page.getByRole('button', { name: 'Chọn hồ sơ Hoàng' });
+    await expect(page.getByRole('heading', { name: 'Choose your profile' })).toBeVisible();
+    const profile = page.getByRole('button', { name: 'Choose profile Hoàng' });
     await profile.focus();
     await expect(profile).toBeFocused();
     await page.screenshot({ path: evidence('02-profile-picker-390x844.png'), fullPage: true });
     await profile.press('Enter');
-    await expect(page.getByRole('status')).toContainText('Đang tải trang chủ');
+    await expect(page.getByRole('status')).toContainText('Loading home');
     await page.screenshot({ path: evidence('03-profile-launch-390x844.png'), fullPage: true });
     await expect(page.getByTestId('mobile-home')).toBeVisible({ timeout: 4_000 });
     expect(await page.evaluate(() => sessionStorage.getItem('nitrocine:active-profile:e2e-user'))).toBe('profile-one');
@@ -129,30 +129,30 @@ test.describe('mobile application experience', () => {
 
   test('profile editor supports rename, allowed avatar selection, add and permitted delete', async ({ page }) => {
     await openPicker(page);
-    await page.getByRole('button', { name: 'Quản lý hồ sơ' }).click();
-    await page.getByRole('button', { name: 'Chỉnh sửa hồ sơ Hoàng' }).click();
-    const name = page.getByLabel('Tên hồ sơ');
+    await page.getByRole('button', { name: 'Manage profiles' }).click();
+    await page.getByRole('button', { name: 'Edit profile Hoàng' }).click();
+    const name = page.getByLabel('Profile name');
     await expect(name).toBeFocused();
     await page.keyboard.press('Shift+Tab');
     await page.keyboard.press('Shift+Tab');
-    await expect(page.getByRole('button', { name: 'Lưu hồ sơ' })).toBeFocused();
-    await name.fill('Hoàng mới');
-    await page.getByRole('button', { name: 'Chọn ảnh nitro-blue' }).click();
-    await page.getByRole('button', { name: 'Lưu hồ sơ' }).click();
-    await expect(page.getByText('Hoàng mới', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Save profile' })).toBeFocused();
+    await name.fill('New profile');
+    await page.getByRole('button', { name: 'Choose avatar nitro-blue' }).click();
+    await page.getByRole('button', { name: 'Save profile' }).click();
+    await expect(page.getByText('New profile', { exact: true })).toBeVisible();
 
-    await page.getByRole('button', { name: 'Thêm hồ sơ' }).click();
-    await page.getByLabel('Tên hồ sơ').fill('Gia đình');
-    await page.getByRole('button', { name: 'Lưu hồ sơ' }).click();
-    await expect(page.getByText('Gia đình', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Add profile' }).click();
+    await page.getByLabel('Profile name').fill('Family');
+    await page.getByRole('button', { name: 'Save profile' }).click();
+    await expect(page.getByText('Family', { exact: true })).toBeVisible();
 
-    await page.getByRole('button', { name: 'Chỉnh sửa hồ sơ Gia đình' }).click();
-    await page.getByRole('button', { name: 'Xóa' }).click();
-    await expect(page.getByText('Gia đình', { exact: true })).toHaveCount(0);
-    await page.getByRole('button', { name: 'Chỉnh sửa hồ sơ Hoàng mới' }).click();
-    await expect(page.getByRole('button', { name: 'Xóa' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Edit profile Family' }).click();
+    await page.getByRole('button', { name: 'Delete' }).click();
+    await expect(page.getByText('Family', { exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Edit profile New profile' }).click();
+    await expect(page.getByRole('button', { name: 'Delete' })).toHaveCount(0);
     await page.keyboard.press('Escape');
-    await expect(page.getByRole('button', { name: 'Chỉnh sửa hồ sơ Hoàng mới' })).toBeFocused();
+    await expect(page.getByRole('button', { name: 'Edit profile New profile' })).toBeFocused();
   });
 
   for (const viewport of [{ width: 390, height: 844 }, { width: 430, height: 932 }]) {
@@ -167,7 +167,7 @@ test.describe('mobile application experience', () => {
       page.on('pageerror', (error) => pageErrors.push(error.message));
       await enterHome(page, viewport);
       await expect(page.getByTestId('mobile-top-bar')).toBeVisible();
-      await expect(page.getByRole('navigation', { name: 'Danh mục phim' })).toBeVisible();
+      await expect(page.getByRole('navigation', { name: 'Movie categories' })).toBeVisible();
       await expect(page.getByTestId('mobile-featured-card')).toBeVisible();
       await expect(page.getByTestId('mobile-movie-rail').first()).toBeVisible();
       await expect(page.getByTestId('mobile-bottom-nav')).toBeVisible();
@@ -189,21 +189,21 @@ test.describe('mobile application experience', () => {
 
   test('bottom navigation exposes real routes and profile switching', async ({ page }) => {
     await enterHome(page);
-    const home = page.getByRole('button', { name: 'Trang chủ', exact: true });
+    const home = page.getByRole('button', { name: 'Home', exact: true });
     await expect(home).toHaveAttribute('aria-current', 'page');
     const bottomNav = page.getByTestId('mobile-bottom-nav');
-    await bottomNav.getByRole('button', { name: 'Tìm kiếm' }).click();
+    await bottomNav.getByRole('button', { name: 'Search' }).click();
     await expect(page).toHaveURL(/\/movies$/);
-    await bottomNav.getByRole('button', { name: 'Vé của tôi' }).click();
+    await bottomNav.getByRole('button', { name: 'My tickets' }).click();
     await expect(page).toHaveURL(/\/my-bookings$/);
-    await bottomNav.getByRole('button', { name: 'Hồ sơ' }).click();
+    await bottomNav.getByRole('button', { name: 'Profile' }).click();
     await expect(page.getByTestId('profile-picker')).toBeVisible();
   });
 
   test('reduced motion replaces the rotating launch ring', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await openPicker(page);
-    await page.getByRole('button', { name: 'Chọn hồ sơ Hoàng' }).click();
+    await page.getByRole('button', { name: 'Choose profile Hoàng' }).click();
     const ring = page.locator('.mobile-launch-ring');
     await expect(ring).toBeVisible();
     expect(await ring.evaluate((element) => getComputedStyle(element).animationName)).toBe('none');

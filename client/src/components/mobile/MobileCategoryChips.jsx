@@ -2,16 +2,16 @@ import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 const CHIPS = [
-  { label: 'Đang chiếu', path: '/movies' },
+  { label: 'Now showing', path: '/movies' },
   { label: 'Phim', path: '/movies' },
-  { label: 'Sắp ra mắt', path: '/releases' },
+  { label: 'Coming soon', path: '/releases' },
 ];
 
 const MobileCategoryChips = () => {
   const navigate = useNavigate();
   const location = useLocation();
   return (
-    <nav className="mobile-category-chips" aria-label="Danh mục phim">
+    <nav className="mobile-category-chips" aria-label="Movie categories">
       {CHIPS.map((chip) => (
         <button
           type="button"
@@ -27,4 +27,3 @@ const MobileCategoryChips = () => {
 };
 
 export default MobileCategoryChips;
-

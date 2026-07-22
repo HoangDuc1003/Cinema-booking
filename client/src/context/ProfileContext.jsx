@@ -71,7 +71,7 @@ export const ProfileProvider = ({ children }) => {
         setActiveProfile(nextProfiles.find((profile) => profile.id === storedId) || null);
       })
       .catch((requestError) => {
-        if (requestError?.code !== 'ERR_CANCELED') setError('Không thể tải hồ sơ. Vui lòng thử lại.');
+        if (requestError?.code !== 'ERR_CANCELED') setError('Unable to load profiles. Please try again.');
       })
       .finally(() => {
         if (!controller.signal.aborted) setIsLoading(false);
@@ -128,7 +128,7 @@ export const ProfileProvider = ({ children }) => {
       }
       return data.profile || null;
     } catch (requestError) {
-      const message = requestError.response?.data?.message || 'Không thể cập nhật hồ sơ.';
+      const message = requestError.response?.data?.message || 'Unable to update the profile.';
       setError(message);
       throw requestError;
     }

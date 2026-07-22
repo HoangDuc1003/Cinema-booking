@@ -1146,11 +1146,11 @@ const HeroSection = ({
         <div className="hero-catalog-state__backdrop" aria-hidden="true" />
         <div className="hero-catalog-state__error" role="alert">
           <p className="hero-catalog-state__eyebrow">NitroCine</p>
-          <h1>Chưa thể tải phim nổi bật</h1>
-          <p>{heroCatalogError?.message || 'Kết nối đến máy chủ đang gián đoạn. Vui lòng thử lại.'}</p>
+          <h1>Unable to load featured movies</h1>
+          <p>{heroCatalogError?.message || 'The server connection was interrupted. Please try again.'}</p>
           <button type="button" onClick={() => setHeroReloadToken((token) => token + 1)}>
             <RefreshCw aria-hidden="true" />
-            Thử lại
+            Try again
           </button>
         </div>
       </section>

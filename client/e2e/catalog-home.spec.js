@@ -138,11 +138,11 @@ test('Hero shows retry on failure and preserves the five server movies in order'
 
   await page.goto('/');
   const hero = page.locator('.hero-section');
-  await expect(page.getByRole('heading', { name: 'Chưa thể tải phim nổi bật' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Unable to load featured movies' })).toBeVisible();
   await expect(hero.getByText('In the Lost Lands', { exact: true })).toHaveCount(0);
   await expect(hero.locator('iframe, video')).toHaveCount(0);
 
-  await page.getByRole('button', { name: 'Thử lại' }).click();
+  await page.getByRole('button', { name: 'Try again' }).click();
   await expect(hero).toHaveAttribute('data-catalog-source', 'server');
   const railTitles = await hero.locator('.hero-poster-thumb span').allTextContents();
   expect(railTitles).toEqual(candidates.map((movie) => movie.title));

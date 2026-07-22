@@ -17,15 +17,15 @@ const CatalogState = ({
   status,
   error,
   onRetry,
-  emptyTitle = 'Chưa có phim để hiển thị',
-  emptyDescription = 'Hãy quay lại sau để khám phá những bộ phim mới.',
+  emptyTitle = 'No movies to display',
+  emptyDescription = 'Check back later to discover new movies.',
   emptyIcon: EmptyIcon = Heart,
 }) => {
   if (status === 'loading') {
     return (
-      <div role="status" aria-live="polite" aria-label="Đang tải danh sách phim">
+      <div role="status" aria-live="polite" aria-label="Loading movie catalog">
         <CatalogSkeleton />
-        <span className="sr-only">Đang tải danh sách phim…</span>
+        <span className="sr-only">Loading movie catalog…</span>
       </div>
     );
   }
@@ -36,11 +36,11 @@ const CatalogState = ({
         <span className="catalog-state-panel__icon" aria-hidden="true">
           <RefreshCw />
         </span>
-        <h2>Chưa thể tải danh sách phim</h2>
-        <p>{error?.message || 'Kết nối đến máy chủ đang gián đoạn. Vui lòng thử lại.'}</p>
+        <h2>Unable to load movies</h2>
+        <p>{error?.message || 'The server connection was interrupted. Please try again.'}</p>
         <button type="button" className="catalog-state-panel__button" onClick={onRetry}>
           <RefreshCw aria-hidden="true" />
-          Thử lại
+          Try again
         </button>
       </section>
     );

@@ -24,10 +24,10 @@ const MobileGateContent = ({ children }) => {
   const homeData = useMobileHomeData({ enabled: isSignedIn && Boolean(activeProfile) });
 
   if (!authLoaded) {
-    return <div className="mobile-gate-status" role="status">Đang khởi động NitroCine…</div>;
+    return <div className="mobile-gate-status" role="status">Starting NitroCine…</div>;
   }
   if (!isSignedIn) return <MobileAuthEntry onSignIn={openSignIn} />;
-  if (isLoading) return <div className="mobile-gate-status" role="status">Đang tải hồ sơ…</div>;
+  if (isLoading) return <div className="mobile-gate-status" role="status">Loading profiles…</div>;
   if (!activeProfile) return <ProfilePicker />;
   if (pendingLaunch) {
     return <ProfileLaunchScreen profile={pendingLaunch} criticalReady={homeData.criticalReady} onComplete={finishLaunch} />;

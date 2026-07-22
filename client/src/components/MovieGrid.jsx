@@ -7,14 +7,12 @@ import useIntersectionObserver from '../hooks/useIntersectionObserver';
  * @param {string} columns 
  * @param {boolean} animated
  * @param {number} staggerDelay
- * @param {boolean} hydrateRuntime
  */
 const MovieGrid = ({
   movies = [],
-  columns = 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4',
+  columns = 'grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5',
   animated = true,
   staggerDelay = 30,
-  hydrateRuntime = true,
 }) => {
   const { ref, isVisible } = useIntersectionObserver({
     threshold: 0.01,
@@ -27,23 +25,18 @@ const MovieGrid = ({
 
     return movies.map((movie, index) => {
       const key = movie._id || movie.id || index;
-      const delay = Math.min(index * staggerDelay, 180);
-      const itemStyle = animated
-        ? {
-            opacity: isVisible ? 1 : 0,
-            transform: isVisible ? 'translate3d(0, 0, 0)' : 'translate3d(0, 24px, 0)',
-            transition: `opacity 320ms cubic-bezier(0.16, 1, 0.3, 1) ${delay}ms, transform 320ms cubic-bezier(0.16, 1, 0.3, 1) ${delay}ms`,
-            willChange: isVisible ? 'auto' : 'opacity, transform',
-          }
-        : undefined;
+      const delay = Math.min(index * staggerDelay, 150);
+      const className = animated
+        ? `catalog-grid-item ${isVisible ? 'is-visible' : ''}`
+        : 'catalog-grid-item is-visible';
 
       return (
-        <div key={key} style={itemStyle}>
-          <MovieCard movie={movie} hydrateRuntime={hydrateRuntime} />
+        <div key={key} className={className} style={{ '--catalog-card-delay': `${delay}ms` }}>
+          <MovieCard movie={movie} />
         </div>
       );
     });
-  }, [movies, animated, staggerDelay, hydrateRuntime, isVisible]);
+  }, [movies, animated, staggerDelay, isVisible]);
 
   if (!movieItems) return null;
 

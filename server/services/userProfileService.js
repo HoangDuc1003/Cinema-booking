@@ -61,9 +61,9 @@ export const sanitizeProfiles = (profiles = []) => {
     return sanitized;
 };
 
-export const createDefaultProfile = (displayName = 'Bạn') => ({
+export const createDefaultProfile = (displayName = 'You') => ({
     id: randomUUID(),
-    name: normalizeName(String(displayName || 'Bạn').trim().slice(0, 20) || 'Bạn'),
+    name: normalizeName(String(displayName || 'You').trim().slice(0, 20) || 'You'),
     avatarId: ALLOWED_PROFILE_AVATARS[0],
     isKids: false,
 });

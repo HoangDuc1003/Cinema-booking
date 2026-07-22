@@ -93,7 +93,6 @@ const Movies = () => {
       ) : displayedMovies.length > 0 ? (
           <MovieGrid
             movies={displayedMovies}
-            columns="grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
             animated={true}
             staggerDelay={30}
           />
@@ -101,8 +100,8 @@ const Movies = () => {
           <CatalogState
             status="empty"
             emptyIcon={Search}
-            emptyTitle={searchQuery.trim().length >= 2 ? 'Không tìm thấy phim phù hợp' : 'Chưa có phim để hiển thị'}
-            emptyDescription={searchQuery.trim().length >= 2 ? 'Hãy thử một từ khóa khác.' : 'Hãy quay lại sau để khám phá phim mới.'}
+            emptyTitle={searchQuery.trim().length >= 2 ? 'No matching movies found' : 'No movies to display'}
+            emptyDescription={searchQuery.trim().length >= 2 ? 'Try a different search term.' : 'Check back later to discover new movies.'}
           />
         )}
     </CatalogPageShell>
