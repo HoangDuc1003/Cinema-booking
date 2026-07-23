@@ -313,23 +313,32 @@ const HeroYouTubeVideo = ({
 
     try {
       player.setVolume?.(Math.max(0, Math.min(100, Number(volume) || 60)));
-      player.unMute?.();
+      const res = player.unMute?.();
+      if (res && typeof res.catch === 'function') {
+        res.catch(() => {
+          try { player.mute?.(); } catch {}
+          handleMutedFallback({ generation, videoId });
+        });
+      }
+      // Recover if browser autoplay policy pauses playback on unMute attempt without user gesture
+      const timer = window.setTimeout(() => {
+        try {
+          const states = window.YT?.PlayerState || {};
+          if (player.getPlayerState?.() === states.PAUSED) {
+            player.mute?.();
+            player.playVideo?.();
+          }
+        } catch {
+          // Recovery check is best effort
+        }
+      }, 120);
+
+      return () => window.clearTimeout(timer);
     } catch {
+      try { player.mute?.(); } catch {}
       handleMutedFallback({ generation, videoId });
       return undefined;
     }
-
-    const verificationTimer = window.setTimeout(() => {
-      try {
-        if (player.isMuted?.() === true) {
-          handleMutedFallback({ generation, videoId });
-        }
-      } catch {
-        // Audio verification is best-effort across YouTube player versions.
-      }
-    }, 300);
-
-    return () => window.clearTimeout(verificationTimer);
   }, [active, generation, handleMutedFallback, muted, player, videoId, visible, volume]);
 
   useEffect(() => () => clearAllTimers(), [clearAllTimers]);
