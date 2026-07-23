@@ -7,8 +7,6 @@ import Footer from './components/Footer'
 import ErrorBoundary from './components/ErrorBoundary'
 import { useAppContext } from './context/AppContext';
 import Loading from './components/Loading';
-import useMediaQuery from './hooks/useMediaQuery';
-import MobileExperienceGate from './components/mobile/MobileExperienceGate';
 
 const Home = lazy(() => import('./pages/Home'));
 const Movies = lazy(() => import('./pages/Movies'));
@@ -20,7 +18,7 @@ const MyMovies = lazy(() => import('./pages/MyMovies'));
 const Release = lazy(() => import('./pages/Release'));
 const Theater = lazy(() => import('./pages/Theater'));
 
-// Admin pages — NOW lazy-loaded (were eager before)
+// Admin pages
 const Layout = lazy(() => import('./pages/admin/Layout'));
 const DashBoard = lazy(() => import('./pages/admin/DashBoard'));
 const AddShows = lazy(() => import('./pages/admin/AddShows'));
@@ -64,32 +62,14 @@ const App = () => {
   // Hide navbar/footer on admin routes
   const isAdminRoute = useLocation().pathname.startsWith('/admin')
   const { user } = useAppContext()
-  const isE2EProfileBuild = import.meta.env.DEV && import.meta.env.VITE_E2E_PROFILE_TEST === 'true';
-  const hasE2EProfileFixture = isE2EProfileBuild && Boolean(globalThis.__NITROCINE_PROFILE_TEST__);
-  const isPhone = useMediaQuery('(max-width: 767px)')
-    && !isAdminRoute
-    && (!isE2EProfileBuild || hasE2EProfileFixture);
-
-  if (isPhone) {
-    return (
-      <div className='min-h-screen w-full overflow-x-hidden bg-black'>
-        <Toaster />
-        {isPhone ? <MobileExperienceGate>
-          <Suspense fallback={<PageFallback />}>
-            <AppRoutes />
-          </Suspense>
-        </MobileExperienceGate> : null}
-      </div>
-    );
-  }
 
   return (
-    <div className='flex flex-col min-h-screen overflow-x-hidden w-full'>
+    <div className='flex flex-col min-h-screen overflow-x-hidden w-full bg-black text-white'>
       <Toaster />
 
       {!isAdminRoute && <Navbar />}
 
-      <main className='flex-grow'>
+      <main className='flex-grow w-full overflow-x-hidden'>
         <Suspense fallback={<PageFallback />}>
           <AppRoutes includeAdmin user={user} />
         </Suspense>
