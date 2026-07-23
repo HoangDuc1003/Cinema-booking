@@ -4,7 +4,7 @@ import { RefreshCw } from 'lucide-react';
 import { fetchHomeHero, fetchMovieTrailers } from '../services/tmdb';
 import {
   getClientHeroDayKey,
-  millisecondsUntilNextLocalMidnight,
+  millisecondsUntilNextHeroRotation,
 } from '../services/heroCatalogOffset';
 import HeroContent from './hero/HeroContent';
 import CinematicCurtain from './hero/CinematicCurtain';
@@ -593,7 +593,7 @@ const HeroSection = ({
 
     const scheduleNextDay = () => {
       window.clearTimeout(midnightTimerId);
-      const nextDelay = millisecondsUntilNextLocalMidnight(new Date());
+      const nextDelay = millisecondsUntilNextHeroRotation(new Date());
       midnightTimerId = window.setTimeout(() => {
         const nextDayKey = getClientHeroDayKey();
         setHeroDayKey((currentDayKey) => (

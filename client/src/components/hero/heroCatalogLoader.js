@@ -99,15 +99,21 @@ export const validateMovieCandidates = async (movies, signal) => {
       findFirstLoadable(desktopCandidates),
       findFirstLoadable(mobileCandidates),
     ]);
-    const fallbackUrl = heroImageUrl || heroMobileImageUrl;
+    const fallbackUrl = heroImageUrl
+      || heroMobileImageUrl
+      || desktopCandidates[0]
+      || mobileCandidates[0];
     if (!fallbackUrl) return null;
+
+    const resolvedHeroImageUrl = heroImageUrl || fallbackUrl;
+    const resolvedHeroMobileImageUrl = heroMobileImageUrl || fallbackUrl;
 
     return {
       ...movie,
-      heroImageUrl: heroImageUrl || fallbackUrl,
-      heroMobileImageUrl: heroMobileImageUrl || fallbackUrl,
-      heroImageCandidates: putFirst(desktopCandidates, heroImageUrl || fallbackUrl),
-      heroMobileImageCandidates: putFirst(mobileCandidates, heroMobileImageUrl || fallbackUrl),
+      heroImageUrl: resolvedHeroImageUrl,
+      heroMobileImageUrl: resolvedHeroMobileImageUrl,
+      heroImageCandidates: putFirst(desktopCandidates, resolvedHeroImageUrl),
+      heroMobileImageCandidates: putFirst(mobileCandidates, resolvedHeroMobileImageUrl),
     };
   };
 
