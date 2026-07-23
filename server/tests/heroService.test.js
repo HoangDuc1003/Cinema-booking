@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Movie from '../models/Movie.js';
+import Show from '../models/Show.js';
 import SiteConfig from '../models/SiteConfig.js';
 import CatalogBatch from '../models/CatalogBatch.js';
-import { getPublicHomeHero } from '../services/heroService.js';
+import { getPublicHomeHero, randomizeHomeHero } from '../services/heroService.js';
 
 test('manual Hero remains authoritative and preserves the stored movie order', async () => {
     const originalConfig = SiteConfig.findOneAndUpdate;
@@ -71,5 +72,78 @@ test('getPublicHomeHero slices 5 movies according to heroOffset across 150 pre-d
         SiteConfig.findOne = originalConfigFindOne;
         CatalogBatch.findOne = originalBatchFindOne;
         Movie.find = originalMovieFind;
+    }
+});
+
+test('randomizeHomeHero picks 5 movies and avoids movies used within 2 days', async () => {
+    const originalFindOneAndUpdate = SiteConfig.findOneAndUpdate;
+    const originalFindOne = SiteConfig.findOne;
+    const originalMovieFind = Movie.find;
+    const originalShowFind = Show.find;
+
+    const mockPool = Array.from({ length: 10 }, (_, i) => ({
+        _id: `m-${i + 1}`,
+        title: `Movie ${i + 1}`,
+        poster_path: `/m-${i + 1}.jpg`,
+    }));
+
+    let savedConfig = null;
+    SiteConfig.findOneAndUpdate = (query, update) => {
+        if (update?.$set?.['homeHero.mode']) {
+            savedConfig = update.$set;
+        }
+        return {
+            lean: async () => ({
+                homeHero: { mode: 'manual', movieIds: savedConfig?.['homeHero.movieIds'] || ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'] },
+                updatedAt: new Date(),
+            }),
+        };
+    };
+    SiteConfig.findOne = () => ({
+        lean: async () => ({
+            homeHero: {
+                randomHistory: [
+                    { movieIds: ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'], timestamp: new Date() },
+                ],
+            },
+        }),
+    });
+    Movie.find = (query) => {
+        const ids = query?._id?.$in;
+        const result = Array.isArray(ids) && ids.length > 0
+            ? mockPool.filter((m) => ids.includes(m._id))
+            : mockPool;
+        const chain = {
+            select: () => chain,
+            sort: () => chain,
+            limit: () => chain,
+            populate: () => chain,
+            lean: async () => result,
+        };
+        return chain;
+    };
+    Show.find = () => ({
+        populate: () => ({
+            sort: () => ({
+                limit: () => ({
+                    lean: async () => [],
+                }),
+            }),
+        }),
+    });
+
+    try {
+        const result = await randomizeHomeHero();
+        assert.equal(result.selectedMovies.length, 5);
+        const newlyPicked = savedConfig['homeHero.movieIds'];
+        assert.equal(newlyPicked.length, 5);
+        // The first 5 movies m-1 to m-5 were in recent 2-day history, so fresh pick must choose only from m-6 to m-10
+        const freshSet = new Set(['m-6', 'm-7', 'm-8', 'm-9', 'm-10']);
+        assert.equal(newlyPicked.every((id) => freshSet.has(id)), true);
+    } finally {
+        SiteConfig.findOneAndUpdate = originalFindOneAndUpdate;
+        SiteConfig.findOne = originalFindOne;
+        Movie.find = originalMovieFind;
+        Show.find = originalShowFind;
     }
 });

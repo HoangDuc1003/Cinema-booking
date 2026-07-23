@@ -8,6 +8,7 @@ import { getPublicHomePayload } from './catalogRefreshService.js';
 
 const HERO_CONFIG_KEY = 'homeHero';
 const HERO_LIMIT = 5;
+const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
 const MOVIE_SELECT = '_id title overview poster_path backdrop_path release_date vote_average runtime genres heroVideoId heroVideoUrl heroVideoMimeType heroVideoPosterUrl heroVideoStatus heroVideoVersion updatedAt';
 
 const createHttpError = (status, message) => {
@@ -209,7 +210,7 @@ export const updateHomeHero = async ({ mode, movieIds }) => {
     }
     const config = await SiteConfig.findOneAndUpdate(
         { key: HERO_CONFIG_KEY },
-        { $set: { homeHero: { mode: nextMode, movieIds: ids } } },
+        { $set: { 'homeHero.mode': nextMode, 'homeHero.movieIds': ids } },
         { new: true, upsert: true, setDefaultsOnInsert: true },
     ).lean();
     await deleteKeys(redisKeys.homeHero());
@@ -219,4 +220,72 @@ export const updateHomeHero = async ({ mode, movieIds }) => {
         movieIds: sanitizeMovieIds(config?.homeHero?.movieIds),
         updatedAt: config?.updatedAt,
     };
+};
+
+export const randomizeHomeHero = async () => {
+    const adminData = await getAdminHomeHero();
+    const availableList = adminData.availableMovies || [];
+    if (!availableList.length) {
+        throw createHttpError(400, 'No available movies to randomize.');
+    }
+
+    const now = Date.now();
+    const doc = await SiteConfig.findOne({ key: HERO_CONFIG_KEY }).lean();
+    const currentHistory = Array.isArray(doc?.homeHero?.randomHistory) ? doc.homeHero.randomHistory : [];
+
+    const validHistory = currentHistory.filter((entry) => {
+        const time = entry?.timestamp ? new Date(entry.timestamp).getTime() : 0;
+        return now - time < TWO_DAYS_MS;
+    });
+
+    const usedIdsSet = new Set(
+        validHistory.flatMap((entry) => (Array.isArray(entry.movieIds) ? entry.movieIds : [])),
+    );
+
+    const freshCandidates = availableList.filter((movie) => !usedIdsSet.has(String(movie.id)));
+
+    const shuffle = (array) => {
+        const arr = [...array];
+        for (let i = arr.length - 1; i > 0; i -= 1) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [arr[i], arr[j]] = [arr[j], arr[i]];
+        }
+        return arr;
+    };
+
+    let selectedMovies = [];
+    if (freshCandidates.length >= HERO_LIMIT) {
+        selectedMovies = shuffle(freshCandidates).slice(0, HERO_LIMIT);
+    } else {
+        selectedMovies = shuffle(freshCandidates);
+        const selectedIdsSet = new Set(selectedMovies.map((m) => String(m.id)));
+        const remainingPool = shuffle(
+            availableList.filter((m) => !selectedIdsSet.has(String(m.id))),
+        );
+        selectedMovies = [...selectedMovies, ...remainingPool].slice(0, HERO_LIMIT);
+    }
+
+    const newPickedIds = selectedMovies.map((m) => String(m.id));
+
+    const updatedHistory = [
+        ...validHistory,
+        { movieIds: newPickedIds, timestamp: new Date(now) },
+    ];
+
+    await SiteConfig.findOneAndUpdate(
+        { key: HERO_CONFIG_KEY },
+        {
+            $set: {
+                'homeHero.mode': 'manual',
+                'homeHero.movieIds': newPickedIds,
+                'homeHero.randomHistory': updatedHistory,
+            },
+        },
+        { new: true, upsert: true, setDefaultsOnInsert: true },
+    ).lean();
+
+    await deleteKeys(redisKeys.homeHero());
+    await deleteByPattern(redisKeys.homeHeroPattern());
+
+    return getAdminHomeHero();
 };

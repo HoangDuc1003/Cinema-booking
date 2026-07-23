@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDownIcon, ArrowUpIcon, CheckIcon, ImagePlusIcon, RotateCcwIcon, SaveIcon, SearchIcon, SparklesIcon, XIcon } from 'lucide-react';
+import { ArrowDownIcon, ArrowUpIcon, CheckIcon, ImagePlusIcon, RotateCcwIcon, SaveIcon, SearchIcon, ShuffleIcon, SparklesIcon, XIcon } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Loading from '../../components/Loading';
 import Title from '../../components/admin/Title';
@@ -19,6 +19,7 @@ const HeroSettings = () => {
   const { axios, user } = useAppContext();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [randomizing, setRandomizing] = useState(false);
   const [mode, setMode] = useState('auto');
   const [selectedIds, setSelectedIds] = useState([]);
   const [availableMovies, setAvailableMovies] = useState([]);
@@ -29,6 +30,26 @@ const HeroSettings = () => {
   const [refreshStatus, setRefreshStatus] = useState('');
   const [catalogJobId, setCatalogJobId] = useState(() => sessionStorage.getItem(CATALOG_JOB_STORAGE_KEY) || '');
   const terminalToastRef = useRef('');
+
+  const handleRandomize = async () => {
+    try {
+      setRandomizing(true);
+      const { data } = await axios.post('/api/admin/hero/randomize');
+      if (!data.success) {
+        toast.error(data.message || 'Unable to randomize hero.');
+        return;
+      }
+      toast.success('Hero randomized (2-day anti-duplicate active).');
+      const hero = data.hero || {};
+      setMode(hero.settings?.mode || 'manual');
+      setSelectedIds((hero.settings?.movieIds || []).map(String));
+      setAvailableMovies(hero.availableMovies || []);
+    } catch (error) {
+      toast.error(error.response?.data?.message || error.message || 'Unable to randomize hero.');
+    } finally {
+      setRandomizing(false);
+    }
+  };
 
   const handleCatalogRefresh = async () => {
     try {
@@ -212,9 +233,20 @@ const HeroSettings = () => {
 
             <button
               type="button"
+              onClick={handleRandomize}
+              disabled={randomizing || saving}
+              className="flex items-center gap-2 px-4 py-2 rounded-md bg-purple-600 hover:bg-purple-700 disabled:opacity-60 transition text-white text-sm cursor-pointer"
+              title="Randomize Hero movies excluding any used in the last 2 days"
+            >
+              <ShuffleIcon className={`w-4 h-4 ${randomizing ? 'animate-spin' : ''}`} />
+              {randomizing ? 'Randomizing' : 'Randomize'}
+            </button>
+
+            <button
+              type="button"
               onClick={handleSave}
-              disabled={saving}
-              className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary hover:bg-primary-dull disabled:opacity-60 transition"
+              disabled={saving || randomizing}
+              className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary hover:bg-primary-dull disabled:opacity-60 transition text-sm cursor-pointer"
             >
               <SaveIcon className="w-4 h-4" />
               {saving ? 'Saving' : 'Save'}

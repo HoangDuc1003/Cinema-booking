@@ -1,7 +1,7 @@
 import Booking from "../models/Booking.js"
 import Show from "../models/Show.js"
 import User from "../models/User.js"
-import { getAdminHomeHero, updateHomeHero } from "../services/heroService.js"
+import { getAdminHomeHero, randomizeHomeHero, updateHomeHero } from "../services/heroService.js"
 import { getUploadSignature, commitHeroVideo, removeHeroVideo } from "../services/heroVideoService.js"
 import { randomUUID } from 'node:crypto';
 import { inngest } from '../inngest/index.js';
@@ -74,6 +74,16 @@ export const updateHeroSettings = async (req,res) =>{
     try {
         const settings = await updateHomeHero(req.body || {});
         res.json({success:true,message:"Hero updated successfully.",settings});
+    } catch (error) {
+        console.log(error);
+        return res.status(error.status || 500).json({ success: false, message: error.message });
+    }
+}
+
+export const randomizeHeroAction = async (req, res) => {
+    try {
+        const hero = await randomizeHomeHero();
+        res.json({ success: true, message: "Hero randomized successfully without 2-day duplicates.", hero });
     } catch (error) {
         console.log(error);
         return res.status(error.status || 500).json({ success: false, message: error.message });

@@ -6,6 +6,12 @@ const siteConfigSchema = new mongoose.Schema(
         homeHero: {
             mode: { type: String, enum: ['auto', 'manual'], default: 'auto' },
             movieIds: { type: [String], default: [] },
+            randomHistory: [
+                {
+                    movieIds: { type: [String], default: [] },
+                    timestamp: { type: Date, default: Date.now },
+                },
+            ],
         },
         catalog: {
             activeBatchId: { type: mongoose.Schema.Types.ObjectId, ref: 'CatalogBatch' },
