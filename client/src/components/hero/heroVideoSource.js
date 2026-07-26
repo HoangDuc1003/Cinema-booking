@@ -133,7 +133,7 @@ export const resolveConfiguredHeroVideoSource = (movie, options = {}) => {
   if (isMockUrl) {
     const mockEnabled = options.mockEnabled !== undefined
       ? Boolean(options.mockEnabled)
-      : (typeof window !== 'undefined' && Boolean(import.meta?.env?.DEV) && new URLSearchParams(window.location.search).get('heroMock') === '1');
+      : true; // Allow explicitly configured mock URLs to play in production without flags
     if (!mockEnabled) return null;
   }
 

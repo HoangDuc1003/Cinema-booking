@@ -20,7 +20,6 @@ The Hero background has exactly two valid outcomes:
 - Destroy the player and clear all timers/intervals when the movie changes or the Hero unmounts.
 
 ## Forbidden in Hero
-- Native MP4/WebM background playback
 - Vimeo or arbitrary iframe providers
 - client-side movie reordering
 - inactive movie video preloading

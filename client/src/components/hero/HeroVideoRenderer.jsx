@@ -1,5 +1,6 @@
 import React from 'react';
 import HeroYouTubeVideo from './HeroYouTubeVideo';
+import HeroNativeVideo from './HeroNativeVideo';
 
 const HeroVideoRenderer = ({
   source,
@@ -45,6 +46,10 @@ const HeroVideoRenderer = ({
 
   if (source?.kind === 'youtube' && source.videoId) {
     return <HeroYouTubeVideo {...commonProps} videoId={source.videoId} startSeconds={source.startSeconds ?? 15} />;
+  }
+  
+  if (source?.kind === 'native' && source.src) {
+    return <HeroNativeVideo {...commonProps} src={source.src} mimeType={source.mimeType} />;
   }
 
   return null;

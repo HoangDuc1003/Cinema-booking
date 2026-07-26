@@ -2,36 +2,40 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   HERO_BUFFERING_HYSTERESIS_MS,
   HERO_FAILURE_REASONS,
+  HERO_MIN_PLAYBACK_ADVANCE_SECONDS,
   HERO_PLAYBACK_TIMEOUT_MS,
   HERO_PLAYING_HYSTERESIS_MS,
-  HERO_VISUAL_READY_CONFIRM_MS,
+  hasAdvancedPlayback,
 } from './heroMachine';
-import { calculateCoverTransform, detectStableLetterbox } from './heroVideoCrop';
-
-const SAMPLE_WIDTH = 160;
-const SAMPLE_HEIGHT = 90;
-const REQUIRED_FRAME_SAMPLES = 12;
 
 const now = () => performance.now();
 
-const unloadVideo = (video) => {
-  if (!video) return;
+const calculateCover = (containerW, containerH, videoW, videoH) => {
+  if (containerW <= 0 || containerH <= 0 || videoW <= 0 || videoH <= 0) return null;
+  const containerRatio = containerW / containerH;
+  const videoRatio = videoW / videoH;
+  let frameW, frameH;
 
-  try {
-    video.pause();
-    video.removeAttribute('src');
-    video.querySelectorAll('source').forEach((element) => element.removeAttribute('src'));
-    video.load();
-  } catch {
-    // The element may already be detached while React is unmounting it.
+  if (containerRatio > videoRatio) {
+    frameW = containerW;
+    frameH = containerW / videoRatio;
+  } else {
+    frameH = containerH;
+    frameW = containerH * videoRatio;
   }
+
+  return {
+    width: frameW,
+    height: frameH,
+  };
 };
 
 const HeroNativeVideo = ({
   enabled,
   active,
   visible,
-  source,
+  src,
+  mimeType,
   generation,
   muted,
   volume = 60,
@@ -44,73 +48,42 @@ const HeroNativeVideo = ({
   onPlaybackPaused,
   onBufferingSustained,
   onAutoplayBlocked,
-  onMutedFallback,
   onEnded,
   onFailure,
 }) => {
-  const shellRef = useRef(null);
+  const latestRef = useRef({ enabled, active, src, generation });
   const videoRef = useRef(null);
-  const samplingCanvasRef = useRef(null);
-  const latestRef = useRef({ enabled, active, source, generation });
-  const cropRef = useRef(null);
-  const cropConfirmedRef = useRef(false);
-  const samplingFramesRef = useRef([]);
-  const sampleCallbackRef = useRef(null);
-  const fallbackSampleTimerRef = useRef(null);
-  const playbackTimeoutRef = useRef(null);
+  const shellRef = useRef(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [coverLayout, setCoverLayout] = useState(null);
+  const coverLayoutRef = useRef(null);
+  const quarantineCompletedRef = useRef(null);
+  
   const playingTimerRef = useRef(null);
-  const visualTimerRef = useRef(null);
   const bufferingTimerRef = useRef(null);
   const recoveryTimerRef = useRef(null);
-  const readyGenerationRef = useRef(null);
-  const requestedCommandRef = useRef(null);
-  const stableGenerationRef = useRef(null);
-  const visualConfirmedGenerationRef = useRef(null);
-  const visualGenerationRef = useRef(null);
+  const startupTimerRef = useRef(null);
   const failedGenerationRef = useRef(null);
-  const [videoLayout, setVideoLayout] = useState(null);
-  const isMock = Boolean(source?.src && (source.src.includes('/mock/') || source.src.includes('hero-trailer')));
+  
+  const videoSizeRef = useRef({ width: 0, height: 0 });
 
   useEffect(() => {
-    latestRef.current = { enabled, active, source, generation };
+    latestRef.current = { enabled, active, src, generation };
   });
 
-
-
-  const isLoadedCurrent = useCallback((targetGeneration, targetSource = source?.src) => {
+  const isCurrent = useCallback((targetGeneration, targetSrc = src) => {
     const latest = latestRef.current;
     return Boolean(
       latest.enabled
-      && latest.source?.src
+      && latest.active
       && latest.generation === targetGeneration
-      && latest.source.src === targetSource
+      && latest.src === targetSrc
     );
-  }, [source?.src]);
-
-  const isCurrent = useCallback((targetGeneration, targetSource = source?.src) => (
-    isLoadedCurrent(targetGeneration, targetSource) && latestRef.current.active
-  ), [isLoadedCurrent, source?.src]);
-
-  const clearSamplingCallback = useCallback(() => {
-    const video = videoRef.current;
-    if (sampleCallbackRef.current != null && video?.cancelVideoFrameCallback) {
-      video.cancelVideoFrameCallback(sampleCallbackRef.current);
-    }
-    sampleCallbackRef.current = null;
-    window.clearTimeout(fallbackSampleTimerRef.current);
-    fallbackSampleTimerRef.current = null;
-  }, []);
-
-  const resetIncompleteSampling = useCallback(() => {
-    clearSamplingCallback();
-    if (!cropRef.current) samplingFramesRef.current = [];
-  }, [clearSamplingCallback]);
+  }, [src]);
 
   const clearVerificationTimers = useCallback(() => {
     window.clearTimeout(playingTimerRef.current);
-    window.clearTimeout(visualTimerRef.current);
     playingTimerRef.current = null;
-    visualTimerRef.current = null;
   }, []);
 
   const clearBufferingTimers = useCallback(() => {
@@ -123,483 +96,290 @@ const HeroNativeVideo = ({
   const clearAllTimers = useCallback(() => {
     clearVerificationTimers();
     clearBufferingTimers();
-    window.clearTimeout(playbackTimeoutRef.current);
-    playbackTimeoutRef.current = null;
+    window.clearTimeout(startupTimerRef.current);
+    startupTimerRef.current = null;
+    quarantineCompletedRef.current = null;
   }, [clearBufferingTimers, clearVerificationTimers]);
 
-  const resetVisualLatch = useCallback(() => {
-    clearVerificationTimers();
-    stableGenerationRef.current = null;
-    visualConfirmedGenerationRef.current = null;
-    visualGenerationRef.current = null;
-  }, [clearVerificationTimers]);
-
-  const updateLayout = useCallback(() => {
-    const shell = shellRef.current;
-    const video = videoRef.current;
-    if (!shell || !video || video.videoWidth <= 0 || video.videoHeight <= 0) return;
-
-    const nextLayout = calculateCoverTransform({
-      containerWidth: shell.clientWidth,
-      containerHeight: shell.clientHeight,
-      videoWidth: video.videoWidth,
-      videoHeight: video.videoHeight,
-      crop: cropRef.current,
-    });
-
-    if (nextLayout) setVideoLayout(nextLayout);
-  }, []);
-
-  const hideVisual = useCallback((targetGeneration) => {
-    if (!isCurrent(targetGeneration)) return;
-    resetVisualLatch();
-    resetIncompleteSampling();
-    onVisualHidden?.({ generation: targetGeneration });
-    onPlaybackPaused?.({ generation: targetGeneration, now: now() });
-  }, [isCurrent, onPlaybackPaused, onVisualHidden, resetIncompleteSampling, resetVisualLatch]);
-
-  const fail = useCallback((reason, detail, targetGeneration = generation) => {
-    if (!isCurrent(targetGeneration) || failedGenerationRef.current === targetGeneration) return;
+  const fail = useCallback((reason, detail, targetGeneration, targetSrc = src) => {
+    if (!isCurrent(targetGeneration, targetSrc) || failedGenerationRef.current === targetGeneration) return;
     failedGenerationRef.current = targetGeneration;
     clearAllTimers();
-    resetIncompleteSampling();
-    resetVisualLatch();
     onVisualHidden?.({ generation: targetGeneration });
     onPlaybackPaused?.({ generation: targetGeneration, now: now() });
     onFailure?.({ generation: targetGeneration, reason, detail });
-  }, [
-    clearAllTimers,
-    generation,
-    isCurrent,
-    onFailure,
-    onPlaybackPaused,
-    onVisualHidden,
-    resetIncompleteSampling,
-    resetVisualLatch,
-  ]);
+  }, [clearAllTimers, isCurrent, onFailure, onPlaybackPaused, onVisualHidden, src]);
 
-  const finishSampling = useCallback((targetGeneration) => {
-    if (!isCurrent(targetGeneration)) return;
-    const result = detectStableLetterbox(samplingFramesRef.current);
-    if (!result?.safeToDisplay) {
-      fail(HERO_FAILURE_REASONS.UNSAFE_VIDEO_FRAME, {
-        stage: 'letterbox-detection',
-        reason: result?.reason || 'low-confidence',
-        confidence: result?.confidence || 0,
-      }, targetGeneration);
-      return;
-    }
-
-    const video = videoRef.current;
-    if (!video || video.videoWidth <= 0 || video.videoHeight <= 0) return;
-    cropRef.current = {
-      top: result.cropRatios.top * video.videoHeight,
-      right: result.cropRatios.right * video.videoWidth,
-      bottom: result.cropRatios.bottom * video.videoHeight,
-      left: result.cropRatios.left * video.videoWidth,
-    };
-    cropConfirmedRef.current = true;
-    updateLayout();
-  }, [fail, isCurrent, updateLayout]);
-
-  const captureFrame = useCallback((targetGeneration) => {
-    const video = videoRef.current;
-    if (!isCurrent(targetGeneration) || !video || video.paused || video.ended) return;
-
-    try {
-      if (!samplingCanvasRef.current) samplingCanvasRef.current = document.createElement('canvas');
-      const canvas = samplingCanvasRef.current;
-      canvas.width = SAMPLE_WIDTH;
-      canvas.height = SAMPLE_HEIGHT;
-      const context = canvas.getContext('2d', { alpha: false, willReadFrequently: true });
-      if (!context) throw new Error('Canvas 2D context is unavailable.');
-      context.drawImage(video, 0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
-      const imageData = context.getImageData(0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
-      samplingFramesRef.current.push({
-        width: SAMPLE_WIDTH,
-        height: SAMPLE_HEIGHT,
-        data: imageData.data,
-      });
-    } catch (error) {
-      fail(HERO_FAILURE_REASONS.UNSAFE_VIDEO_FRAME, {
-        stage: 'frame-sampling',
-        message: error?.message,
-      }, targetGeneration);
-      return;
-    }
-
-    if (samplingFramesRef.current.length >= REQUIRED_FRAME_SAMPLES) {
-      clearSamplingCallback();
-      finishSampling(targetGeneration);
-    }
-  }, [clearSamplingCallback, fail, finishSampling, isCurrent]);
-
-  const beginSampling = useCallback((targetGeneration) => {
-    const video = videoRef.current;
-    if (!video || cropConfirmedRef.current || sampleCallbackRef.current != null || fallbackSampleTimerRef.current != null) {
-      return;
-    }
-
-    if (isMock) {
-      cropRef.current = { top: 0, right: 0, bottom: 0, left: 0 };
-      cropConfirmedRef.current = true;
-      updateLayout();
-      return;
-    }
-
-    const sampleNextFrame = () => {
-      captureFrame(targetGeneration);
-      if (
-        isCurrent(targetGeneration)
-        && samplingFramesRef.current.length < REQUIRED_FRAME_SAMPLES
-        && failedGenerationRef.current !== targetGeneration
-      ) {
-        if (video.requestVideoFrameCallback) {
-          sampleCallbackRef.current = video.requestVideoFrameCallback(sampleNextFrame);
-        } else {
-          fallbackSampleTimerRef.current = window.setTimeout(sampleNextFrame, 90);
-        }
-      }
-    };
-
-    sampleNextFrame();
-  }, [captureFrame, isCurrent, isMock, updateLayout]);
-
-  const syncPlaybackRequest = useCallback((targetGeneration = generation) => {
-    const video = videoRef.current;
-    const targetSource = source?.src;
-    if (
-      !video
-      || !isCurrent(targetGeneration, targetSource)
-      || video.readyState < HTMLMediaElement.HAVE_METADATA
-    ) return;
-
-    const commandKey = `${targetGeneration}:${targetSource}`;
-    if (requestedCommandRef.current === commandKey) return;
-    requestedCommandRef.current = commandKey;
-    const safeVolume = Math.max(0, Math.min(1, (Number(volume) || 60) / 100));
-    video.muted = Boolean(muted);
-    video.defaultMuted = Boolean(muted);
-    video.volume = muted ? 0 : safeVolume;
-    onPlaybackRequested?.({ generation: targetGeneration, player: video });
-
-    window.clearTimeout(playbackTimeoutRef.current);
-    playbackTimeoutRef.current = window.setTimeout(() => {
-      fail(HERO_FAILURE_REASONS.TIMEOUT, { stage: 'native-playback-start' }, targetGeneration);
-    }, HERO_PLAYBACK_TIMEOUT_MS);
-
-    const playPromise = video.play();
-    playPromise?.catch((error) => {
-      if (!muted || error?.name === 'NotAllowedError' || /NotAllowedError|interact/i.test(error?.message || '')) {
-        onAutoplayBlocked?.(error, { generation: targetGeneration });
-        try {
-          video.muted = true;
-          video.defaultMuted = true;
-          video.volume = 0;
-          const retryPromise = video.play();
-          onMutedFallback?.({ generation: targetGeneration });
-          retryPromise?.catch((retryError) => {
-            fail(HERO_FAILURE_REASONS.AUTOPLAY_BLOCKED, {
-              stage: 'native-autoplay-retry',
-              message: retryError?.message,
-            }, targetGeneration);
-          });
-        } catch (fallbackError) {
-          fail(HERO_FAILURE_REASONS.AUTOPLAY_BLOCKED, {
-            stage: 'native-autoplay',
-            message: error?.message,
-          }, targetGeneration);
-        }
-      } else {
-        fail(HERO_FAILURE_REASONS.AUTOPLAY_BLOCKED, {
-          stage: 'native-autoplay',
-          message: error?.message,
-        }, targetGeneration);
-      }
-    });
-  }, [fail, generation, isCurrent, muted, volume, onAutoplayBlocked, onMutedFallback, onPlaybackRequested, source?.src]);
-
-  const handlePlayerReady = useCallback(() => {
-    const targetGeneration = generation;
-    if (!isLoadedCurrent(targetGeneration)) return;
-    updateLayout();
-    if (readyGenerationRef.current !== targetGeneration) {
-      readyGenerationRef.current = targetGeneration;
-      onPlayerReady?.({ generation: targetGeneration, player: videoRef.current });
-    }
-    syncPlaybackRequest(targetGeneration);
-  }, [generation, isLoadedCurrent, onPlayerReady, syncPlaybackRequest, updateLayout]);
-
-  const handlePlaying = useCallback(() => {
-    const targetGeneration = generation;
-    const video = videoRef.current;
-    if (!isCurrent(targetGeneration) || !video) return;
-
-    clearBufferingTimers();
+  const confirmStablePlayback = useCallback((videoElement, targetGeneration, targetSrc) => {
+    const firstTime = Number(videoElement.currentTime);
     clearVerificationTimers();
-    stableGenerationRef.current = null;
-    visualConfirmedGenerationRef.current = null;
-    visualGenerationRef.current = null;
+    playingTimerRef.current = window.setTimeout(() => {
+      playingTimerRef.current = null;
+      const currentTime = Number(videoElement.currentTime);
+      const isActuallyPlaying = !videoElement.paused && !videoElement.ended && videoElement.readyState >= 3;
+      
+      if (
+        !isCurrent(targetGeneration, targetSrc)
+        || !hasAdvancedPlayback({
+          playerState: isActuallyPlaying ? 1 : 2, // 1 = playing, 2 = paused
+          playingState: 1,
+          previousTime: firstTime,
+          currentTime,
+          minimumAdvance: HERO_MIN_PLAYBACK_ADVANCE_SECONDS,
+        })
+      ) return;
 
-    if (!cropRef.current) {
-      cropRef.current = { top: 0, right: 0, bottom: 0, left: 0 };
+      const confirmedAt = now();
+      window.clearTimeout(startupTimerRef.current);
+      startupTimerRef.current = null;
+      onPlaybackStable?.({ generation: targetGeneration, now: confirmedAt, currentTime });
+
+      const layout = coverLayoutRef.current;
+      const shell = shellRef.current;
+      if (
+        !layout
+        || !shell
+        || layout.width < shell.clientWidth - 1
+        || layout.height < shell.clientHeight - 1
+      ) {
+        quarantineCompletedRef.current = {
+          generation: targetGeneration,
+          src: targetSrc,
+          minTime: currentTime,
+        };
+        return;
+      }
+
+      onVisualReady?.({ generation: targetGeneration, now: confirmedAt, currentTime });
+    }, HERO_PLAYING_HYSTERESIS_MS);
+  }, [clearVerificationTimers, isCurrent, onPlaybackStable, onVisualReady]);
+
+  const updateCoverLayout = useCallback(() => {
+    const shell = shellRef.current;
+    if (!shell) return;
+    const { width: videoW, height: videoH } = videoSizeRef.current;
+    if (!videoW || !videoH) return;
+    
+    const nextLayout = calculateCover(shell.clientWidth, shell.clientHeight, videoW, videoH);
+    if (nextLayout) {
+      coverLayoutRef.current = { ...nextLayout, containerWidth: shell.clientWidth, containerHeight: shell.clientHeight };
+      setCoverLayout(nextLayout);
+      const pending = quarantineCompletedRef.current;
+      if (
+        pending
+        && pending.generation === generation
+        && isCurrent(generation, src)
+        && nextLayout.width >= shell.clientWidth - 1
+        && nextLayout.height >= shell.clientHeight - 1
+      ) {
+        const videoElement = videoRef.current;
+        const visualTime = Number(videoElement?.currentTime);
+        const isActuallyPlaying = !videoElement?.paused && !videoElement?.ended && videoElement?.readyState >= 3;
+        
+        if (
+          isActuallyPlaying
+          && Number.isFinite(visualTime)
+          && visualTime > pending.minTime
+        ) {
+          quarantineCompletedRef.current = null;
+          onVisualReady?.({ generation, now: now(), currentTime: visualTime });
+        }
+      }
     }
+  }, [generation, isCurrent, onVisualReady, src]);
 
-    onPlaybackPlaying?.({ generation: targetGeneration, now: now(), player: video });
-
-    let lastTime = video.currentTime;
-    const checkProgress = () => {
-      const currentVideo = videoRef.current;
-      if (!isCurrent(targetGeneration) || !currentVideo || currentVideo.paused || currentVideo.ended) {
-        return;
-      }
-
-      if (currentVideo.readyState < 2) {
-        playingTimerRef.current = window.setTimeout(checkProgress, 100);
-        return;
-      }
-
-      const currentTime = currentVideo.currentTime;
-      if (currentTime > lastTime) {
-        stableGenerationRef.current = targetGeneration;
-        visualConfirmedGenerationRef.current = targetGeneration;
-        visualGenerationRef.current = targetGeneration;
-
-        window.clearTimeout(playbackTimeoutRef.current);
-        playbackTimeoutRef.current = null;
-
-        onPlaybackStable?.({
-          generation: targetGeneration,
-          now: now(),
-          currentTime: currentTime,
-        });
-
-        updateLayout();
-
-        onVisualReady?.({
-          generation: targetGeneration,
-          now: now(),
-          currentTime: currentTime,
-        });
-
-        beginSampling(targetGeneration);
-      } else {
-        lastTime = currentTime;
-        playingTimerRef.current = window.setTimeout(checkProgress, 100);
-      }
+  // Video Event Handlers
+  const handleLoadedMetadata = useCallback((e) => {
+    videoSizeRef.current = {
+      width: e.target.videoWidth || 1920,
+      height: e.target.videoHeight || 1080,
     };
-
-    playingTimerRef.current = window.setTimeout(checkProgress, 100);
-  }, [
-    generation,
-    isCurrent,
-    clearBufferingTimers,
-    clearVerificationTimers,
-    onPlaybackPlaying,
-    onPlaybackStable,
-    onVisualReady,
-    updateLayout,
-    beginSampling,
-  ]);
-
-  const handleWaiting = useCallback((e) => {
-    const targetGeneration = generation;
-    if (!isCurrent(targetGeneration)) return;
-
-    hideVisual(targetGeneration);
-    const isSynthetic = e && (e.isTrusted === false || e.nativeEvent?.isTrusted === false);
-    if (isSynthetic && videoRef.current && !videoRef.current.paused) {
-      try {
-        videoRef.current.pause();
-      } catch {
-        // Ignore errors if the video element is not ready or detached
-      }
-    }
-    if (bufferingTimerRef.current != null) return;
-    bufferingTimerRef.current = window.setTimeout(() => {
-      bufferingTimerRef.current = null;
-      if (!isCurrent(targetGeneration) || (videoRef.current?.readyState ?? 0) >= HTMLMediaElement.HAVE_FUTURE_DATA) return;
-      onBufferingSustained?.({ generation: targetGeneration, now: now() });
-      recoveryTimerRef.current = window.setTimeout(() => {
-        fail(HERO_FAILURE_REASONS.TIMEOUT, {
-          stage: 'native-buffering-recovery',
-        }, targetGeneration);
+    updateCoverLayout();
+    
+    if (isCurrent(generation, src)) {
+      onPlayerReady?.({ generation, player: e.target });
+      onPlaybackRequested?.({ generation, player: e.target });
+      window.clearTimeout(startupTimerRef.current);
+      startupTimerRef.current = window.setTimeout(() => {
+        fail(
+          HERO_FAILURE_REASONS.TIMEOUT,
+          { stage: 'native-playback-start' },
+          generation,
+          src,
+        );
       }, HERO_PLAYBACK_TIMEOUT_MS);
-    }, HERO_BUFFERING_HYSTERESIS_MS);
-  }, [fail, generation, hideVisual, isCurrent, onBufferingSustained]);
-
-  const handlePause = useCallback((e) => {
-    if (!isCurrent(generation) || videoRef.current?.ended) return;
-    clearBufferingTimers();
-    hideVisual(generation);
-    const isSynthetic = e && (e.isTrusted === false || e.nativeEvent?.isTrusted === false);
-    if (isSynthetic && videoRef.current && !videoRef.current.paused) {
-      try {
-        videoRef.current.pause();
-      } catch {
-        // Ignore errors if the video element is not ready or detached
+      
+      if (active) {
+        e.target.play().catch((err) => {
+          if (err.name === 'NotAllowedError') {
+            onAutoplayBlocked?.(err, { generation, videoId: src });
+          } else if (err.name !== 'AbortError') {
+            fail(HERO_FAILURE_REASONS.VIDEO_ERROR, { message: err.message, stage: 'native-play' }, generation, src);
+          }
+        });
       }
     }
-  }, [clearBufferingTimers, generation, hideVisual, isCurrent]);
+  }, [active, fail, generation, isCurrent, onAutoplayBlocked, onPlaybackRequested, onPlayerReady, src, updateCoverLayout]);
+
+  const handlePlaying = useCallback((e) => {
+    if (!isCurrent(generation, src)) return;
+    setIsPlaying(true);
+    clearBufferingTimers();
+    onPlaybackPlaying?.({ generation, now: now() });
+    confirmStablePlayback(e.target, generation, src);
+  }, [clearBufferingTimers, confirmStablePlayback, generation, isCurrent, onPlaybackPlaying, src]);
+
+  const handlePause = useCallback(() => {
+    if (!isCurrent(generation, src)) return;
+    setIsPlaying(false);
+    clearVerificationTimers();
+    clearBufferingTimers();
+    onVisualHidden?.({ generation });
+    onPlaybackPaused?.({ generation, now: now() });
+    
+    // Auto-resume if still active
+    if (active && videoRef.current) {
+      videoRef.current.play().catch(() => {});
+    }
+  }, [active, clearBufferingTimers, clearVerificationTimers, generation, isCurrent, onPlaybackPaused, onVisualHidden, src]);
 
   const handleEnded = useCallback(() => {
-    const targetGeneration = generation;
-    if (!isCurrent(targetGeneration) || !videoRef.current?.ended) return;
+    if (!isCurrent(generation, src)) return;
+    setIsPlaying(false);
     clearAllTimers();
-    resetIncompleteSampling();
-    resetVisualLatch();
-    onVisualHidden?.({ generation: targetGeneration });
-    onPlaybackPaused?.({ generation: targetGeneration, now: now() });
-    onEnded?.({ generation: targetGeneration });
-  }, [
-    clearAllTimers,
-    generation,
-    isCurrent,
-    onEnded,
-    onPlaybackPaused,
-    onVisualHidden,
-    resetIncompleteSampling,
-    resetVisualLatch,
-  ]);
+    onVisualHidden?.({ generation });
+    onPlaybackPaused?.({ generation, now: now() });
+    onEnded?.({ generation });
+  }, [clearAllTimers, generation, isCurrent, onEnded, onPlaybackPaused, onVisualHidden, src]);
+
+  const handleWaiting = useCallback((e) => {
+    if (!isCurrent(generation, src)) return;
+    onVisualHidden?.({ generation });
+    onPlaybackPaused?.({ generation, now: now() });
+    clearBufferingTimers();
+    
+    bufferingTimerRef.current = window.setTimeout(() => {
+      bufferingTimerRef.current = null;
+      if (!isCurrent(generation, src) || e.target.readyState >= 3) return;
+      onBufferingSustained?.({ generation, now: now() });
+      recoveryTimerRef.current = window.setTimeout(() => {
+        fail(
+          HERO_FAILURE_REASONS.TIMEOUT,
+          { stage: 'native-buffering-recovery' },
+          generation,
+          src,
+        );
+      }, HERO_PLAYBACK_TIMEOUT_MS);
+    }, HERO_BUFFERING_HYSTERESIS_MS);
+  }, [clearBufferingTimers, fail, generation, isCurrent, onBufferingSustained, onPlaybackPaused, onVisualHidden, src]);
+
+  const handleError = useCallback((e) => {
+    if (!isCurrent(generation, src)) return;
+    const error = e.target.error;
+    fail(HERO_FAILURE_REASONS.VIDEO_ERROR, { 
+      code: error?.code,
+      message: error?.message,
+      stage: 'native-player' 
+    }, generation, src);
+  }, [fail, generation, isCurrent, src]);
+
+  // Volume & Mute Sync
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.muted = muted;
+      videoRef.current.volume = Math.max(0, Math.min(1, volume / 100));
+    }
+  }, [muted, volume]);
+
+  // Active Sync
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (active) {
+      if (video.paused && !video.ended) {
+        video.play().catch((err) => {
+          if (err.name === 'NotAllowedError') {
+            onAutoplayBlocked?.(err, { generation, videoId: src });
+          }
+        });
+      }
+    } else {
+      video.pause();
+    }
+  }, [active, generation, onAutoplayBlocked, src]);
+
+  useEffect(() => {
+    failedGenerationRef.current = null;
+    clearAllTimers();
+  }, [clearAllTimers, generation, src]);
+
+  useEffect(() => {
+    if (enabled && active) return undefined;
+    clearAllTimers();
+    if (enabled) {
+      onVisualHidden?.({ generation });
+      onPlaybackPaused?.({ generation, now: now() });
+    }
+    return undefined;
+  }, [active, clearAllTimers, enabled, generation, onPlaybackPaused, onVisualHidden]);
+
+  useEffect(() => () => clearAllTimers(), [clearAllTimers]);
 
   useEffect(() => {
     const shell = shellRef.current;
     if (!shell || typeof ResizeObserver === 'undefined') return undefined;
-    const observer = new ResizeObserver(updateLayout);
+    const observer = new ResizeObserver(updateCoverLayout);
     observer.observe(shell);
     return () => observer.disconnect();
-  }, [updateLayout]);
+  }, [updateCoverLayout]);
 
   useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        hideVisual(generation);
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [generation, hideVisual]);
+    updateCoverLayout();
+  }, [generation, updateCoverLayout]);
 
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    const safeVolume = Math.max(0, Math.min(1, (Number(volume) || 60) / 100));
-    video.muted = Boolean(muted);
-    video.defaultMuted = Boolean(muted);
-    video.volume = muted ? 0 : safeVolume;
-  }, [muted, volume]);
-
-  useEffect(() => {
-    cropRef.current = null;
-    cropConfirmedRef.current = false;
-    samplingFramesRef.current = [];
-    readyGenerationRef.current = null;
-    requestedCommandRef.current = null;
-    stableGenerationRef.current = null;
-    visualConfirmedGenerationRef.current = null;
-    visualGenerationRef.current = null;
-    failedGenerationRef.current = null;
-    clearSamplingCallback();
-    clearAllTimers();
-
-    onVisualHidden?.({ generation });
-    onPlaybackPaused?.({ generation, now: now() });
-
-    const video = videoRef.current;
-    if (video && enabled && source?.src) video.load();
-  }, [clearAllTimers, clearSamplingCallback, enabled, generation, source?.src, onVisualHidden, onPlaybackPaused]);
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    if (!enabled || !source?.src) {
-      requestedCommandRef.current = null;
-      clearAllTimers();
-      resetIncompleteSampling();
-      resetVisualLatch();
-      unloadVideo(video);
-      return;
-    }
-
-    if (!active) {
-      requestedCommandRef.current = null;
-      video.pause();
-      clearAllTimers();
-      resetIncompleteSampling();
-      resetVisualLatch();
-      onVisualHidden?.({ generation });
-      onPlaybackPaused?.({ generation, now: now() });
-      return;
-    }
-
-    syncPlaybackRequest(generation);
-  }, [
-    active,
-    clearAllTimers,
-    enabled,
-    generation,
-    onPlaybackPaused,
-    onVisualHidden,
-    resetIncompleteSampling,
-    resetVisualLatch,
-    source?.src,
-    syncPlaybackRequest,
-  ]);
-
-  useEffect(() => () => {
-    clearAllTimers();
-    clearSamplingCallback();
-    unloadVideo(videoRef.current);
-  }, [clearAllTimers, clearSamplingCallback]);
-
-  const videoStyle = videoLayout ? {
-    width: `${videoLayout.width}px`,
-    height: `${videoLayout.height}px`,
-    left: `${videoLayout.left}px`,
-    top: `${videoLayout.top}px`,
+  const mountStyle = coverLayout ? {
+    position: 'absolute',
+    width: `${coverLayout.width}px`,
+    height: `${coverLayout.height}px`,
+    left: '50%',
+    top: '50%',
+    transform: 'translate(-50%, -50%)',
+    maxWidth: 'none',
+    pointerEvents: 'none',
+    backfaceVisibility: 'hidden',
+    willChange: 'transform',
+    objectFit: 'cover',
   } : undefined;
+
+  const isFullyVisible = visible && isPlaying;
+
+  if (!enabled) return null;
 
   return (
     <div
       ref={shellRef}
-      className={`hero-video-shell hero-native-video-shell ${visible ? 'is-visible' : ''}`}
+      className={`hero-video-shell hero-native-video ${isFullyVisible ? 'is-visible' : ''}`}
       aria-hidden="true"
-      data-video-safe={visible ? 'true' : 'false'}
+      data-video-safe={isFullyVisible ? 'true' : 'false'}
+      data-video-id={src}
     >
       <div className="hero-video-frame">
         <video
           ref={videoRef}
-          key={`${generation}-${source?.src || ''}`}
-          className="hero-native-video"
-          style={videoStyle}
-          muted={muted}
+          src={src}
+          type={mimeType}
+          style={mountStyle}
+          className="hero-native-video__mount"
           playsInline
-          loop={isMock}
-          preload={enabled ? 'auto' : 'none'}
+          muted={muted}
           crossOrigin="anonymous"
-          disablePictureInPicture
-          controlsList="nodownload noplaybackrate nofullscreen noremoteplayback"
-          tabIndex={-1}
-          onLoadedMetadata={handlePlayerReady}
-          onCanPlay={handlePlayerReady}
+          onLoadedMetadata={handleLoadedMetadata}
           onPlaying={handlePlaying}
-          onWaiting={handleWaiting}
-          onStalled={handleWaiting}
           onPause={handlePause}
           onEnded={handleEnded}
-          onAbort={handlePause}
-          onEmptied={handlePause}
-          onError={() => fail(HERO_FAILURE_REASONS.VIDEO_ERROR, {
-            stage: 'native-player',
-            code: videoRef.current?.error?.code,
-            message: videoRef.current?.error?.message,
-          }, generation)}
-        >
-          {enabled && source?.src ? (
-            <source src={source.src} type={source.mimeType} />
-          ) : null}
-        </video>
+          onWaiting={handleWaiting}
+          onError={handleError}
+        />
       </div>
     </div>
   );
