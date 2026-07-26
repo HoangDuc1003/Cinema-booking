@@ -8,7 +8,6 @@ import {
   millisecondsUntilRotationEnd,
 } from '../services/heroCatalogOffset';
 import HeroContent from './hero/HeroContent';
-import CinematicCurtain from './hero/CinematicCurtain';
 import HeroMedia from './hero/HeroMedia';
 import HeroPosterRail from './hero/HeroPosterRail';
 import HeroVideoRenderer from './hero/HeroVideoRenderer';
@@ -42,12 +41,6 @@ const HERO_POSTER_SWAP_DELAY_MS = 400;
 const HERO_POSTER_TRANSITION_MS = 1_200;
 const HERO_AUTO_CAROUSEL_MS = 5_000;
 const HERO_ENDED_POSTER_HOLD_MS = 1_000;
-const CURTAIN_POSTER_PREVIEW_MS = 200;
-const CURTAIN_PREFETCHED_PREVIEW_MS = Math.max(0, CURTAIN_POSTER_PREVIEW_MS - HERO_ENDED_POSTER_HOLD_MS);
-const CURTAIN_CLOSE_DURATION_MS = 400;
-const CURTAIN_CLOSED_HOLD_MS = 300;
-const CURTAIN_OPEN_DURATION_MS = 400;
-const CURTAIN_REDUCED_MOTION_DURATION_MS = 150;
 const HERO_AUDIO_VOLUME = 60;
 const HERO_AUDIO_FADE_MS = 800;
 const HERO_CINEMATIC_DEADLINE_MS = 12_000;
@@ -82,8 +75,6 @@ const HeroSection = ({
   const [manualPosterMode, setManualPosterMode] = useState(false);
   const [catalogSource, setCatalogSource] = useState(initialMoviesList.length ? 'server' : 'loading');
   const [revealedGeneration, setRevealedGeneration] = useState(null);
-  const [curtainState, setCurtainState] = useState('closed');
-  const [curtainMounted, setCurtainMounted] = useState(false);
   const [cinematicRevealed, setCinematicRevealed] = useState(false);
   const [heroVisible, setHeroVisible] = useState(() => typeof IntersectionObserver === 'undefined');
   const [documentVisible, setDocumentVisible] = useState(() => !document.hidden);
@@ -116,11 +107,7 @@ const HeroSection = ({
   const carouselIntervalRef = useRef(null);
   const pendingVisualReadyRef = useRef(null);
   const pendingContinuationRef = useRef(false);
-  const pendingCurtainPreviewMsRef = useRef(CURTAIN_POSTER_PREVIEW_MS);
   const playerRef = useRef(null);
-  const cinematicTimersRef = useRef(new Set());
-  const curtainStateRef = useRef('closed');
-  const curtainOpenPendingRef = useRef(null);
   const verifiedPlaybackGenerationRef = useRef(null);
   const attemptStartedAtRef = useRef(null);
   const autoUnmutedGenerationRef = useRef(null);
@@ -133,7 +120,6 @@ const HeroSection = ({
     cancelFade();
   }, [cancelFade]);
 
-  const curtainEnabled = import.meta.env.VITE_HERO_CURTAIN_ENABLED !== 'false';
   const isMobileScreen = useMediaQuery('(max-width: 767px)');
   const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
   const saveData = useSaveData();
@@ -151,9 +137,7 @@ const HeroSection = ({
   const trailerFailed = machine.phase === HERO_PHASES.TRAILER_FAILED;
   const playbackPhase = trailerLoading || trailerActive;
   const verifiedVideoVisible = trailerActive && machine.visualReady && !machine.posterVisible && machine.playbackStatus === HERO_PLAYBACK_STATUS.STABLE;
-  const videoVisible = verifiedVideoVisible && (
-    cinematicRevealed || curtainState === 'opening' || curtainState === 'open'
-  );
+  const videoVisible = verifiedVideoVisible && cinematicRevealed;
   const mediaPosterVisible = machine.posterVisible || !videoVisible;
   const awaitingFirstReveal = playbackPhase && (
     revealedGeneration !== machine.generation || !cinematicRevealed
@@ -217,101 +201,15 @@ const HeroSection = ({
     endedHandoffTimerRef.current = null;
   }, []);
 
-  const clearCinematicTimers = useCallback(() => {
-    cinematicTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
-    cinematicTimersRef.current.clear();
-  }, []);
-
-  const scheduleCinematicTimer = useCallback((callback, delay) => {
-    const timerId = window.setTimeout(() => {
-      cinematicTimersRef.current.delete(timerId);
-      callback();
-    }, delay);
-    cinematicTimersRef.current.add(timerId);
-    return timerId;
-  }, []);
-
-  const prepareCinematicAttempt = useCallback(({ mountCurtain }) => {
-    clearCinematicTimers();
+  const prepareCinematicAttempt = useCallback(() => {
     cancelFade();
     playerRef.current = null;
-    const shouldMount = curtainEnabled && mountCurtain;
-    const nextCurtainState = shouldMount ? 'previewing' : 'open';
-    curtainStateRef.current = nextCurtainState;
-    curtainOpenPendingRef.current = null;
     verifiedPlaybackGenerationRef.current = null;
     attemptStartedAtRef.current = null;
-    setCurtainState(nextCurtainState);
-    setCurtainMounted(shouldMount);
-    setCinematicRevealed(!shouldMount);
-  }, [cancelFade, clearCinematicTimers, curtainEnabled]);
+    setCinematicRevealed(false);
+  }, [cancelFade]);
 
-  const beginCurtainOpening = useCallback((generation, { visualReadyNow = false } = {}) => {
-    if (generation !== generationRef.current) return;
-    if (!curtainEnabled) {
-      curtainStateRef.current = 'open';
-      setCurtainState('open');
-      setCinematicRevealed(true);
-      return;
-    }
-    const latestMachine = machineRef.current;
-    const playbackVerified = visualReadyNow || (
-      latestMachine.playbackStatus === HERO_PLAYBACK_STATUS.STABLE
-      && latestMachine.visualReady
-    );
-    if (
-      curtainStateRef.current !== 'closed'
-      || verifiedPlaybackGenerationRef.current !== generation
-      || !playbackVerified
-    ) {
-      curtainOpenPendingRef.current = generation;
-      return;
-    }
 
-    curtainOpenPendingRef.current = null;
-    curtainStateRef.current = 'opening';
-    setCurtainState('opening');
-
-    const curtainDuration = reducedMotion
-      ? CURTAIN_REDUCED_MOTION_DURATION_MS
-      : CURTAIN_OPEN_DURATION_MS;
-
-    scheduleCinematicTimer(() => {
-      if (generation !== generationRef.current || curtainStateRef.current !== 'opening') return;
-      curtainStateRef.current = 'open';
-      setCurtainState('open');
-      setCinematicRevealed(true);
-    }, curtainDuration);
-  }, [curtainEnabled, reducedMotion, scheduleCinematicTimer]);
-
-  const beginCurtainClosing = useCallback((generation, previewMs = CURTAIN_POSTER_PREVIEW_MS) => {
-    if (!curtainEnabled) return;
-    if (generation !== generationRef.current || curtainStateRef.current !== 'previewing') return;
-    const previewDelay = Number.isFinite(previewMs)
-      ? Math.max(0, Math.min(CURTAIN_POSTER_PREVIEW_MS, previewMs))
-      : CURTAIN_POSTER_PREVIEW_MS;
-
-    scheduleCinematicTimer(() => {
-      if (generation !== generationRef.current || curtainStateRef.current !== 'previewing') return;
-
-      curtainStateRef.current = 'closing';
-      setCurtainState('closing');
-
-      const curtainDuration = reducedMotion
-        ? CURTAIN_REDUCED_MOTION_DURATION_MS
-        : CURTAIN_CLOSE_DURATION_MS;
-
-      scheduleCinematicTimer(() => {
-        if (generation !== generationRef.current || curtainStateRef.current !== 'closing') return;
-        curtainStateRef.current = 'closed';
-        setCurtainState('closed');
-        scheduleCinematicTimer(() => {
-          if (generation !== generationRef.current || curtainStateRef.current !== 'closed') return;
-          beginCurtainOpening(generation);
-        }, CURTAIN_CLOSED_HOLD_MS);
-      }, curtainDuration);
-    }, previewDelay);
-  }, [beginCurtainOpening, curtainEnabled, reducedMotion, scheduleCinematicTimer]);
 
   const clearTransitionTimers = useCallback(() => {
     transitionTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
@@ -333,7 +231,7 @@ const HeroSection = ({
   ) => {
     abortMetadataRequests({ includePrefetch: false });
     clearPlaybackTimers();
-    prepareCinematicAttempt({ mountCurtain: false });
+    prepareCinematicAttempt();
     pendingVisualReadyRef.current = null;
     setRevealedGeneration(null);
     setPlaybackIntent(nextPlaybackIntent);
@@ -347,7 +245,6 @@ const HeroSection = ({
     // selected movie identity changes.
     const shouldContinue = pendingContinuationRef.current;
     pendingContinuationRef.current = false;
-    if (!shouldContinue) pendingCurtainPreviewMsRef.current = CURTAIN_POSTER_PREVIEW_MS;
     resetToPoster(currentMovieKey, {
       nextPlaybackIntent: shouldContinue
         ? HERO_PLAYBACK_INTENT.CONTINUATION
@@ -456,7 +353,6 @@ const HeroSection = ({
     source = 'manual',
     forceMetadata = false,
     retryCountOverride,
-    curtainPreviewMs = CURTAIN_POSTER_PREVIEW_MS,
   } = {}) => {
     if (attemptLockRef.current) return;
     const targetMovie = moviesRef.current[currentIndexRef.current];
@@ -487,11 +383,10 @@ const HeroSection = ({
 
     // Every attempt starts silently; audio is released only after the curtain
     // has fully opened, including attempts started by the manual CTA.
-    prepareCinematicAttempt({ mountCurtain: true });
+    prepareCinematicAttempt();
 
     const generation = nextGeneration();
     attemptStartedAtRef.current = getNow();
-    beginCurtainClosing(generation, curtainPreviewMs);
     attemptLockRef.current = { generation, movieKey: targetKey };
     dispatch({
       type: 'TRAILER_REQUESTED',
@@ -534,12 +429,11 @@ const HeroSection = ({
         now: getNow(),
       });
     }
-  }, [beginCurtainClosing, clearEndedHandoffTimer, clearPlaybackTimers, loadHeroVideoSource, nextGeneration, prepareCinematicAttempt, resetToPoster]);
+  }, [clearEndedHandoffTimer, clearPlaybackTimers, loadHeroVideoSource, nextGeneration, prepareCinematicAttempt, resetToPoster]);
 
   const switchMovie = useCallback((targetIndex, {
     animate = true,
     continueTrailer = false,
-    curtainPreviewMs = CURTAIN_POSTER_PREVIEW_MS,
     preservePrefetch = false,
   } = {}) => {
     const availableMovies = moviesRef.current;
@@ -548,11 +442,10 @@ const HeroSection = ({
     if (normalizedIndex === currentIndexRef.current) return;
 
     pendingContinuationRef.current = continueTrailer;
-    pendingCurtainPreviewMsRef.current = continueTrailer ? curtainPreviewMs : CURTAIN_POSTER_PREVIEW_MS;
     clearEndedHandoffTimer();
     abortMetadataRequests({ includePrefetch: !preservePrefetch });
     clearPlaybackTimers();
-    prepareCinematicAttempt({ mountCurtain: false });
+    prepareCinematicAttempt();
     pendingVisualReadyRef.current = null;
     setRevealedGeneration(null);
     setPlaybackIntent(continueTrailer ? HERO_PLAYBACK_INTENT.CONTINUATION : HERO_PLAYBACK_INTENT.NONE);
@@ -592,7 +485,6 @@ const HeroSection = ({
       abortMetadataRequests();
       clearEndedHandoffTimer();
       clearPlaybackTimers();
-      clearCinematicTimers();
       cancelFade();
       clearTransitionTimers();
       pendingVisualReadyRef.current = null;
@@ -600,7 +492,7 @@ const HeroSection = ({
       window.clearInterval(carouselIntervalRef.current);
       carouselIntervalRef.current = null;
     };
-  }, [abortMetadataRequests, cancelFade, clearCinematicTimers, clearEndedHandoffTimer, clearPlaybackTimers, clearTransitionTimers]);
+  }, [abortMetadataRequests, cancelFade, clearEndedHandoffTimer, clearPlaybackTimers, clearTransitionTimers]);
 
   useEffect(() => {
     let midnightTimerId;
@@ -671,7 +563,7 @@ const HeroSection = ({
         return;
       }
       abortMetadataRequests();
-      prepareCinematicAttempt({ mountCurtain: false });
+      prepareCinematicAttempt();
       const generation = nextGeneration();
       const nextKey = getHeroMovieKey(nextMovies[0], 0);
       currentIndexRef.current = 0;
@@ -817,7 +709,6 @@ const HeroSection = ({
   }, [cancelCurrentFade, dispatch]);
 
   useEffect(() => {
-    if (curtainState !== 'closed') return;
     if (!playerApiReady) return;
 
     const generation = generationRef.current;
@@ -878,7 +769,7 @@ const HeroSection = ({
 
     setMuted(false);
     setAudioStatus('ramping');
-  }, [curtainState, playerApiReady, verifiedPlaybackGeneration, fadeIn, fallbackToMuted, dispatch]);
+  }, [playerApiReady, verifiedPlaybackGeneration, fadeIn, fallbackToMuted, dispatch]);
 
   useEffect(() => {
     if (!muted) return undefined;
@@ -939,10 +830,8 @@ const HeroSection = ({
 
     let timerId;
     if (isUserInitiated) {
-      const curtainPreviewMs = pendingCurtainPreviewMsRef.current;
-      pendingCurtainPreviewMsRef.current = CURTAIN_POSTER_PREVIEW_MS;
       timerId = window.setTimeout(() => {
-        void startTrailerAttempt({ source: 'continuation', curtainPreviewMs });
+        void startTrailerAttempt({ source: 'continuation' });
       }, 0);
       return () => window.clearTimeout(timerId);
     }
@@ -1202,7 +1091,7 @@ const HeroSection = ({
     if (generation !== generationRef.current) return;
     abortMetadataRequests();
     clearPlaybackTimers();
-    prepareCinematicAttempt({ mountCurtain: false });
+    prepareCinematicAttempt();
     pendingVisualReadyRef.current = null;
     setRevealedGeneration(null);
     setMuted(true);
@@ -1302,10 +1191,8 @@ const HeroSection = ({
 
   const handleVisualReady = useCallback((payload) => {
     revealVerifiedVideo(payload);
-    if (curtainOpenPendingRef.current === payload.generation) {
-      beginCurtainOpening(payload.generation, { visualReadyNow: true });
-    }
-  }, [beginCurtainOpening, revealVerifiedVideo]);
+    setCinematicRevealed(true);
+  }, [revealVerifiedVideo]);
 
   useEffect(() => {
     if (!playerEnabled || machine.playerStatus === HERO_PLAYER_STATUS.READY) return undefined;
@@ -1319,11 +1206,6 @@ const HeroSection = ({
     }, YOUTUBE_READY_TIMEOUT_MS);
     return () => window.clearTimeout(timerId);
   }, [handlePlayerFailure, machine.generation, machine.playerStatus, playerEnabled]);
-
-  const handleCurtainRevealComplete = useCallback(() => {
-    if (curtainStateRef.current !== 'open') return;
-    setCurtainMounted(false);
-  }, []);
 
 
 
@@ -1377,7 +1259,6 @@ const HeroSection = ({
       switchMovie(nextIndex, {
         animate: true,
         continueTrailer: true,
-        curtainPreviewMs: CURTAIN_PREFETCHED_PREVIEW_MS,
         preservePrefetch: true,
       });
     }, HERO_ENDED_POSTER_HOLD_MS);
@@ -1510,12 +1391,6 @@ const HeroSection = ({
         )}
       </HeroMedia>
 
-      {curtainMounted && (
-        <CinematicCurtain
-          state={curtainState}
-          onRevealComplete={handleCurtainRevealComplete}
-        />
-      )}
 
       {isTransitioning && machine.posterVisible && (
         <>
