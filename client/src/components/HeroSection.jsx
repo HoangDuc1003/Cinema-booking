@@ -42,12 +42,12 @@ const HERO_POSTER_SWAP_DELAY_MS = 400;
 const HERO_POSTER_TRANSITION_MS = 1_200;
 const HERO_AUTO_CAROUSEL_MS = 5_000;
 const HERO_ENDED_POSTER_HOLD_MS = 1_000;
-const CURTAIN_POSTER_PREVIEW_MS = 400;
+const CURTAIN_POSTER_PREVIEW_MS = 200;
 const CURTAIN_PREFETCHED_PREVIEW_MS = Math.max(0, CURTAIN_POSTER_PREVIEW_MS - HERO_ENDED_POSTER_HOLD_MS);
-const CURTAIN_CLOSE_DURATION_MS = 1_200;
-const CURTAIN_CLOSED_HOLD_MS = 400;
-const CURTAIN_OPEN_DURATION_MS = 600;
-const CURTAIN_REDUCED_MOTION_DURATION_MS = 200;
+const CURTAIN_CLOSE_DURATION_MS = 400;
+const CURTAIN_CLOSED_HOLD_MS = 300;
+const CURTAIN_OPEN_DURATION_MS = 400;
+const CURTAIN_REDUCED_MOTION_DURATION_MS = 150;
 const HERO_AUDIO_VOLUME = 60;
 const HERO_AUDIO_FADE_MS = 800;
 const HERO_CINEMATIC_DEADLINE_MS = 12_000;
@@ -133,7 +133,7 @@ const HeroSection = ({
     cancelFade();
   }, [cancelFade]);
 
-  const curtainEnabled = import.meta.env.VITE_HERO_CURTAIN_ENABLED === 'true';
+  const curtainEnabled = import.meta.env.VITE_HERO_CURTAIN_ENABLED !== 'false';
   const isMobileScreen = useMediaQuery('(max-width: 767px)');
   const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
   const saveData = useSaveData();
