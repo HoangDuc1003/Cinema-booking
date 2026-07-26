@@ -31,7 +31,6 @@ const MovieDetails = () => {
   const navigate = useNavigate();
   const [isFavorited, setIsFavorited] = useState(false);
   const [showTrailerSection, setShowTrailerSection] = useState(false);
-  const [ambientLoaded, setAmbientLoaded] = useState(false);
 
   const toggleFavorite = useCallback((e) => {
     e.stopPropagation();
@@ -117,7 +116,7 @@ const MovieDetails = () => {
       setRecommendationError('');
 
       try {
-        const data = await fetchSimilarMovies(id, { signal: controller.signal, limit: 18 });
+        const data = await fetchSimilarMovies(id, { signal: controller.signal, limit: 10 });
         if (controller.signal.aborted) return;
         const relatedMovies = Array.isArray(data) ? data : [];
         setMovies(relatedMovies);
@@ -147,11 +146,6 @@ const MovieDetails = () => {
     [show?.release_date]
   );
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setAmbientLoaded(false);
-  }, [imageUrl]);
-
   const genreNames = useMemo(() =>
     show?.genres?.map(g => g.name).join(", ") || '',
     [show?.genres]
@@ -170,16 +164,22 @@ const MovieDetails = () => {
     const carousel = document.getElementById('similar-movies-carousel');
     if (!carousel) return;
     
-    let scrollAmount = 0;
-    const step = 1; 
-    const intervalTime = 30; 
+    const intervalTime = 3000; // 3 seconds
     
     const scrollInterval = setInterval(() => {
-      if (carousel.matches(':hover')) return; 
+      if (carousel.matches(':hover')) return;
       
-      carousel.scrollLeft += step;
-      if (carousel.scrollLeft >= (carousel.scrollWidth - carousel.clientWidth - 1)) {
-        carousel.scrollLeft = 0;
+      const firstChild = carousel.children[0];
+      if (!firstChild) return;
+      
+      const itemWidth = firstChild.getBoundingClientRect().width + 16; // item width + 16px gap
+      const jumpDistance = itemWidth * 4;
+      const maxScroll = carousel.scrollWidth - carousel.clientWidth;
+      
+      if (carousel.scrollLeft >= maxScroll - 20) {
+        carousel.scrollTo({ left: 0, behavior: 'smooth' });
+      } else {
+        carousel.scrollBy({ left: jumpDistance, behavior: 'smooth' });
       }
     }, intervalTime);
     
@@ -202,18 +202,7 @@ const MovieDetails = () => {
               alt=""
               draggable="false"
               decoding="async"
-              onLoad={() => setAmbientLoaded(true)}
-              onError={(event) => {
-                event.currentTarget.hidden = true;
-                setAmbientLoaded(false);
-              }}
-              className={[
-                "absolute inset-[-8%] h-[116%] w-[116%]",
-                "scale-[1.06] object-cover object-center blur-[10px]",
-                "transition-opacity duration-500 ease-out",
-                "motion-reduce:transition-none",
-                ambientLoaded ? "opacity-30" : "opacity-0",
-              ].join(" ")}
+              className="absolute inset-0 w-full h-full scale-110 object-cover object-center blur-[12px] opacity-50 transition-opacity duration-500 ease-out"
             />
           )}
 
@@ -221,10 +210,10 @@ const MovieDetails = () => {
             className="
               absolute left-[-28%] top-[4%]
               aspect-square w-[320px]
-              rounded-full opacity-[0.10] blur-[80px]
+              rounded-full opacity-[0.35] blur-[80px]
               md:left-[-8%] md:top-[8%]
               md:w-[min(34vw,520px)]
-              md:opacity-[0.10] md:blur-[90px]
+              md:opacity-[0.35] md:blur-[90px]
             "
             style={{
               background:
@@ -236,10 +225,10 @@ const MovieDetails = () => {
             className="
               absolute bottom-[-12%] right-[-35%]
               aspect-square w-[360px]
-              rounded-full opacity-[0.10] blur-[80px]
+              rounded-full opacity-[0.35] blur-[80px]
               md:bottom-[-8%] md:right-[-12%]
               md:w-[min(38vw,600px)]
-              md:opacity-[0.10] md:blur-[90px]
+              md:opacity-[0.35] md:blur-[90px]
             "
             style={{
               background:
@@ -247,12 +236,13 @@ const MovieDetails = () => {
             }}
           />
 
-          <div className="absolute inset-0 bg-gradient-to-r from-[#03060a]/95 via-[#03060a]/70 to-[#03060a]/90" />
+          {/* Lightened overlays so background is actually visible */}
+          <div className="absolute inset-0 bg-gradient-to-r from-[#03060a]/80 via-[#03060a]/40 to-[#03060a]/80" />
 
           <div className="absolute inset-0 bg-gradient-to-b from-[#03060a]/20 via-transparent to-[#03060a]" />
         </div>
 
-      <div className="relative z-10 px-6 md:px-6 lg:px-40 pt-30 pb-12">
+      <div className="relative z-10 px-6 md:px-6 lg:px-40 pt-[140px] pb-12">
           <div className='flex flex-col md:flex-row gap-8 max-w-6xl mx-auto'>
             <div className="relative overflow-hidden rounded-xl cursor-pointer group w-auto h-130 flex-shrink-0">
               <img
@@ -323,78 +313,74 @@ const MovieDetails = () => {
         {showTrailerSection && (
           <TrailerSection sectionId="movie-trailers" featuredMovie={show} movieOnly />
         )}
+      </div>
 
-        <div className="max-w-6xl mx-auto w-full">
-          <p className='relative text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-2 mt-20'>You May Also Like</p>
-          <div className='relative overflow-hidden mb-10' />
-        </div>
+      <section className="relative z-10 w-full mt-16 pb-10">
+        <div className="mx-auto w-full max-w-[1440px] px-6 lg:px-10 xl:px-12">
+          <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-8">
+            You May Also Like
+          </h2>
 
-        <div className="max-w-6xl mx-auto w-full" aria-live="polite">
-          {recommendationStatus === 'loading' && (
-            <div className="grid sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-6">
-              {Array.from({ length: 4 }, (_, index) => (
-                <div key={index} className="catalog-card-skeleton" aria-hidden="true">
-                  <span className="catalog-card-skeleton__art" />
-                </div>
-              ))}
-              <span className="sr-only">Loading similar movies</span>
-            </div>
-          )}
-
-          {recommendationStatus === 'error' && (
-            <div className="catalog-state-panel" role="alert">
-              <h2>Similar movies are unavailable</h2>
-              <p>{recommendationError}</p>
-              <button
-                type="button"
-                className="catalog-state-panel__button"
-                onClick={() => setRecommendationReloadToken((value) => value + 1)}
-              >
-                <RefreshCw aria-hidden="true" />
-                Try again
-              </button>
-            </div>
-          )}
-
-          {recommendationStatus === 'empty' && (
-            <div className="catalog-state-panel" role="status">
-              <h2>No similar movies yet</h2>
-              <p>We could not find another matching title with usable artwork.</p>
-            </div>
-          )}
-
-          {recommendationStatus === 'ready' && (
-            <div className="relative w-full overflow-hidden">
-              <div 
-                id="similar-movies-carousel"
-                className="flex items-center gap-4 overflow-x-auto snap-x snap-mandatory scroll-smooth no-scrollbar pb-4"
-                style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
-              >
-                {movies.map((movie) => (
-                  <div key={movie._id || movie.id} className="snap-start flex-shrink-0 w-[45%] sm:w-[30%] md:w-[22%] lg:w-[15%]">
-                    <MovieCard movie={movie} />
+          <div aria-live="polite">
+            {recommendationStatus === 'loading' && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-6">
+                {Array.from({ length: 5 }, (_, index) => (
+                  <div key={index} className="catalog-card-skeleton" aria-hidden="true">
+                    <span className="catalog-card-skeleton__art" />
                   </div>
                 ))}
+                <span className="sr-only">Loading similar movies</span>
               </div>
-            </div>
-          )}
-        </div>
+            )}
 
-        <div className='flex justify-center mt-10'>
-          <button
-            onClick={() => {
-              navigate('/movies');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-            className="group flex items-center gap-3 px-12 py-6 bg-linear-to-r from-primary to-primary-dull
-              hover:from-primary-dull hover:to-primary text-white font-semibold rounded-full shadow-lg shadow-primary/30
-              hover:shadow-xl hover:shadow-primary/60 hover:scale-105 active:scale-95 transition-all duration-300 border
-              border-primary/30 hover:border-primary/60 relative overflow-hidden mb-5"
-          >
-            Show more
-          </button>
+            {recommendationStatus === 'error' && (
+              <div className="catalog-state-panel" role="alert">
+                <h2>Similar movies are unavailable</h2>
+                <p>{recommendationError}</p>
+                <button
+                  type="button"
+                  className="catalog-state-panel__button"
+                  onClick={() => setRecommendationReloadToken((value) => value + 1)}
+                >
+                  <RefreshCw aria-hidden="true" />
+                  Try again
+                </button>
+              </div>
+            )}
+
+            {recommendationStatus === 'empty' && (
+              <div className="catalog-state-panel" role="status">
+                <h2>No similar movies yet</h2>
+                <p>We could not find another matching title with usable artwork.</p>
+              </div>
+            )}
+
+            {recommendationStatus === 'ready' && (
+              <MovieGrid
+                movies={movies}
+                columns="grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
+                animated
+                staggerDelay={80}
+              />
+            )}
+          </div>
+
+          <div className="flex justify-center mt-12">
+            <button
+              onClick={() => {
+                navigate('/movies');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className="group flex items-center gap-3 px-12 py-6 bg-linear-to-r from-primary to-primary-dull
+                hover:from-primary-dull hover:to-primary text-white font-semibold rounded-full shadow-lg shadow-primary/30
+                hover:shadow-xl hover:shadow-primary/60 hover:scale-105 active:scale-95 transition-all duration-300 border
+                border-primary/30 hover:border-primary/60 relative overflow-hidden"
+            >
+              Show more
+            </button>
+          </div>
         </div>
-      </div>
+      </section>
     </main>
   ) : (
     <Loading />

@@ -280,7 +280,7 @@ body {
   transform: perspective(900px) translate3d(0, var(--movie-card-lift), 0)
     rotateX(var(--movie-card-rotate-x)) rotateY(var(--movie-card-rotate-y));
   transform-style: preserve-3d;
-  transition: transform var(--nitro-motion-slow) var(--nitro-ease-out), border-color var(--nitro-motion-base) var(--nitro-ease-out), box-shadow var(--nitro-motion-base) var(--nitro-ease-out);
+  transition: transform 500ms cubic-bezier(0.16, 1, 0.3, 1), border-color 400ms ease, box-shadow 400ms ease;
 }
 
 .movie-card__main { position: absolute; z-index: 1; inset: 0; color: white; }
@@ -296,7 +296,7 @@ body {
 .movie-card__poster {
   object-fit: cover;
   transform: scale(1.002);
-  transition: transform var(--nitro-motion-slow) var(--nitro-ease-out);
+  transition: transform 500ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .movie-card__fallback {
