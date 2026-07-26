@@ -9,6 +9,7 @@ import BlurCircle from '../components/BlurCircle'
 import { StarIcon, Heart, PlayCircleIcon, RefreshCw } from 'lucide-react'
 import timeFormat from '../lib/timeFormat'
 import MovieGrid from '../components/MovieGrid';
+import MovieCard from '../components/MovieCard';
 import DateSelect from '../components/DateSelect';
 import Loading from '../components/Loading';
 import TrailerSection from '../components/TrailerSection';
@@ -116,7 +117,7 @@ const MovieDetails = () => {
       setRecommendationError('');
 
       try {
-        const data = await fetchSimilarMovies(id, { signal: controller.signal, limit: 4 });
+        const data = await fetchSimilarMovies(id, { signal: controller.signal, limit: 18 });
         if (controller.signal.aborted) return;
         const relatedMovies = Array.isArray(data) ? data : [];
         setMovies(relatedMovies);
@@ -148,6 +149,7 @@ const MovieDetails = () => {
   );
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setAmbientLoaded(false);
   }, [imageUrl]);
 
@@ -163,16 +165,37 @@ const MovieDetails = () => {
     }, 80);
   };
 
+  useEffect(() => {
+    if (recommendationStatus !== 'ready' || movies.length === 0) return;
+    
+    const carousel = document.getElementById('similar-movies-carousel');
+    if (!carousel) return;
+    
+    let scrollAmount = 0;
+    const step = 1; 
+    const intervalTime = 30; 
+    
+    const scrollInterval = setInterval(() => {
+      if (carousel.matches(':hover')) return; 
+      
+      carousel.scrollLeft += step;
+      if (carousel.scrollLeft >= (carousel.scrollWidth - carousel.clientWidth - 1)) {
+        carousel.scrollLeft = 0;
+      }
+    }, intervalTime);
+    
+    return () => clearInterval(scrollInterval);
+  }, [recommendationStatus, movies.length]);
+
   if (isLoading) return <Loading />;
   if (hasError) return <Loading message="Error loading movie details..." />;
 
   return show ? (
-    <main className='min-h-screen bg-black pb-20'>
-      <section className="relative isolate overflow-hidden bg-[#03060a]">
-        <div
-          className="pointer-events-none absolute inset-0 z-0 overflow-hidden"
-          aria-hidden="true"
-        >
+    <main className='relative isolate min-h-screen bg-[#03060a] pb-20'>
+      <div
+        className="pointer-events-none absolute inset-0 z-0 overflow-hidden"
+        aria-hidden="true"
+      >
           {imageUrl && (
             <img
               key={imageUrl}
@@ -199,10 +222,10 @@ const MovieDetails = () => {
             className="
               absolute left-[-28%] top-[4%]
               aspect-square w-[320px]
-              rounded-full opacity-[0.14] blur-[80px]
+              rounded-full opacity-[0.10] blur-[80px]
               md:left-[-8%] md:top-[8%]
               md:w-[min(34vw,520px)]
-              md:opacity-[0.18] md:blur-[90px]
+              md:opacity-[0.10] md:blur-[90px]
             "
             style={{
               background:
@@ -214,10 +237,10 @@ const MovieDetails = () => {
             className="
               absolute bottom-[-12%] right-[-35%]
               aspect-square w-[360px]
-              rounded-full opacity-[0.14] blur-[80px]
+              rounded-full opacity-[0.10] blur-[80px]
               md:bottom-[-8%] md:right-[-12%]
               md:w-[min(38vw,600px)]
-              md:opacity-[0.18] md:blur-[90px]
+              md:opacity-[0.10] md:blur-[90px]
             "
             style={{
               background:
@@ -227,10 +250,10 @@ const MovieDetails = () => {
 
           <div className="absolute inset-0 bg-gradient-to-r from-[#03060a]/95 via-[#03060a]/80 to-[#03060a]/90" />
 
-          <div className="absolute inset-0 bg-gradient-to-b from-[#03060a]/20 via-transparent to-[#03060a]/95" />
-        </div>
+        <div className="absolute inset-0 bg-gradient-to-b from-[#03060a]/20 via-[#03060a]/80 to-[#03060a]" />
+      </div>
 
-        <div className="relative z-10 px-6 md:px-6 lg:px-40 pt-30 pb-12">
+      <div className="relative z-10 px-6 md:px-6 lg:px-40 pt-30 pb-12">
           <div className='flex flex-col md:flex-row gap-8 max-w-6xl mx-auto'>
             <div className="relative overflow-hidden rounded-xl cursor-pointer group w-auto h-130 flex-shrink-0">
               <img
@@ -288,9 +311,8 @@ const MovieDetails = () => {
             </div>
           </div>
         </div>
-      </section>
 
-      <div className="px-6 md:px-6 lg:px-40 mt-10">
+      <div className="relative z-10 px-6 md:px-6 lg:px-40 mt-10">
         <DateSelect
           id={show._id || show.id}
           availableDates={availableDates}
@@ -343,12 +365,19 @@ const MovieDetails = () => {
           )}
 
           {recommendationStatus === 'ready' && (
-            <MovieGrid
-              movies={movies}
-              columns="sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-              animated
-              staggerDelay={100}
-            />
+            <div className="relative w-full overflow-hidden">
+              <div 
+                id="similar-movies-carousel"
+                className="flex items-center gap-4 overflow-x-auto snap-x snap-mandatory scroll-smooth no-scrollbar pb-4"
+                style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+              >
+                {movies.map((movie) => (
+                  <div key={movie._id || movie.id} className="snap-start flex-shrink-0 w-[45%] sm:w-[30%] md:w-[22%] lg:w-[15%]">
+                    <MovieCard movie={movie} />
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
         </div>
 
