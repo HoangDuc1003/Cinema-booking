@@ -141,13 +141,6 @@ const MovieDetails = () => {
     return `https://image.tmdb.org/t/p/original${path}`;
   }, [show?.poster_path]);
 
-  const backdropUrl = useMemo(() => {
-    if (!show?.backdrop_path) return imageUrl;
-    const path = show.backdrop_path;
-    if (path.startsWith('http')) return path;
-    return `https://image.tmdb.org/t/p/original${path}`;
-  }, [show?.backdrop_path, imageUrl]);
-
   // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const releaseYear = useMemo(() =>
     show?.release_date ? show.release_date.split("-")[0] : 'N/A',
@@ -157,7 +150,7 @@ const MovieDetails = () => {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setAmbientLoaded(false);
-  }, [backdropUrl]);
+  }, [imageUrl]);
 
   const genreNames = useMemo(() =>
     show?.genres?.map(g => g.name).join(", ") || '',
@@ -201,11 +194,11 @@ const MovieDetails = () => {
       <div
         className="pointer-events-none absolute inset-0 z-0 overflow-hidden"
         aria-hidden="true"
-      >
-          {backdropUrl && (
+        >
+          {imageUrl && (
             <img
-              key={backdropUrl}
-              src={backdropUrl}
+              key={imageUrl}
+              src={imageUrl}
               alt=""
               draggable="false"
               decoding="async"
@@ -216,10 +209,10 @@ const MovieDetails = () => {
               }}
               className={[
                 "absolute inset-[-8%] h-[116%] w-[116%]",
-                "scale-[1.06] object-cover object-center blur-[12px]",
+                "scale-[1.06] object-cover object-center blur-[10px]",
                 "transition-opacity duration-500 ease-out",
                 "motion-reduce:transition-none",
-                ambientLoaded ? "opacity-[0.10]" : "opacity-0",
+                ambientLoaded ? "opacity-30" : "opacity-0",
               ].join(" ")}
             />
           )}
@@ -254,10 +247,10 @@ const MovieDetails = () => {
             }}
           />
 
-          <div className="absolute inset-0 bg-gradient-to-r from-[#03060a]/95 via-[#03060a]/80 to-[#03060a]/90" />
+          <div className="absolute inset-0 bg-gradient-to-r from-[#03060a]/95 via-[#03060a]/70 to-[#03060a]/90" />
 
-        <div className="absolute inset-0 bg-gradient-to-b from-[#03060a]/20 via-[#03060a]/80 to-[#03060a]" />
-      </div>
+          <div className="absolute inset-0 bg-gradient-to-b from-[#03060a]/20 via-transparent to-[#03060a]" />
+        </div>
 
       <div className="relative z-10 px-6 md:px-6 lg:px-40 pt-30 pb-12">
           <div className='flex flex-col md:flex-row gap-8 max-w-6xl mx-auto'>
