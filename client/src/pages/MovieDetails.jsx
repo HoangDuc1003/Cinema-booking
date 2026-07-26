@@ -1,5 +1,4 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react'
-import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   fetchMovieDetails,
