@@ -23,47 +23,29 @@ const setupMockSessionStorage = () => {
     return store;
 };
 
-test('reloads during the same half-day keep the same Hero slice', () => {
-    const earlyMorning = new Date(2026, 6, 22, 8, 0);
-    const lateMorning = new Date(2026, 6, 22, 11, 59);
+test('reloads during the same 48-hour window keep the same Hero slice', () => {
+    const earlyTime = new Date(1784700000000);
+    const sameWindowTime = new Date(1784700000000 + 3600000);
 
-    assert.equal(getClientHeroDayKey(earlyMorning), '2026-07-22-AM');
-    assert.equal(getClientHeroDayKey(lateMorning), '2026-07-22-AM');
-    assert.equal(resolveClientHeroOffset(earlyMorning), resolveClientHeroOffset(lateMorning));
+    assert.equal(getClientHeroDayKey(earlyTime), getClientHeroDayKey(sameWindowTime));
+    assert.equal(resolveClientHeroOffset(earlyTime), resolveClientHeroOffset(sameWindowTime));
 });
 
-test('crossing noon advances the Hero slice', () => {
-    const beforeNoon = new Date(2026, 6, 22, 11, 59, 59, 999);
-    const afterNoon = new Date(2026, 6, 22, 12, 0, 0, 0);
+test('crossing 48-hour period advances the Hero slice', () => {
+    const periodMs = 48 * 60 * 60 * 1000;
+    const endOfPeriod = new Date(periodMs - 1);
+    const startOfNextPeriod = new Date(periodMs + 1);
 
-    assert.equal(getClientHeroDayKey(beforeNoon), '2026-07-22-AM');
-    assert.equal(getClientHeroDayKey(afterNoon), '2026-07-22-PM');
     assert.equal(
-        resolveClientHeroOffset(afterNoon),
-        (resolveClientHeroOffset(beforeNoon) + 1) % 30,
+        resolveClientHeroOffset(startOfNextPeriod),
+        (resolveClientHeroOffset(endOfPeriod) + 1) % 30,
     );
 });
 
-test('crossing local midnight advances exactly one Hero slice', () => {
-    const beforeMidnight = new Date(2026, 6, 22, 23, 59, 59, 999);
-    const afterMidnight = new Date(2026, 6, 23, 0, 0, 0, 0);
-
-    assert.equal(getClientHeroDayKey(beforeMidnight), '2026-07-22-PM');
-    assert.equal(getClientHeroDayKey(afterMidnight), '2026-07-23-AM');
-    assert.equal(
-        resolveClientHeroOffset(afterMidnight),
-        (resolveClientHeroOffset(beforeMidnight) + 1) % 30,
-    );
-});
-
-test('millisecondsUntilNextHeroRotation targets noon from morning', () => {
-    const morning = new Date(2026, 6, 22, 11, 59, 59, 500);
-    assert.equal(millisecondsUntilNextHeroRotation(morning), 500);
-});
-
-test('millisecondsUntilNextHeroRotation targets midnight from evening', () => {
-    const evening = new Date(2026, 6, 22, 23, 59, 59, 500);
-    assert.equal(millisecondsUntilNextHeroRotation(evening), 500);
+test('millisecondsUntilNextHeroRotation targets rotation end boundary', () => {
+    const periodMs = 48 * 60 * 60 * 1000;
+    const nearBoundary = new Date(periodMs - 500);
+    assert.equal(millisecondsUntilNextHeroRotation(nearBoundary), 500);
 });
 
 test('Hero cache hydrates only current half-day server movies', () => {

@@ -516,23 +516,23 @@
 }
 
 .hero-curtain-overlay.is-closing .hero-curtain-left {
-  animation: hero-curtain-close-left 4000ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: hero-curtain-close-left 1200ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .hero-curtain-overlay.is-closing .hero-curtain-right {
-  animation: hero-curtain-close-right 4000ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: hero-curtain-close-right 1200ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .hero-curtain-overlay.is-closing .hero-curtain-valance {
-  animation: hero-curtain-valance-in 650ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: hero-curtain-valance-in 500ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .hero-curtain-overlay.is-opening .hero-curtain-left {
-  animation: hero-curtain-open-left 1000ms cubic-bezier(0.77, 0, 0.175, 1) forwards;
+  animation: hero-curtain-open-left 600ms cubic-bezier(0.77, 0, 0.175, 1) forwards;
 }
 
 .hero-curtain-overlay.is-opening .hero-curtain-right {
-  animation: hero-curtain-open-right 1000ms cubic-bezier(0.77, 0, 0.175, 1) forwards;
+  animation: hero-curtain-open-right 600ms cubic-bezier(0.77, 0, 0.175, 1) forwards;
 }
 
 .hero-curtain-overlay.is-open .hero-curtain-left { transform: translate3d(-100%, 0, 0); }

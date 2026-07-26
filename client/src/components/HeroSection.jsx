@@ -5,6 +5,7 @@ import { fetchHomeHero, fetchMovieTrailers } from '../services/tmdb';
 import {
   getClientHeroDayKey,
   millisecondsUntilNextHeroRotation,
+  millisecondsUntilRotationEnd,
 } from '../services/heroCatalogOffset';
 import HeroContent from './hero/HeroContent';
 import CinematicCurtain from './hero/CinematicCurtain';
@@ -41,11 +42,11 @@ const HERO_POSTER_SWAP_DELAY_MS = 400;
 const HERO_POSTER_TRANSITION_MS = 1_200;
 const HERO_AUTO_CAROUSEL_MS = 5_000;
 const HERO_ENDED_POSTER_HOLD_MS = 1_000;
-const CURTAIN_POSTER_PREVIEW_MS = 2_000;
+const CURTAIN_POSTER_PREVIEW_MS = 400;
 const CURTAIN_PREFETCHED_PREVIEW_MS = Math.max(0, CURTAIN_POSTER_PREVIEW_MS - HERO_ENDED_POSTER_HOLD_MS);
-const CURTAIN_CLOSE_DURATION_MS = 4_000;
-const CURTAIN_CLOSED_HOLD_MS = 1_000;
-const CURTAIN_OPEN_DURATION_MS = 1_000;
+const CURTAIN_CLOSE_DURATION_MS = 1_200;
+const CURTAIN_CLOSED_HOLD_MS = 400;
+const CURTAIN_OPEN_DURATION_MS = 600;
 const CURTAIN_REDUCED_MOTION_DURATION_MS = 200;
 const HERO_AUDIO_VOLUME = 60;
 const HERO_AUDIO_FADE_MS = 800;
@@ -76,6 +77,7 @@ const HeroSection = ({
   const [heroReloadToken, setHeroReloadToken] = useState(0);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [playbackIntent, setPlaybackIntent] = useState(HERO_PLAYBACK_INTENT.NONE);
+  const [heroRotation, setHeroRotation] = useState(null);
   const [muted, setMuted] = useState(true);
   const [manualPosterMode, setManualPosterMode] = useState(false);
   const [catalogSource, setCatalogSource] = useState(initialMoviesList.length ? 'server' : 'loading');
@@ -131,6 +133,7 @@ const HeroSection = ({
     cancelFade();
   }, [cancelFade]);
 
+  const curtainEnabled = import.meta.env.VITE_HERO_CURTAIN_ENABLED === 'true';
   const isMobileScreen = useMediaQuery('(max-width: 767px)');
   const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
   const saveData = useSaveData();
@@ -147,7 +150,7 @@ const HeroSection = ({
   const trailerLoading = machine.phase === HERO_PHASES.TRAILER_LOADING;
   const trailerFailed = machine.phase === HERO_PHASES.TRAILER_FAILED;
   const playbackPhase = trailerLoading || trailerActive;
-  const verifiedVideoVisible = trailerActive && machine.visualReady && !machine.posterVisible;
+  const verifiedVideoVisible = trailerActive && machine.visualReady && !machine.posterVisible && machine.playbackStatus === HERO_PLAYBACK_STATUS.STABLE;
   const videoVisible = verifiedVideoVisible && (
     cinematicRevealed || curtainState === 'opening' || curtainState === 'open'
   );
@@ -232,18 +235,25 @@ const HeroSection = ({
     clearCinematicTimers();
     cancelFade();
     playerRef.current = null;
-    const nextCurtainState = mountCurtain ? 'previewing' : 'closed';
+    const shouldMount = curtainEnabled && mountCurtain;
+    const nextCurtainState = shouldMount ? 'previewing' : 'open';
     curtainStateRef.current = nextCurtainState;
     curtainOpenPendingRef.current = null;
     verifiedPlaybackGenerationRef.current = null;
     attemptStartedAtRef.current = null;
     setCurtainState(nextCurtainState);
-    setCurtainMounted(mountCurtain);
-    setCinematicRevealed(false);
-  }, [cancelFade, clearCinematicTimers]);
+    setCurtainMounted(shouldMount);
+    setCinematicRevealed(!shouldMount);
+  }, [cancelFade, clearCinematicTimers, curtainEnabled]);
 
   const beginCurtainOpening = useCallback((generation, { visualReadyNow = false } = {}) => {
     if (generation !== generationRef.current) return;
+    if (!curtainEnabled) {
+      curtainStateRef.current = 'open';
+      setCurtainState('open');
+      setCinematicRevealed(true);
+      return;
+    }
     const latestMachine = machineRef.current;
     const playbackVerified = visualReadyNow || (
       latestMachine.playbackStatus === HERO_PLAYBACK_STATUS.STABLE
@@ -272,9 +282,10 @@ const HeroSection = ({
       setCurtainState('open');
       setCinematicRevealed(true);
     }, curtainDuration);
-  }, [reducedMotion, scheduleCinematicTimer]);
+  }, [curtainEnabled, reducedMotion, scheduleCinematicTimer]);
 
   const beginCurtainClosing = useCallback((generation, previewMs = CURTAIN_POSTER_PREVIEW_MS) => {
+    if (!curtainEnabled) return;
     if (generation !== generationRef.current || curtainStateRef.current !== 'previewing') return;
     const previewDelay = Number.isFinite(previewMs)
       ? Math.max(0, Math.min(CURTAIN_POSTER_PREVIEW_MS, previewMs))
@@ -300,7 +311,7 @@ const HeroSection = ({
         }, CURTAIN_CLOSED_HOLD_MS);
       }, curtainDuration);
     }, previewDelay);
-  }, [beginCurtainOpening, reducedMotion, scheduleCinematicTimer]);
+  }, [beginCurtainOpening, curtainEnabled, reducedMotion, scheduleCinematicTimer]);
 
   const clearTransitionTimers = useCallback(() => {
     transitionTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
@@ -690,6 +701,9 @@ const HeroSection = ({
           if (data?.source !== 'server') {
             throw new Error('Hero response did not come from the server.');
           }
+          if (data?.rotation) {
+            setHeroRotation(data.rotation);
+          }
           const orderedMovies = Array.isArray(data.movies)
             ? data.movies.slice(0, HERO_MAX_MOVIES)
             : [];
@@ -731,6 +745,32 @@ const HeroSection = ({
     void loadHero();
     return () => controller.abort();
   }, [abortMetadataRequests, heroDayKey, heroReloadToken, nextGeneration, prepareCinematicAttempt]);
+
+  useEffect(() => {
+    const endsAt = heroRotation?.endsAt;
+    if (!endsAt) return undefined;
+
+    const delayMs = millisecondsUntilRotationEnd(endsAt);
+    if (delayMs == null) return undefined;
+
+    const timerId = window.setTimeout(() => {
+      setHeroReloadToken((token) => token + 1);
+    }, delayMs + 250);
+
+    return () => window.clearTimeout(timerId);
+  }, [heroRotation?.endsAt, heroRotation?.key]);
+
+  useEffect(() => {
+    const handleRotationVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      const endsAtMs = Date.parse(heroRotation?.endsAt || '');
+      if (Number.isFinite(endsAtMs) && Date.now() >= endsAtMs) {
+        setHeroReloadToken((token) => token + 1);
+      }
+    };
+    document.addEventListener('visibilitychange', handleRotationVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleRotationVisibilityChange);
+  }, [heroRotation?.endsAt]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -793,12 +833,11 @@ const HeroSection = ({
     const token = ++audioFadeTokenRef.current;
     autoUnmutedGenerationRef.current = generation;
 
-    let started = false;
     try {
       player.setVolume?.(0);
       player.unMute?.();
 
-      started = fadeIn(player, {
+      const ok = fadeIn(player, {
         from: 0,
         to: HERO_AUDIO_VOLUME,
         duration: HERO_AUDIO_FADE_MS,
@@ -807,16 +846,16 @@ const HeroSection = ({
           if (generation !== generationRef.current) return;
 
           const playingState = window.YT?.PlayerState?.PLAYING;
-          let soundEnabled = false;
+          let soundActive;
           try {
-            soundEnabled = player.isMuted?.() === false &&
-                           player.getVolume?.() > 0 &&
-                           (playingState == null || player.getPlayerState?.() === playingState);
+            soundActive = player.isMuted?.() === false &&
+                          player.getVolume?.() > 0 &&
+                          (playingState == null || player.getPlayerState?.() === playingState);
           } catch {
-            soundEnabled = false;
+            soundActive = false;
           }
 
-          if (!soundEnabled) {
+          if (!soundActive) {
             fallbackToMuted({ player, generation, token });
             return;
           }
@@ -827,12 +866,12 @@ const HeroSection = ({
         },
         onError: () => fallbackToMuted({ player, generation, token }),
       });
-    } catch {
-      fallbackToMuted({ player, generation, token });
-      return;
-    }
 
-    if (!started) {
+      if (!ok) {
+        fallbackToMuted({ player, generation, token });
+        return;
+      }
+    } catch {
       fallbackToMuted({ player, generation, token });
       return;
     }
@@ -840,6 +879,33 @@ const HeroSection = ({
     setMuted(false);
     setAudioStatus('ramping');
   }, [curtainState, playerApiReady, verifiedPlaybackGeneration, fadeIn, fallbackToMuted, dispatch]);
+
+  useEffect(() => {
+    if (!muted) return undefined;
+    const handleFirstInteraction = () => {
+      const player = playerRef.current;
+      const generation = generationRef.current;
+      const override = manualAudioOverrideRef.current;
+      if (override.generation === generation && override.value === 'muted') return;
+      if (!player || machineRef.current.playbackStatus !== HERO_PLAYBACK_STATUS.STABLE) return;
+      try {
+        player.setVolume?.(HERO_AUDIO_VOLUME);
+        player.unMute?.();
+        setMuted(false);
+        setAudioStatus('audible');
+        dispatch({ type: 'SOUND_CONFIRMED', generation });
+      } catch {
+        // Keep current state on interaction unmute error
+      }
+    };
+
+    window.addEventListener('pointerdown', handleFirstInteraction, { once: true });
+    window.addEventListener('keydown', handleFirstInteraction, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', handleFirstInteraction);
+      window.removeEventListener('keydown', handleFirstInteraction);
+    };
+  }, [muted]);
 
   useEffect(() => {
     if (heroVisible && documentVisible) return;
@@ -1071,7 +1137,9 @@ const HeroSection = ({
       try {
         player.setVolume?.(0);
         player.mute?.();
-      } catch {}
+      } catch {
+        // Ignore player mute errors
+      }
       setMuted(true);
       setAudioStatus('muted');
       manualAudioOverrideRef.current = { generation, value: 'muted' };
@@ -1080,13 +1148,12 @@ const HeroSection = ({
 
     manualAudioOverrideRef.current = { generation, value: 'unmuted' };
     const token = ++audioFadeTokenRef.current;
-    let started = false;
 
     try {
       player.setVolume?.(0);
       player.unMute?.();
       
-      started = fadeIn(player, {
+      const ok = fadeIn(player, {
         from: 0,
         to: HERO_AUDIO_VOLUME,
         duration: HERO_AUDIO_FADE_MS,
@@ -1095,16 +1162,16 @@ const HeroSection = ({
           if (generation !== generationRef.current) return;
 
           const playingState = window.YT?.PlayerState?.PLAYING;
-          let soundEnabled = false;
+          let soundActive;
           try {
-            soundEnabled = player.isMuted?.() === false &&
-                           player.getVolume?.() > 0 &&
-                           (playingState == null || player.getPlayerState?.() === playingState);
+            soundActive = player.isMuted?.() === false &&
+                          player.getVolume?.() > 0 &&
+                          (playingState == null || player.getPlayerState?.() === playingState);
           } catch {
-            soundEnabled = false;
+            soundActive = false;
           }
 
-          if (!soundEnabled) {
+          if (!soundActive) {
             fallbackToMuted({ player, generation, token });
             return;
           }
@@ -1117,12 +1184,12 @@ const HeroSection = ({
           fallbackToMuted({ player, generation, token });
         },
       });
-    } catch {
-      fallbackToMuted({ player, generation, token });
-      return;
-    }
 
-    if (!started) {
+      if (!ok) {
+        fallbackToMuted({ player, generation, token });
+        return;
+      }
+    } catch {
       fallbackToMuted({ player, generation, token });
       return;
     }

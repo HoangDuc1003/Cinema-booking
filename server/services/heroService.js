@@ -6,10 +6,13 @@ import { deleteByPattern, deleteKeys, getJson } from './cacheService.js';
 import { redisKeys } from './redisKeys.js';
 import { getPublicHomePayload } from './catalogRefreshService.js';
 
+import { resolveHeroRotationWindow, HERO_BATCH_SIZE } from '../configs/heroRotation.js';
+
 const HERO_CONFIG_KEY = 'homeHero';
-const HERO_LIMIT = 5;
+const HERO_LIMIT = HERO_BATCH_SIZE;
 const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
 const MOVIE_SELECT = '_id title overview poster_path backdrop_path release_date vote_average runtime genres heroVideoId heroVideoUrl heroVideoMimeType heroVideoPosterUrl heroVideoStatus heroVideoVersion updatedAt';
+const STABLE_HERO_SORT = { heroPriority: -1, heroCatalogOrder: 1, _id: 1 };
 
 const createHttpError = (status, message) => {
     const error = new Error(message);
@@ -108,6 +111,7 @@ const forcePosterOnly = (movies) => movies.map((movie) => ({
 }));
 
 export const getPublicHomeHero = async (options = {}) => {
+    const rotation = resolveHeroRotationWindow(options.nowMs || Date.now());
     const { heroOffset } = options;
     const [config, refreshState] = await Promise.all([
         getHomeHeroConfig(),
@@ -121,6 +125,51 @@ export const getPublicHomeHero = async (options = {}) => {
         movies = await loadMoviesByIds(config.movieIds);
         if (movies.length) effectiveMode = 'manual';
     }
+
+    if (!movies.length) {
+        try {
+            const filter = {
+                createdAt: { $lte: new Date(rotation.startsAt) },
+            };
+            const totalEligible = await Movie.countDocuments(filter);
+
+            if (totalEligible > 0) {
+                const effectiveSlotIndex = typeof heroOffset === 'number' && Number.isFinite(heroOffset) && heroOffset >= 0
+                    ? heroOffset
+                    : rotation.index;
+                const startOffset = (effectiveSlotIndex * HERO_BATCH_SIZE) % totalEligible;
+
+                const firstBatch = await Movie.find(filter)
+                    .select(MOVIE_SELECT)
+                    .sort(STABLE_HERO_SORT)
+                    .skip(startOffset)
+                    .limit(HERO_BATCH_SIZE)
+                    .lean();
+
+                let selectedMovies = firstBatch.map(normalizeHeroMovie).filter(Boolean);
+
+                if (selectedMovies.length < HERO_BATCH_SIZE && totalEligible > selectedMovies.length) {
+                    const remaining = HERO_BATCH_SIZE - selectedMovies.length;
+                    const wrappedBatch = await Movie.find(filter)
+                        .select(MOVIE_SELECT)
+                        .sort(STABLE_HERO_SORT)
+                        .limit(remaining)
+                        .lean();
+                    const wrappedNormalized = wrappedBatch.map(normalizeHeroMovie).filter(Boolean);
+                    selectedMovies = [...selectedMovies, ...wrappedNormalized].slice(0, HERO_BATCH_SIZE);
+                }
+
+                movies = selectedMovies;
+                meta = {
+                    key: rotation.key,
+                    slot: rotation.index,
+                };
+            }
+        } catch {
+            movies = [];
+        }
+    }
+
     if (!movies.length && typeof heroOffset === 'number' && Number.isFinite(heroOffset) && heroOffset >= 0) {
         try {
             const siteConfig = await SiteConfig.findOne({ key: 'catalog' }).lean();
@@ -140,28 +189,21 @@ export const getPublicHomeHero = async (options = {}) => {
                 const rawMovies = await Movie.find({ _id: { $in: selectedIds } }).lean();
                 const movieMap = new Map(rawMovies.map((m) => [String(m._id), normalizeHeroMovie(m)]));
                 movies = selectedIds.map((id) => movieMap.get(String(id))).filter(Boolean);
-                if (movies.length) {
-                    meta = {
-                        batchId: String(batch._id),
-                        weekKey: batch.weekKey,
-                        version: batch.version,
-                        slot: Math.floor((heroOffset * 5) / 150) || 0,
-                    };
-                }
             }
         } catch {
             movies = [];
         }
     }
+
     if (!movies.length) {
         try {
             const payload = await getPublicHomePayload(5, 'US', new Date());
             movies = payload.hero || [];
-            meta = payload.meta || null;
         } catch {
             movies = [];
         }
     }
+
     if (!movies.length) movies = await loadStoredHeroMovies();
     if (refreshState?.active) movies = forcePosterOnly(movies);
 
@@ -174,6 +216,7 @@ export const getPublicHomeHero = async (options = {}) => {
             catalog: meta,
         },
         movies,
+        rotation,
         cache: meta ? 'catalog' : 'bypass',
     };
 };

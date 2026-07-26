@@ -71,8 +71,7 @@ export const getTmdbPopular = async (req, res) => {
         return res.status(502).json({ success: false, message: 'Unable to load popular movies.' });
     }
 };
-
-export const getHomeHero = async (req, res) => {
+export const getHomeHero = async (req, res) => {
     try {
         const heroOffset = req.query.heroOffset !== undefined && !Number.isNaN(parseInt(req.query.heroOffset, 10))
             ? parseInt(req.query.heroOffset, 10)
@@ -82,6 +81,7 @@ export const getHomeHero = async (req, res) => {
             success: true,
             settings: payload.settings,
             movies: payload.movies,
+            rotation: payload.rotation,
         });
     } catch (error) {
         console.error('[getHomeHero]', error.message);
