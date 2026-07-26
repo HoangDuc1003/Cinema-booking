@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react'
+import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   fetchMovieDetails,
@@ -30,6 +31,7 @@ const MovieDetails = () => {
   const navigate = useNavigate();
   const [isFavorited, setIsFavorited] = useState(false);
   const [showTrailerSection, setShowTrailerSection] = useState(false);
+  const [ambientLoaded, setAmbientLoaded] = useState(false);
 
   const toggleFavorite = useCallback((e) => {
     e.stopPropagation();
@@ -146,6 +148,10 @@ const MovieDetails = () => {
     [show?.release_date]
   );
 
+  useEffect(() => {
+    setAmbientLoaded(false);
+  }, [imageUrl]);
+
   const genreNames = useMemo(() =>
     show?.genres?.map(g => g.name).join(", ") || '',
     [show?.genres]
@@ -162,150 +168,207 @@ const MovieDetails = () => {
   if (hasError) return <Loading message="Error loading movie details..." />;
 
   return show ? (
-    <div className='px-6 md:px-6 lg:px-40 pt-30'>
-      <div
-        className="absolute left-1/2 -translate-x-1/2 w-[90%] h-45 rounded-[100%] blur-[120px] 
-          animate-slow-pulse pointer-events-none"
-        style={{ top: '-20px', zIndex: 0, background: 'rgba(0, 123, 255, 0.5)' }}
-      />
-
-      <div className='flex flex-col md:flex-row gap-8 max-w-6xl mx-auto'>
-        <div className="relative overflow-hidden rounded-xl cursor-pointer group w-auto h-130">
-          <img
-            src={imageUrl}
-            alt={show.title}
-            className='max-md:mx-auto rounded-2xl h-130 w-90 object-cover group-hover:scale-105 transition-transform duration-500'
-          />
-          <div className="absolute top-0 left-[-150%] w-1/2 h-full z-10 block transform -skew-x-12 bg-linear-to-r from-transparent
-            via-white/40 to-transparent transition-all duration-700 group-hover:left-[150%]">
-          </div>
-        </div>
-
-        <div className='relative flex flex-col gap-3'>
-          <BlurCircle top='-100px' left='-100px' />
-          <p className='text-primary'>ENGLISH</p>
-          <h1 className='text-4xl font-semibold max-w-96 text-balance'>{show.title}</h1>
-
-          <div className='flex items-center gap-2 text-gray-300'>
-            <StarIcon className='w-5 h-5 text-primary fill-primary' />
-            {show.vote_average?.toFixed(1)} User Rating
-          </div>
-
-          <p className='text-gray-400 mt-2 text-sm leading-tight max-w-xl'>
-            {show.overview}
-          </p>
-
-          <p>
-            {timeFormat(show.runtime)} • {genreNames} • {releaseYear}
-          </p>
-
-          <div className='flex items-center flex-wrap gap-4 mt-4'>
-            <button
-              type="button"
-              onClick={handleWatchTrailer}
-              className="group flex items-center gap-3 px-8 py-4 rounded-full backdrop-blur-sm border transition-all duration-300
-              hover:scale-105 bg-white/10 hover:bg-white/20 border-white/20 hover:border-primary/40 cursor-pointer">
-              <PlayCircleIcon className="w-5 h-5" />
-              Watch Trailer
-            </button>
-            <a href="#dateSelect" className="group flex items-center gap-3 px-12 py-6 bg-linear-to-r from-primary to-primary-dull
-            hover:from-primary-dull hover:to-primary text-white font-semibold rounded-full shadow-lg shadow-primary/30
-            hover:shadow-xl hover:shadow-primary/60 hover:scale-105 active:scale-95 transition-all duration-300 border
-            border-primary/30 hover:border-primary/60 relative overflow-hidden">
-              Buy Tickets
-            </a>
-            <button
-              type="button"
-              onClick={toggleFavorite}
-              aria-label={isFavorited ? `Remove ${show.title} from favorites` : `Add ${show.title} to favorites`}
-              aria-pressed={isFavorited}
-              className="p-4 rounded-full bg-white/10 hover:bg-white/20 border border-white/20 transition-all duration-300 hover:scale-110 active:scale-95 cursor-pointer"
-            >
-              <Heart className={`w-6 h-6 ${isFavorited ? 'text-pink-500 fill-pink-500' : 'text-white'}`} />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <DateSelect
-        id={show._id || show.id}
-        availableDates={availableDates}
-        status={showtimeStatus}
-        error={showtimeError}
-        onRetry={() => setShowtimeReloadToken((value) => value + 1)}
-      />
-
-      {showTrailerSection && (
-        <TrailerSection sectionId="movie-trailers" featuredMovie={show} movieOnly />
-      )}
-
-      <div className="max-w-6xl mx-auto w-full">
-        <p className='relative text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-2 mt-20'>You May Also Like</p>
-        <div className='relative overflow-hidden mb-10' />
-      </div>
-
-      <BlurCircle top='150px' left='0' />
-      <BlurCircle bottom='50px' right='50px' />
-
-      <div className="max-w-6xl mx-auto w-full" aria-live="polite">
-        {recommendationStatus === 'loading' && (
-          <div className="grid sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-6">
-            {Array.from({ length: 4 }, (_, index) => (
-              <div key={index} className="catalog-card-skeleton" aria-hidden="true">
-                <span className="catalog-card-skeleton__art" />
-              </div>
-            ))}
-            <span className="sr-only">Loading similar movies</span>
-          </div>
-        )}
-
-        {recommendationStatus === 'error' && (
-          <div className="catalog-state-panel" role="alert">
-            <h2>Similar movies are unavailable</h2>
-            <p>{recommendationError}</p>
-            <button
-              type="button"
-              className="catalog-state-panel__button"
-              onClick={() => setRecommendationReloadToken((value) => value + 1)}
-            >
-              <RefreshCw aria-hidden="true" />
-              Try again
-            </button>
-          </div>
-        )}
-
-        {recommendationStatus === 'empty' && (
-          <div className="catalog-state-panel" role="status">
-            <h2>No similar movies yet</h2>
-            <p>We could not find another matching title with usable artwork.</p>
-          </div>
-        )}
-
-        {recommendationStatus === 'ready' && (
-          <MovieGrid
-            movies={movies}
-            columns="sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-            animated
-            staggerDelay={100}
-          />
-        )}
-      </div>
-
-      <div className='flex justify-center mt-10'>
-        <button
-          onClick={() => {
-            navigate('/movies');
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-          }}
-          className="group flex items-center gap-3 px-12 py-6 bg-linear-to-r from-primary to-primary-dull
-            hover:from-primary-dull hover:to-primary text-white font-semibold rounded-full shadow-lg shadow-primary/30
-            hover:shadow-xl hover:shadow-primary/60 hover:scale-105 active:scale-95 transition-all duration-300 border
-            border-primary/30 hover:border-primary/60 relative overflow-hidden mb-5"
+    <main className='min-h-screen bg-black pb-20'>
+      <section className="relative isolate overflow-hidden bg-[#03060a]">
+        <div
+          className="pointer-events-none absolute inset-0 z-0 overflow-hidden"
+          aria-hidden="true"
         >
-          Show more
-        </button>
+          {imageUrl && (
+            <img
+              key={imageUrl}
+              src={imageUrl}
+              alt=""
+              draggable="false"
+              decoding="async"
+              onLoad={() => setAmbientLoaded(true)}
+              onError={(event) => {
+                event.currentTarget.hidden = true;
+                setAmbientLoaded(false);
+              }}
+              className={[
+                "absolute inset-[-8%] h-[116%] w-[116%]",
+                "scale-[1.06] object-cover object-center blur-[34px]",
+                "transition-opacity duration-500 ease-out",
+                "motion-reduce:transition-none",
+                ambientLoaded ? "opacity-[0.10]" : "opacity-0",
+              ].join(" ")}
+            />
+          )}
+
+          <div
+            className="
+              absolute left-[-28%] top-[4%]
+              aspect-square w-[320px]
+              rounded-full opacity-[0.14] blur-[80px]
+              md:left-[-8%] md:top-[8%]
+              md:w-[min(34vw,520px)]
+              md:opacity-[0.18] md:blur-[90px]
+            "
+            style={{
+              background:
+                "radial-gradient(circle, rgba(239,52,87,0.78) 0%, rgba(151,20,48,0.34) 42%, transparent 72%)",
+            }}
+          />
+
+          <div
+            className="
+              absolute bottom-[-12%] right-[-35%]
+              aspect-square w-[360px]
+              rounded-full opacity-[0.14] blur-[80px]
+              md:bottom-[-8%] md:right-[-12%]
+              md:w-[min(38vw,600px)]
+              md:opacity-[0.18] md:blur-[90px]
+            "
+            style={{
+              background:
+                "radial-gradient(circle, rgba(177,23,55,0.70) 0%, rgba(105,12,33,0.30) 44%, transparent 74%)",
+            }}
+          />
+
+          <div className="absolute inset-0 bg-gradient-to-r from-[#03060a]/95 via-[#03060a]/80 to-[#03060a]/90" />
+
+          <div className="absolute inset-0 bg-gradient-to-b from-[#03060a]/20 via-transparent to-[#03060a]/95" />
+        </div>
+
+        <div className="relative z-10 px-6 md:px-6 lg:px-40 pt-30 pb-12">
+          <div className='flex flex-col md:flex-row gap-8 max-w-6xl mx-auto'>
+            <div className="relative overflow-hidden rounded-xl cursor-pointer group w-auto h-130 flex-shrink-0">
+              <img
+                src={imageUrl}
+                alt={show.title}
+                className='max-md:mx-auto rounded-2xl h-130 w-[340px] md:w-[320px] object-cover group-hover:scale-105 transition-transform duration-500'
+              />
+              <div className="absolute top-0 left-[-150%] w-1/2 h-full z-10 block transform -skew-x-12 bg-linear-to-r from-transparent
+                via-white/40 to-transparent transition-all duration-700 group-hover:left-[150%]">
+              </div>
+            </div>
+
+            <div className='relative flex flex-col gap-3'>
+              <p className='text-primary font-bold tracking-wider text-sm'>ENGLISH</p>
+              <h1 className='text-4xl md:text-5xl font-extrabold max-w-xl text-balance'>{show.title}</h1>
+
+              <div className='flex items-center gap-2 text-gray-300'>
+                <StarIcon className='w-5 h-5 text-primary fill-primary' />
+                {show.vote_average?.toFixed(1)} User Rating
+              </div>
+
+              <p className='text-gray-400 mt-2 text-sm leading-tight max-w-xl'>
+                {show.overview}
+              </p>
+
+              <p>
+                {timeFormat(show.runtime)} • {genreNames} • {releaseYear}
+              </p>
+
+              <div className='flex items-center flex-wrap gap-4 mt-4'>
+                <button
+                  type="button"
+                  onClick={handleWatchTrailer}
+                  className="group flex items-center gap-3 px-8 py-4 rounded-full backdrop-blur-sm border transition-all duration-300
+                  hover:scale-105 bg-white/10 hover:bg-white/20 border-white/20 hover:border-primary/40 cursor-pointer">
+                  <PlayCircleIcon className="w-5 h-5" />
+                  Watch Trailer
+                </button>
+                <a href="#dateSelect" className="group flex items-center gap-3 px-12 py-6 bg-linear-to-r from-primary to-primary-dull
+                hover:from-primary-dull hover:to-primary text-white font-semibold rounded-full shadow-lg shadow-primary/30
+                hover:shadow-xl hover:shadow-primary/60 hover:scale-105 active:scale-95 transition-all duration-300 border
+                border-primary/30 hover:border-primary/60 relative overflow-hidden">
+                  Buy Tickets
+                </a>
+                <button
+                  type="button"
+                  onClick={toggleFavorite}
+                  aria-label={isFavorited ? `Remove ${show.title} from favorites` : `Add ${show.title} to favorites`}
+                  aria-pressed={isFavorited}
+                  className="p-4 rounded-full bg-white/10 hover:bg-white/20 border border-white/20 transition-all duration-300 hover:scale-110 active:scale-95 cursor-pointer"
+                >
+                  <Heart className={`w-6 h-6 ${isFavorited ? 'text-pink-500 fill-pink-500' : 'text-white'}`} />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div className="px-6 md:px-6 lg:px-40 mt-10">
+        <DateSelect
+          id={show._id || show.id}
+          availableDates={availableDates}
+          status={showtimeStatus}
+          error={showtimeError}
+          onRetry={() => setShowtimeReloadToken((value) => value + 1)}
+        />
+
+        {showTrailerSection && (
+          <TrailerSection sectionId="movie-trailers" featuredMovie={show} movieOnly />
+        )}
+
+        <div className="max-w-6xl mx-auto w-full">
+          <p className='relative text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-2 mt-20'>You May Also Like</p>
+          <div className='relative overflow-hidden mb-10' />
+        </div>
+
+        <div className="max-w-6xl mx-auto w-full" aria-live="polite">
+          {recommendationStatus === 'loading' && (
+            <div className="grid sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-6">
+              {Array.from({ length: 4 }, (_, index) => (
+                <div key={index} className="catalog-card-skeleton" aria-hidden="true">
+                  <span className="catalog-card-skeleton__art" />
+                </div>
+              ))}
+              <span className="sr-only">Loading similar movies</span>
+            </div>
+          )}
+
+          {recommendationStatus === 'error' && (
+            <div className="catalog-state-panel" role="alert">
+              <h2>Similar movies are unavailable</h2>
+              <p>{recommendationError}</p>
+              <button
+                type="button"
+                className="catalog-state-panel__button"
+                onClick={() => setRecommendationReloadToken((value) => value + 1)}
+              >
+                <RefreshCw aria-hidden="true" />
+                Try again
+              </button>
+            </div>
+          )}
+
+          {recommendationStatus === 'empty' && (
+            <div className="catalog-state-panel" role="status">
+              <h2>No similar movies yet</h2>
+              <p>We could not find another matching title with usable artwork.</p>
+            </div>
+          )}
+
+          {recommendationStatus === 'ready' && (
+            <MovieGrid
+              movies={movies}
+              columns="sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+              animated
+              staggerDelay={100}
+            />
+          )}
+        </div>
+
+        <div className='flex justify-center mt-10'>
+          <button
+            onClick={() => {
+              navigate('/movies');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className="group flex items-center gap-3 px-12 py-6 bg-linear-to-r from-primary to-primary-dull
+              hover:from-primary-dull hover:to-primary text-white font-semibold rounded-full shadow-lg shadow-primary/30
+              hover:shadow-xl hover:shadow-primary/60 hover:scale-105 active:scale-95 transition-all duration-300 border
+              border-primary/30 hover:border-primary/60 relative overflow-hidden mb-5"
+          >
+            Show more
+          </button>
+        </div>
       </div>
-    </div>
+    </main>
   ) : (
     <Loading />
   );
