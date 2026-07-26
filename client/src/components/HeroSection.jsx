@@ -755,6 +755,27 @@ const HeroSection = ({
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
 
+  const fallbackToMuted = useCallback(({ player, generation, token }) => {
+    if (token !== audioFadeTokenRef.current) return;
+    if (generation !== generationRef.current) return;
+
+    cancelCurrentFade();
+    try {
+      player.setVolume?.(0);
+      player.mute?.();
+      const playingState = window.YT?.PlayerState?.PLAYING;
+      if (playingState != null && player.getPlayerState?.() !== playingState) {
+        player.playVideo?.();
+      }
+    } catch {
+      // Existing failure path keeps poster fallback.
+    }
+
+    setMuted(true);
+    setAudioStatus('fallback-muted');
+    dispatch({ type: 'AUDIO_FALLBACK_MUTED', generation });
+  }, [cancelCurrentFade, dispatch]);
+
   useEffect(() => {
     if (curtainState !== 'closed') return;
     if (!playerApiReady) return;
@@ -1037,27 +1058,6 @@ const HeroSection = ({
       forceMetadata: machine.phase === HERO_PHASES.TRAILER_FAILED,
     });
   };
-
-  const fallbackToMuted = useCallback(({ player, generation, token }) => {
-    if (token !== audioFadeTokenRef.current) return;
-    if (generation !== generationRef.current) return;
-
-    cancelCurrentFade();
-    try {
-      player.setVolume?.(0);
-      player.mute?.();
-      const playingState = window.YT?.PlayerState?.PLAYING;
-      if (playingState != null && player.getPlayerState?.() !== playingState) {
-        player.playVideo?.();
-      }
-    } catch {
-      // Existing failure path keeps poster fallback.
-    }
-
-    setMuted(true);
-    setAudioStatus('fallback-muted');
-    dispatch({ type: 'AUDIO_FALLBACK_MUTED', generation });
-  }, [cancelCurrentFade, dispatch]);
 
   const handleToggleMuted = useCallback(() => {
     const player = playerRef.current;
