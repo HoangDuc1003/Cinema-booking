@@ -6,7 +6,8 @@ import { resolveClientHeroOffset } from './heroCatalogOffset.js';
 
 export { resolveClientHeroOffset } from './heroCatalogOffset.js';
 
-const API_BASE = (import.meta.env.VITE_BASE_URL || '').replace(/\/$/, '');
+const RAW_BASE = (import.meta.env.VITE_BASE_URL || '').trim().replace(/\/$/, '');
+const API_BASE = import.meta.env.DEV ? '' : RAW_BASE;
 const IMAGE_BASE = 'https://image.tmdb.org/t/p';
 const API_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS) || 4500;
 const HERO_API_TIMEOUT_MS = Number(import.meta.env.VITE_HERO_API_TIMEOUT_MS) || 12_000;
@@ -43,6 +44,14 @@ const getTmdbMovieId = (movie) => {
     return /^\d+$/.test(value) ? value : '';
 };
 
+export class HttpError extends Error {
+    constructor(response) {
+        super(`HTTP ${response.status} ${response.statusText}`.trim());
+        this.name = 'HttpError';
+        this.status = response.status;
+    }
+}
+
 const fetchWithTimeout = async (url, options = {}, timeoutMs = API_TIMEOUT_MS) => {
     return requestWithTimeout(url, options, { timeoutMs });
 };
@@ -63,8 +72,11 @@ export const fetchHomeHero = async ({ signal, offset, fallbackMode = 'mock' } = 
             : resolveClientHeroOffset();
         const url = `${API_BASE}/api/show/hero?heroOffset=${encodeURIComponent(activeOffset)}`;
         const response = await fetchWithTimeout(url, { signal }, HERO_API_TIMEOUT_MS);
+        if (!response.ok) {
+            throw new HttpError(response);
+        }
         const payload = await response.json().catch(() => null);
-        if (!response.ok || !payload?.success) {
+        if (!payload?.success) {
             throw new Error(payload?.message || `Hero request failed (${response.status})`);
         }
 

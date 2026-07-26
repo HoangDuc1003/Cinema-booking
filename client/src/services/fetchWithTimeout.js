@@ -33,7 +33,8 @@ export const fetchWithTimeout = async (
   const timeoutId = setTimer(() => {
     if (abortCause) return;
     abortCause = 'timeout';
-    controller.abort();
+    const timeoutError = new DOMException('Hero request timed out', 'TimeoutError');
+    controller.abort(timeoutError);
   }, timeoutMs);
 
   try {

@@ -13,7 +13,7 @@ The Hero background has exactly two valid outcomes:
 - Once the curtain is fully closed, hold it for one second; after that hold, open as soon as advancing playback is verified.
 - Invalidate an earlier visual-ready decision whenever playback pauses or buffers before reveal; the curtain may open only after a fresh continuous-advancement verification.
 - Keep the iframe transparent until playback is verified, then reveal it behind the opening curtain.
-- Unmute only after the curtain clears, ramping volume from 0 to 60 over 800ms.
+- Each trailer playback generation starts muted at volume 0. Once verified playback is ready and the curtain enters the closed-hold phase, attempt at most one generation-scoped volume ramp from 0 to 60 over 800 ms. The ramp must be cancelled on generation change, manual mute, flow reset, or unmount. If sound autoplay is denied, preserve muted playback and manual volume controls. Never unmute a stale or inactive playback generation. A user's explicit mute or unmute action is authoritative for the current playback generation and must not be overridden by automatic audio behavior.
 - The curtain is the sole loading-artifact mask; do not add center-button masks.
 - Reveal only after a real `PLAYING` state and advancing `currentTime`.
 - On player or script failure, retain the poster and expose the manual play CTA.

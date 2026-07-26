@@ -85,6 +85,9 @@ const HeroSection = ({
   const [cinematicRevealed, setCinematicRevealed] = useState(false);
   const [heroVisible, setHeroVisible] = useState(() => typeof IntersectionObserver === 'undefined');
   const [documentVisible, setDocumentVisible] = useState(() => !document.hidden);
+  const [playerApiReady, setPlayerApiReady] = useState(false);
+  const [verifiedPlaybackGeneration, setVerifiedPlaybackGeneration] = useState(null);
+  const [audioStatus, setAudioStatus] = useState('muted');
 
   const initialMovieKey = initialMoviesList.length ? getHeroMovieKey(initialMoviesList[0], 0) : 'hero-loading';
   const [machine, dispatch] = useReducer(
@@ -118,7 +121,15 @@ const HeroSection = ({
   const curtainOpenPendingRef = useRef(null);
   const verifiedPlaybackGenerationRef = useRef(null);
   const attemptStartedAtRef = useRef(null);
+  const autoUnmutedGenerationRef = useRef(null);
+  const manualAudioOverrideRef = useRef({ generation: null, value: null });
+  const audioFadeTokenRef = useRef(0);
   const { fadeIn, cancelFade } = useFadeVolume();
+
+  const cancelCurrentFade = useCallback(() => {
+    audioFadeTokenRef.current += 1;
+    cancelFade();
+  }, [cancelFade]);
 
   const isMobileScreen = useMediaQuery('(max-width: 767px)');
   const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
@@ -182,9 +193,15 @@ const HeroSection = ({
 
 
   const nextGeneration = useCallback(() => {
-    generationRef.current += 1;
-    return generationRef.current;
-  }, []);
+    const generation = ++generationRef.current;
+    cancelCurrentFade();
+    autoUnmutedGenerationRef.current = null;
+    manualAudioOverrideRef.current = { generation, value: null };
+    setVerifiedPlaybackGeneration(null);
+    setMuted(true);
+    setAudioStatus('muted');
+    return generation;
+  }, [cancelCurrentFade]);
 
   const clearPlaybackTimers = useCallback(() => {
     playbackTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
@@ -459,7 +476,6 @@ const HeroSection = ({
 
     // Every attempt starts silently; audio is released only after the curtain
     // has fully opened, including attempts started by the manual CTA.
-    setMuted(true);
     prepareCinematicAttempt({ mountCurtain: true });
 
     const generation = nextGeneration();
@@ -607,6 +623,30 @@ const HeroSection = ({
     };
   }, []);
 
+  const delayWithSignal = (ms, signal) =>
+    new Promise((resolve, reject) => {
+      if (signal.aborted) {
+        reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+        return;
+      }
+      let timerId;
+      const handleAbort = () => {
+        window.clearTimeout(timerId);
+        reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+      };
+      timerId = window.setTimeout(() => {
+        signal.removeEventListener('abort', handleAbort);
+        resolve();
+      }, ms);
+      signal.addEventListener('abort', handleAbort, { once: true });
+    });
+
+  const isRetryableHeroError = (error) => {
+    if (error?.name === 'TimeoutError' || error?.name === 'TypeError') return true;
+    const status = error?.status;
+    return status === 429 || (status >= 500 && status <= 599);
+  };
+
   useEffect(() => {
     const controller = new AbortController();
     const applyMovies = (nextMovies, { source = 'server' } = {}) => {
@@ -637,39 +677,54 @@ const HeroSection = ({
         setCatalogSource('loading');
         setHeroCatalogSettled(false);
       }
-      try {
-        const data = await fetchHomeHero({
-          signal: controller.signal,
-          fallbackMode: 'none',
-        });
-        if (controller.signal.aborted) return;
+      
+      const MAX_ATTEMPTS = 2;
+      for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+        try {
+          const data = await fetchHomeHero({
+            signal: controller.signal,
+            fallbackMode: 'none',
+          });
+          if (controller.signal.aborted) return;
 
-        if (data?.source !== 'server') {
-          throw new Error('Hero response did not come from the server.');
-        }
-        const orderedMovies = Array.isArray(data.movies)
-          ? data.movies.slice(0, HERO_MAX_MOVIES)
-          : [];
+          if (data?.source !== 'server') {
+            throw new Error('Hero response did not come from the server.');
+          }
+          const orderedMovies = Array.isArray(data.movies)
+            ? data.movies.slice(0, HERO_MAX_MOVIES)
+            : [];
 
-        const validMovies = await validateMovieCandidates(orderedMovies, controller.signal);
-        if (!controller.signal.aborted && validMovies.length) {
-          setCatalogSource('server');
-          applyMovies(validMovies, { source: 'server' });
-        } else if (!controller.signal.aborted) {
-          throw new Error('Hero returned no movies with usable artwork.');
+          const validMovies = await validateMovieCandidates(orderedMovies, controller.signal);
+          if (!controller.signal.aborted && validMovies.length) {
+            setCatalogSource('server');
+            applyMovies(validMovies, { source: 'server' });
+            break;
+          } else if (!controller.signal.aborted) {
+            throw new Error('Hero returned no movies with usable artwork.');
+          }
+        } catch (error) {
+          if (controller.signal.aborted || error?.name === 'AbortError') return;
+
+          const isFinalAttempt = attempt === MAX_ATTEMPTS - 1;
+          const retryable = isRetryableHeroError(error);
+
+          if (isFinalAttempt || !retryable) {
+            if (!moviesRef.current.length) {
+              setCatalogSource('error');
+              setHeroCatalogError(error);
+            }
+            break;
+          }
+
+          if (import.meta.env.DEV) {
+            console.warn(`Hero load error (attempt ${attempt + 1}):`, error.message);
+          }
+          await delayWithSignal(1500, controller.signal);
         }
-      } catch (error) {
-        if (error?.name !== 'AbortError' && import.meta.env.DEV) {
-          console.warn('Hero load error:', error.message);
-        }
-        if (!controller.signal.aborted && !moviesRef.current.length) {
-          setCatalogSource('error');
-          setHeroCatalogError(error);
-        }
-      } finally {
-        if (!controller.signal.aborted) {
-          setHeroCatalogSettled(true);
-        }
+      }
+      
+      if (!controller.signal.aborted) {
+        setHeroCatalogSettled(true);
       }
     };
 
@@ -699,6 +754,71 @@ const HeroSection = ({
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
+
+  useEffect(() => {
+    if (curtainState !== 'closed') return;
+    if (!playerApiReady) return;
+
+    const generation = generationRef.current;
+    if (verifiedPlaybackGeneration !== generation) return;
+    if (autoUnmutedGenerationRef.current === generation) return;
+
+    const override = manualAudioOverrideRef.current;
+    if (override.generation === generation && override.value !== null) return;
+
+    const player = playerRef.current;
+    if (!player) return;
+
+    const token = ++audioFadeTokenRef.current;
+    autoUnmutedGenerationRef.current = generation;
+
+    let started = false;
+    try {
+      player.setVolume?.(0);
+      player.unMute?.();
+
+      started = fadeIn(player, {
+        from: 0,
+        to: HERO_AUDIO_VOLUME,
+        duration: HERO_AUDIO_FADE_MS,
+        onComplete: () => {
+          if (token !== audioFadeTokenRef.current) return;
+          if (generation !== generationRef.current) return;
+
+          const playingState = window.YT?.PlayerState?.PLAYING;
+          let soundEnabled = false;
+          try {
+            soundEnabled = player.isMuted?.() === false &&
+                           player.getVolume?.() > 0 &&
+                           (playingState == null || player.getPlayerState?.() === playingState);
+          } catch {
+            soundEnabled = false;
+          }
+
+          if (!soundEnabled) {
+            fallbackToMuted({ player, generation, token });
+            return;
+          }
+
+          setMuted(false);
+          setAudioStatus('audible');
+          dispatch({ type: 'SOUND_CONFIRMED', generation });
+        },
+        onError: () => fallbackToMuted({ player, generation, token }),
+      });
+    } catch {
+      fallbackToMuted({ player, generation, token });
+      return;
+    }
+
+    if (!started) {
+      fallbackToMuted({ player, generation, token });
+      return;
+    }
+
+    setMuted(false);
+    setAudioStatus('ramping');
+  }, [curtainState, playerApiReady, verifiedPlaybackGeneration, fadeIn, fallbackToMuted, dispatch]);
 
   useEffect(() => {
     if (heroVisible && documentVisible) return;
@@ -918,56 +1038,98 @@ const HeroSection = ({
     });
   };
 
+  const fallbackToMuted = useCallback(({ player, generation, token }) => {
+    if (token !== audioFadeTokenRef.current) return;
+    if (generation !== generationRef.current) return;
+
+    cancelCurrentFade();
+    try {
+      player.setVolume?.(0);
+      player.mute?.();
+      const playingState = window.YT?.PlayerState?.PLAYING;
+      if (playingState != null && player.getPlayerState?.() !== playingState) {
+        player.playVideo?.();
+      }
+    } catch {
+      // Existing failure path keeps poster fallback.
+    }
+
+    setMuted(true);
+    setAudioStatus('fallback-muted');
+    dispatch({ type: 'AUDIO_FALLBACK_MUTED', generation });
+  }, [cancelCurrentFade, dispatch]);
+
   const handleToggleMuted = useCallback(() => {
     const player = playerRef.current;
     const generation = generationRef.current;
     if (!player || machineRef.current.playbackStatus !== HERO_PLAYBACK_STATUS.STABLE) return;
 
-    const restoreMutedPlayback = () => {
-      cancelFade();
+    const shouldMute = audioStatus === 'ramping' || audioStatus === 'audible' || player.isMuted?.() === false;
+
+    if (shouldMute) {
+      cancelCurrentFade();
       try {
         player.setVolume?.(0);
         player.mute?.();
-        const playingState = window.YT?.PlayerState?.PLAYING;
-        if (player.getPlayerState?.() !== playingState) player.playVideo?.();
-      } catch {
-        // The player failure callbacks retain the poster if recovery cannot run.
-      }
+      } catch {}
       setMuted(true);
-      dispatch({ type: 'AUDIO_FALLBACK_MUTED', generation });
-    };
+      setAudioStatus('muted');
+      manualAudioOverrideRef.current = { generation, value: 'muted' };
+      return;
+    }
 
-    if (!muted) {
-      restoreMutedPlayback();
+    manualAudioOverrideRef.current = { generation, value: 'unmuted' };
+    const token = ++audioFadeTokenRef.current;
+    let started = false;
+
+    try {
+      player.setVolume?.(0);
+      player.unMute?.();
+      
+      started = fadeIn(player, {
+        from: 0,
+        to: HERO_AUDIO_VOLUME,
+        duration: HERO_AUDIO_FADE_MS,
+        onComplete: () => {
+          if (token !== audioFadeTokenRef.current) return;
+          if (generation !== generationRef.current) return;
+
+          const playingState = window.YT?.PlayerState?.PLAYING;
+          let soundEnabled = false;
+          try {
+            soundEnabled = player.isMuted?.() === false &&
+                           player.getVolume?.() > 0 &&
+                           (playingState == null || player.getPlayerState?.() === playingState);
+          } catch {
+            soundEnabled = false;
+          }
+
+          if (!soundEnabled) {
+            fallbackToMuted({ player, generation, token });
+            return;
+          }
+
+          setMuted(false);
+          setAudioStatus('audible');
+          dispatch({ type: 'SOUND_CONFIRMED', generation });
+        },
+        onError: () => {
+          fallbackToMuted({ player, generation, token });
+        },
+      });
+    } catch {
+      fallbackToMuted({ player, generation, token });
+      return;
+    }
+
+    if (!started) {
+      fallbackToMuted({ player, generation, token });
       return;
     }
 
     setMuted(false);
-    const started = fadeIn(player, {
-      from: 0,
-      to: HERO_AUDIO_VOLUME,
-      duration: HERO_AUDIO_FADE_MS,
-      onComplete: () => {
-        if (generation === generationRef.current) {
-          dispatch({ type: 'SOUND_CONFIRMED', generation });
-        }
-      },
-      onError: restoreMutedPlayback,
-    });
-    if (!started) {
-      restoreMutedPlayback();
-      return;
-    }
-
-    scheduleCinematicTimer(() => {
-      const playingState = window.YT?.PlayerState?.PLAYING;
-      if (
-        generation !== generationRef.current
-        || player.getPlayerState?.() === playingState
-      ) return;
-      restoreMutedPlayback();
-    }, 160);
-  }, [cancelFade, fadeIn, muted, scheduleCinematicTimer]);
+    setAudioStatus('ramping');
+  }, [audioStatus, cancelCurrentFade, dispatch, fadeIn, fallbackToMuted]);
 
   const handlePlayerFailure = useCallback(({ generation, reason, detail }) => {
     if (generation !== generationRef.current) return;
@@ -1040,9 +1202,11 @@ const HeroSection = ({
   }, [cinematicRevealed, handlePlayerFailure, machine.generation, playbackPhase]);
 
   const handlePlayerReady = useCallback(({ generation, player }) => {
-    if (generation !== generationRef.current) return;
     playerRef.current = player;
-    dispatch({ type: 'PLAYER_READY', generation });
+    setPlayerApiReady(true);
+    if (generation === generationRef.current) {
+      dispatch({ type: 'PLAYER_READY', generation });
+    }
   }, []);
 
   const handlePlaybackRequested = useCallback(({ generation }) => {
@@ -1064,9 +1228,9 @@ const HeroSection = ({
     if (generation !== generationRef.current) return;
     pendingVisualReadyRef.current = null;
     verifiedPlaybackGenerationRef.current = generation;
+    setVerifiedPlaybackGeneration(generation);
     setRevealedGeneration(generation);
     dispatch({ type: 'VISUAL_READY', generation });
-    setMuted(true);
   }, []);
 
   const handleVisualReady = useCallback((payload) => {

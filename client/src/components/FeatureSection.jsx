@@ -188,7 +188,7 @@ const FeatureSection = () => {
       )}
 
       {/* Desktop Show More Button */}
-      <div className="hidden sm:flex justify-center mt-20">
+      <div className="hidden sm:flex justify-center mt-[70px]">
         <button
           onClick={handleNavigate}
           className="group flex items-center gap-3 px-12 py-6 bg-linear-to-r from-primary to-primary-dull hover:from-primary-dull hover:to-primary text-white font-semibold rounded-full shadow-lg shadow-primary/30 hover:shadow-xl hover:shadow-primary/60 hover:scale-105 active:scale-95 transition-all duration-300 border border-primary/30 hover:border-primary/60 relative overflow-hidden mb-5 cursor-pointer"
