@@ -1391,9 +1391,6 @@ const HeroSection = ({
       currentMovie.backdrop_path,
     ], 'w780');
   const posterCandidates = isMobileScreen ? mobileImageCandidates : desktopImageCandidates;
-  const cinematicBackgroundActive = !disclosure.isCompact;
-  const ambientImageUrl = posterCandidates[0] || null;
-  
   const navigateToMovie = () => {
     navigate(`/movies/${currentMovie._id || currentMovie.id}`);
     window.scrollTo({ top: 0, behavior: reducedMotion ? 'auto' : 'smooth' });
@@ -1414,9 +1411,6 @@ const HeroSection = ({
         posterCandidates={posterCandidates}
         posterVisible={mediaPosterVisible}
         videoVisible={videoVisible}
-        cinematicBackgroundActive={cinematicBackgroundActive}
-        ambientImageUrl={ambientImageUrl}
-        movieId={currentMovie._id || currentMovie.id}
       >
         {playerEnabled && (
           <div
