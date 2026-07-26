@@ -1,4 +1,3 @@
-import axios from 'axios';
 import mongoose from 'mongoose';
 import Movie from '../models/Movie.js';
 import Show from '../models/Show.js';
@@ -25,99 +24,20 @@ import {
     classifyReservationConflict,
 } from '../services/bookingConflictService.js';
 
-const ensureMovieExists = async (movieId) => {
-    const id = String(movieId);
-    const existing = await Movie.findById(id);
-    if (existing) return existing;
+export const isPersistedShowId = (showId) => mongoose.isValidObjectId(String(showId || ''));
 
-    const [details, credits] = await Promise.all([
-        axios.get(`https://api.themoviedb.org/3/movie/${id}`, {
-            headers: { Authorization: `Bearer ${process.env.TMDB_API_KEY}` },
-        }),
-        axios.get(`https://api.themoviedb.org/3/movie/${id}/credits`, {
-            headers: { Authorization: `Bearer ${process.env.TMDB_API_KEY}` },
-        }),
-    ]);
-
-    return Movie.findOneAndUpdate({ _id: id }, {
-        $setOnInsert: {
-            _id: id,
-            title: details.data.title,
-            overview: details.data.overview,
-            poster_path: details.data.poster_path,
-            backdrop_path: details.data.backdrop_path,
-            genres: details.data.genres,
-            casts: credits.data.cast,
-            release_date: details.data.release_date,
-            vote_average: details.data.vote_average,
-            runtime: details.data.runtime,
-            tagline: details.data.tagline || '',
-            original_language: details.data.original_language,
-        },
-    }, { new: true, upsert: true });
-};
-
-const parseVirtualShow = (payload) => {
-    const { showId } = payload;
-    if (showId.startsWith('virtual_')) {
-        const parts = showId.split('_');
-        return {
-            movieId: String(parts[1]),
-            showDateTime: new Date(Number(parts[2])),
-            hall: 'Virtual Hall',
-            showPrice: 50,
-        };
-    }
-    if (showId.startsWith('mock_')) {
-        return {
-            movieId: String(payload.movieId),
-            showDateTime: new Date(payload.showDateTime),
-            hall: String(payload.hall || 'NitroCine Premium'),
-            showPrice: Number(payload.price) || 50,
-        };
-    }
-    return null;
-};
-
-const resolveShow = async (payload) => {
-    const virtual = parseVirtualShow(payload);
-    if (!virtual) {
-        if (!mongoose.isValidObjectId(payload.showId)) return null;
-        return Show.findById(payload.showId);
-    }
-    if (!virtual.movieId || Number.isNaN(virtual.showDateTime.getTime())) return null;
-
-    await ensureMovieExists(virtual.movieId);
-    try {
-        return await Show.findOneAndUpdate({
-            movie: virtual.movieId,
-            showDateTime: virtual.showDateTime,
-            hall: virtual.hall,
-        }, {
-            $setOnInsert: { showPrice: virtual.showPrice, occupiedSeats: {} },
-        }, { new: true, upsert: true, setDefaultsOnInsert: true });
-    } catch (error) {
-        if (!isMongoDuplicateKey(error)) throw error;
-        return Show.findOne({
-            movie: virtual.movieId,
-            showDateTime: virtual.showDateTime,
-            hall: virtual.hall,
-        });
-    }
-};
+const resolveShow = (showId) => Show.findOne({
+    _id: showId,
+    showDateTime: { $gte: new Date() },
+    hall: { $ne: 'Virtual Hall' },
+});
 
 const findShowForSeatMap = async (showId) => {
-    if (showId.startsWith('virtual_')) {
-        const parsed = parseVirtualShow({ showId });
-        if (!parsed || Number.isNaN(parsed.showDateTime.getTime())) return null;
-        return Show.findOne({
-            movie: parsed.movieId,
-            showDateTime: parsed.showDateTime,
-            hall: parsed.hall,
-        }).lean();
-    }
-    if (showId.startsWith('mock_') || !mongoose.isValidObjectId(showId)) return null;
-    return Show.findById(showId).lean();
+    return Show.findOne({
+        _id: showId,
+        showDateTime: { $gte: new Date() },
+        hall: { $ne: 'Virtual Hall' },
+    }).lean();
 };
 
 const logStripeSessionFailure = ({ label, error, booking, bookings, amount, origin }) => {
@@ -250,8 +170,11 @@ export const createBooking = async (req, res) => {
         await ensureCriticalIndexes();
         ({ userId } = req.auth());
         showId = String(req.body.showId || '');
+        if (!isPersistedShowId(showId)) {
+            return res.status(400).json({ success: false, message: 'A valid persisted show ID is required.' });
+        }
         seats = normalizeSeats(req.body.selectedSeats);
-        const show = await resolveShow({ ...req.body, showId });
+        const show = await resolveShow(showId);
         if (!show) return res.status(404).json({ success: false, message: 'Show not found.' });
         resolvedShow = show;
 
@@ -405,6 +328,9 @@ export const getOccupiedSeats = async (req, res) => {
     try {
         const requestedShowId = String(req.params.showId || '');
         if (!requestedShowId) return res.status(400).json({ success: false, message: 'Show ID is required.' });
+        if (!isPersistedShowId(requestedShowId)) {
+            return res.status(400).json({ success: false, message: 'A valid persisted show ID is required.' });
+        }
 
         const result = await rememberJson(redisKeys.seatMap(requestedShowId), redisTtl.seatMap, async () => {
             const show = await findShowForSeatMap(requestedShowId);

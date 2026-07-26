@@ -39,12 +39,13 @@ const ONE_PIXEL_PNG = Buffer.from(
 
 async function installYouTubePlayer(page, {
   stuck = false,
+  pauseOnUnmute = false,
   reducedMotion = 'no-preference',
   saveData = false,
   movies = [HERO_MOVIE],
 } = {}) {
   await page.emulateMedia({ reducedMotion });
-  await page.addInitScript(({ shouldStick, shouldSaveData }) => {
+  await page.addInitScript(({ shouldStick, shouldPauseOnUnmute, shouldSaveData }) => {
     Object.defineProperty(navigator, 'connection', {
       value: { saveData: shouldSaveData },
       configurable: true,
@@ -174,7 +175,11 @@ async function installYouTubePlayer(page, {
         this.events.onStateChange?.({ data: 0, target: this });
       }
       mute() { this.muted = true; diagnostics.events.push({ kind: 'mute', player: this.instanceId, at: Date.now() - startedAt }); }
-      unMute() { this.muted = false; diagnostics.events.push({ kind: 'unmute', player: this.instanceId, at: Date.now() - startedAt }); }
+      unMute() {
+        this.muted = false;
+        diagnostics.events.push({ kind: 'unmute', player: this.instanceId, at: Date.now() - startedAt });
+        if (shouldPauseOnUnmute) this.pauseVideo();
+      }
       isMuted() { return this.muted; }
       setVolume(value) {
         this.volume = Number(value);
@@ -203,7 +208,11 @@ async function installYouTubePlayer(page, {
         CUED: 5,
       },
     };
-  }, { shouldStick: stuck, shouldSaveData: saveData });
+  }, {
+    shouldStick: stuck,
+    shouldPauseOnUnmute: pauseOnUnmute,
+    shouldSaveData: saveData,
+  });
 
   await page.route(/\/api\/show\/hero(?:\?|$)/, (route) => route.fulfill({
     status: 200,
@@ -223,7 +232,7 @@ async function installYouTubePlayer(page, {
 }
 
 test.describe('YouTube cinematic curtain reveal', () => {
-  test('masks player chrome, proves playback, then fades audio to 60', async ({ page }) => {
+  test('masks player chrome, proves playback, then waits for a sound click', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await installYouTubePlayer(page);
     await page.goto('/');
@@ -282,9 +291,17 @@ test.describe('YouTube cinematic curtain reveal', () => {
     await expect.poll(async () => page.evaluate(() => {
       const player = window.__FAKE_YOUTUBE__.players[0];
       return { muted: player.isMuted(), volume: player.volume };
+    }), { timeout: 2_000 }).toEqual({ muted: true, volume: 0 });
+
+    const soundButton = hero.getByRole('button', { name: 'Turn trailer sound on' });
+    const audioClickAt = await page.evaluate(() => Date.now() - window.__FAKE_YOUTUBE__.startedAt);
+    await soundButton.click();
+    await expect.poll(async () => page.evaluate(() => {
+      const player = window.__FAKE_YOUTUBE__.players[0];
+      return { muted: player.isMuted(), volume: player.volume };
     }), { timeout: 2_000 }).toEqual({ muted: false, volume: 60 });
 
-    const revealTiming = await page.evaluate(() => {
+    const revealTiming = await page.evaluate((clickedAt) => {
       const previewingState = window.__FAKE_YOUTUBE__.curtainStates.find((entry) => (
         entry.className.split(/\s+/).includes('is-previewing')
       ));
@@ -314,10 +331,10 @@ test.describe('YouTube cinematic curtain reveal', () => {
         closingAnimationDuration: closingState.animationDuration,
         openingAnimationDuration: openingState.animationDuration,
         playbackStartedDuringPosterPreview: playingEvent.at >= previewingState.at && playingEvent.at < closingState.at,
-        audioDelay: unmuteEvent.at - openState.at,
+        audioDelay: unmuteEvent.at - clickedAt,
         fadeDuration: fullVolumeEvent.at - unmuteEvent.at,
       };
-    });
+    }, audioClickAt);
     expect(revealTiming.posterPreviewDuration).toBeGreaterThanOrEqual(1_850);
     expect(revealTiming.posterPreviewDuration).toBeLessThan(2_300);
     expect(revealTiming.closeDuration).toBeGreaterThanOrEqual(3_850);
@@ -330,8 +347,8 @@ test.describe('YouTube cinematic curtain reveal', () => {
     expect(revealTiming.closingAnimationDuration).toBe('4s');
     expect(revealTiming.openingAnimationDuration).toBe('1s');
     expect(revealTiming.playbackStartedDuringPosterPreview).toBe(true);
-    expect(revealTiming.audioDelay).toBeGreaterThanOrEqual(150);
-    expect(revealTiming.audioDelay).toBeLessThan(800);
+    expect(revealTiming.audioDelay).toBeGreaterThanOrEqual(0);
+    expect(revealTiming.audioDelay).toBeLessThan(250);
     expect(revealTiming.fadeDuration).toBeGreaterThanOrEqual(700);
     expect(revealTiming.fadeDuration).toBeLessThan(1_400);
   });
@@ -358,7 +375,7 @@ test.describe('YouTube cinematic curtain reveal', () => {
     expect(openState.at - openingState.at).toBeLessThan(600);
   });
 
-  test('keeps a manual trailer attempt muted until its curtain opens', async ({ page }) => {
+  test('keeps a manual trailer attempt muted until the user enables sound', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await installYouTubePlayer(page, { saveData: true });
     await page.goto('/');
@@ -372,7 +389,6 @@ test.describe('YouTube cinematic curtain reveal', () => {
     await expect(hero.locator('iframe')).toHaveCount(1);
     await expect(hero.locator('.hero-poster-shell')).toHaveClass(/is-visible/);
     await page.waitForTimeout(1_650);
-    await expect(curtain).toHaveClass(/is-previewing/);
 
     const beforeOpening = await page.evaluate(() => ({
       muted: window.__FAKE_YOUTUBE__.players[0].isMuted(),
@@ -380,14 +396,39 @@ test.describe('YouTube cinematic curtain reveal', () => {
     }));
     expect(beforeOpening).toEqual({ muted: true, unmuteCount: 0 });
 
-    await expect(curtain).toHaveClass(/is-closing/, { timeout: 700 });
     await expect(curtain).toHaveCount(0, { timeout: 7_500 });
     const curtainStates = await page.evaluate(() => window.__FAKE_YOUTUBE__.curtainStates);
     expect(curtainStates.some((entry) => entry.className.split(/\s+/).includes('is-open'))).toBe(true);
     await expect.poll(async () => page.evaluate(() => {
       const player = window.__FAKE_YOUTUBE__.players[0];
       return { muted: player.isMuted(), volume: player.volume };
+    }), { timeout: 1_000 }).toEqual({ muted: true, volume: 0 });
+    await hero.getByRole('button', { name: 'Turn trailer sound on' }).click();
+    await expect.poll(async () => page.evaluate(() => {
+      const player = window.__FAKE_YOUTUBE__.players[0];
+      return { muted: player.isMuted(), volume: player.volume };
     }), { timeout: 5_000 }).toEqual({ muted: false, volume: 60 });
+  });
+
+  test('hides a paused player and resumes muted when unmute is rejected', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await installYouTubePlayer(page, { pauseOnUnmute: true });
+    await page.goto('/');
+
+    const hero = page.locator('.hero-section');
+    await expect(hero.locator('.hero-curtain-overlay')).toHaveCount(0, { timeout: 9_000 });
+    await hero.getByRole('button', { name: 'Turn trailer sound on' }).click();
+
+    await expect.poll(async () => page.evaluate(() => {
+      const player = window.__FAKE_YOUTUBE__.players[0];
+      return {
+        muted: player.isMuted(),
+        state: player.getPlayerState(),
+        volume: player.volume,
+      };
+    }), { timeout: 2_000 }).toEqual({ muted: true, state: 1, volume: 0 });
+    await expect(hero.locator('.hero-youtube-video')).toHaveCSS('opacity', '1', { timeout: 2_000 });
+    await expect(hero.getByRole('button', { name: 'Turn trailer sound on' })).toBeVisible();
   });
 
   test('returns to poster immediately and keeps an absolute five-second carousel cadence', async ({ page }) => {
@@ -616,7 +657,7 @@ test.describe('YouTube cinematic curtain reveal', () => {
 
     await expect(curtain).toHaveCount(1);
     await expect(hero.locator('.hero-youtube-video')).toHaveCSS('opacity', '0');
-    await expect(hero.getByRole('button', { name: 'Play trailer', exact: true })).toBeVisible({ timeout: 7_000 });
+    await expect(hero.getByRole('button', { name: 'Play trailer', exact: true })).toBeVisible({ timeout: 14_000 });
     await expect(poster).toHaveClass(/is-visible/);
     await expect(curtain).toHaveCount(0);
 

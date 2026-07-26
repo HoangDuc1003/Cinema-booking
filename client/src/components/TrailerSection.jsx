@@ -5,6 +5,7 @@ import Loading from './Loading';
 import BlurCircle from './BlurCircle';
 import CinematicTrailerPlayer from './CinematicTrailerPlayer';
 import { extractYouTubeVideoId } from './hero/heroVideoSource';
+import { useMediaQuery, useSaveData } from './hero/useHeroEnvironment';
 
 const CARD_SLIDE_INTERVAL = 4000;
 
@@ -36,6 +37,8 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
   const [hasError, setHasError]         = useState(false);
   const [carouselPaused, setCarouselPaused]   = useState(false);
   const [activeIndex, setActiveIndex]         = useState(0);
+  const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
+  const saveData = useSaveData();
 
   const carouselRef = useRef(null);
   const styleRef    = useRef(false);
@@ -52,7 +55,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
   const goPrev = useCallback(() => { if (trailers.length) switchTrailer((currentIndex - 1 + trailers.length) % trailers.length); }, [currentIndex, trailers.length, switchTrailer]);
 
   useEffect(() => {
-    if (trailers.length === 0 || carouselPaused) return;
+    if (trailers.length === 0 || carouselPaused || reducedMotion || saveData) return;
     const id = setInterval(() => {
       if (!carouselRef.current) return;
       const c = carouselRef.current;
@@ -61,7 +64,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
       c.scrollTo({ left: atEnd ? 0 : c.scrollLeft + w, behavior: 'smooth' });
     }, CARD_SLIDE_INTERVAL);
     return () => clearInterval(id);
-  }, [trailers.length, carouselPaused]);
+  }, [trailers.length, carouselPaused, reducedMotion, saveData]);
 
   const handleScroll = () => {
     if (!carouselRef.current) return;
@@ -73,7 +76,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
   const scrollCarousel = (dir) => {
     if (!carouselRef.current) return;
     const w = (carouselRef.current.firstElementChild?.offsetWidth || 0) + 12;
-    carouselRef.current.scrollBy({ left: dir * w, behavior: 'smooth' });
+    carouselRef.current.scrollBy({ left: dir * w, behavior: reducedMotion ? 'auto' : 'smooth' });
   };
 
   useEffect(() => {
@@ -90,6 +93,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
       .ts-carousel-track::-webkit-scrollbar { display:none; }
       .ts-card { flex:0 0 clamp(180px,18.5%,260px); min-width:0; cursor:pointer; border-radius:12px; overflow:hidden; background:rgba(15,17,28,0.9); border:1.5px solid rgba(255,255,255,0.06); transition:all 0.4s cubic-bezier(0.4,0,0.2,1); position:relative; scroll-snap-align:start; }
       .ts-card:hover { transform:translateY(-4px); border-color:rgba(248,69,101,0.5); box-shadow:0 12px 28px rgba(0,0,0,0.4),0 0 0 1px rgba(248,69,101,0.15); }
+      .ts-card:focus-visible { outline:3px solid #fff; outline-offset:3px; border-color:rgba(248,69,101,0.8); transform:translateY(-4px); }
       .ts-card.active { border-color:rgba(248,69,101,0.8); box-shadow:0 0 20px rgba(248,69,101,0.2),0 8px 24px rgba(0,0,0,0.5); }
       .ts-card-thumb { position:relative; width:100%; aspect-ratio:16/9; overflow:hidden; }
       .ts-card-thumb img { width:100%; height:100%; object-fit:cover; display:block; transition:transform 0.5s ease; }
@@ -118,6 +122,9 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
         .ts-card-title { font-size:0.7rem; }
         .ts-card-sub { font-size:0.6rem; }
         .ts-card { flex:0 0 62%; }
+      }
+      @media (prefers-reduced-motion:reduce) {
+        .ts-nav-btn,.ts-card,.ts-card-thumb img,.ts-card-play,.ts-card-play-icon,.ts-dot { animation:none!important; transition:none!important; transform:none!important; }
       }
     `;
     document.head.appendChild(s);
@@ -201,7 +208,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
   }, [currentIndex, movieOnly, trailers]);
 
   useEffect(() => {
-    if (movieOnly || trailers.length < 2) return undefined;
+    if (movieOnly || saveData || trailers.length < 2) return undefined;
     const current = trailers[currentIndex];
     if (!current?.videoResolved || !getTrailerVideoId(current)) return undefined;
     const nextIndex = (currentIndex + 1) % trailers.length;
@@ -223,7 +230,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [currentIndex, movieOnly, trailers]);
+  }, [currentIndex, movieOnly, saveData, trailers]);
 
   if (movieOnly) {
     if (isLoading) {
@@ -296,9 +303,16 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
           <button className="ts-nav-btn hidden md:flex" onClick={() => scrollCarousel(-1)} aria-label="Previous thumbnails"><ChevronLeft className="w-4 h-4" /></button>
           <div className="ts-carousel-track" ref={carouselRef} onScroll={handleScroll}>
             {trailers.map((t, i) => (
-              <button key={t.id || i} className={`ts-card ${currentIndex === i ? 'active' : ''}`} onClick={() => switchTrailer(i)}>
+              <button
+                key={t.id || i}
+                type="button"
+                className={`ts-card ${currentIndex === i ? 'active' : ''}`}
+                onClick={() => switchTrailer(i)}
+                aria-label={`Play trailer for ${t.title}`}
+                aria-pressed={currentIndex === i}
+              >
                 <div className="ts-card-thumb">
-                  <img src={t.thumbnail || t.backdrop_path || t.poster_path} alt={t.title} loading="lazy" />
+                  <img src={t.thumbnail || t.backdrop_path || t.poster_path} alt={t.title} loading="lazy" decoding="async" />
                   <div className="ts-card-play"><div className="ts-card-play-icon"><Play className="w-3 h-3 text-white fill-white ml-0.5" /></div></div>
                   {t.vote_average && <div className="ts-card-rating"><Star className="w-2.5 h-2.5 fill-yellow-400 text-yellow-400" />{Number(t.vote_average).toFixed(1)}</div>}
                 </div>
@@ -320,7 +334,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
             <button key={i} className={`ts-dot ${activeIndex === i ? 'active' : ''}`} onClick={() => {
               if (carouselRef.current) {
                 const w = (carouselRef.current.firstElementChild?.offsetWidth || 0) + 12;
-                carouselRef.current.scrollTo({ left: i * w, behavior: 'smooth' });
+                carouselRef.current.scrollTo({ left: i * w, behavior: reducedMotion ? 'auto' : 'smooth' });
               }
             }} aria-label={`Go to slide ${i + 1}`} />
           ))}

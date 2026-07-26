@@ -1,14 +1,13 @@
 import React, { useEffect, useState } from 'react'
-import { useParams, useNavigate, useLocation } from 'react-router-dom'
-import { ClockIcon, ArrowRight, Users, Calendar, Star, MapPin, Sparkles } from 'lucide-react'
+import { useParams, useNavigate } from 'react-router-dom'
+import { ClockIcon, ArrowRight, Users, Calendar, Star, MapPin, RefreshCw } from 'lucide-react'
 import BlurCircle from '../components/BlurCircle'
 import toast from 'react-hot-toast'
 import timeFormat from '../lib/timeFormat'
 import { useAppContext } from '../context/AppContext'
 import Loading from '../components/Loading'
 import isoTimeFormat from '../lib/isoTimeFormat'
-import { fetchMovieDetails } from '../services/tmdb'
-import generateMockShowtimes from '../lib/generateMockShowtimes'
+import { fetchMovieShowtimes } from '../services/tmdb'
 
 const customStyles = `
     @keyframes syncPulse {
@@ -43,21 +42,6 @@ const customStyles = `
       animation: syncGlow 2s ease-in-out infinite;
     }
 `
-
-const generateFakeOccupied = (showId) => {
-  const seed = showId ? showId.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0) : 42
-  const rows = 'ABCDEFGHIJ'
-  const occupied = new Set()
-  const count = 15 + (seed % 20)
-  for (let index = 0; index < count; index += 1) {
-    const rowIndex = (seed * (index + 3) * 7) % rows.length
-    const row = rows[rowIndex]
-    const maxSeat = rowIndex < 2 ? 9 : 18
-    const seatNumber = ((seed * (index + 1) * 13) % maxSeat) + 1
-    occupied.add(`${row}${seatNumber}`)
-  }
-  return [...occupied]
-}
 
 const sameSeatSet = (left, right) => {
   if (left.length !== right.length) return false
@@ -120,13 +104,9 @@ const Seat = React.memo(({ seatId, status, type, showPrice, onClick }) => {
 });
 
 const SeatLayout = () => {
-  const { getToken, user, axios } = useAppContext()
+  const { user, axios } = useAppContext()
   const { id, date } = useParams()
   const navigate = useNavigate()
-  const location = useLocation()
-
-  // Detect if we're using mock data (passed from DateSelect via router state)
-  const isMockData = location.state?.isMockData || false;
 
   const [selectedSeats, setSelectedSeats] = useState([])
   const [selectedTime, setSelectedTime] = useState(null)
@@ -137,6 +117,8 @@ const SeatLayout = () => {
   const [showPrice, setShowPrice] = useState(0)
   const [priceLoading, setPriceLoading] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [loadError, setLoadError] = useState('')
+  const [reloadToken, setReloadToken] = useState(0)
   const [isBooking, setIsBooking] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false) // Tracking real-time sync
   const imageBaseUrl = "https://image.tmdb.org/t/p/original"
@@ -177,71 +159,24 @@ const SeatLayout = () => {
     [selectedHall, showtimesForDate],
   )
 
-  const fetchShow = async () => {
-    try {
-      // STRATEGY: Always load TMDB first (fast, cached), then try backend as upgrade.
-      // This guarantees sub-1s render regardless of backend health.
-
-      // Step 1: TMDB details — instant if cached, ~300ms if not
-      const tmdbData = await fetchMovieDetails(id);
-      if (!tmdbData) {
-        toast.error("Can't find movie details.");
-        return null;
-      }
-
-      const buildTmdbResult = (data) => ({
-        ...data,
-        dateTime: generateMockShowtimes(data.id || id),
-        _id: data.id?.toString() || id,
-        poster_path: data.poster_path?.startsWith('http')
-          ? data.poster_path.replace('https://image.tmdb.org/t/p/w500', '')
-          : data.poster_path,
-      });
-
-      // If we know it's mock data (passed from DateSelect), skip backend entirely
-      if (isMockData) {
-        return buildTmdbResult(tmdbData);
-      }
-
-      // Step 2: Try backend with 10s timeout — Vercel cold starts need more time
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 10000);
-
-        const { data } = await axios.get(`/api/show/${id}`, {
-          signal: controller.signal,
-        });
-        clearTimeout(timeout);
-
-        if (data?.success && data.movie && data.dateTime) {
-          return {
-            ...data.movie,
-            dateTime: data.dateTime,
-            _id: data.movie._id || data.movie.id,
-          };
-        }
-      } catch {
-        // Backend timeout or unavailable — that's fine, use TMDB data
-      }
-
-      // Fallback: use TMDB data with mock showtimes
-      return buildTmdbResult(tmdbData);
-    } catch (error) {
-      console.error('Error fetching show data:', error);
-      toast.error("Can't load seat info. Please try again!");
-      return null;
+  const fetchShow = async (signal) => {
+    const data = await fetchMovieShowtimes(id, { signal });
+    const showtimesForSelectedDate = data.dateTime?.[date] || [];
+    if (!showtimesForSelectedDate.length) {
+      throw new Error('This date no longer has an available showtime.');
     }
+
+    return {
+      ...data.movie,
+      dateTime: data.dateTime,
+      _id: data.movie._id || data.movie.id,
+    };
   }
 
   const fetchOccupiedSeats = React.useCallback(async (showIdParam) => {
     try {
       const showId = showIdParam ?? selectedTime?.showId ?? selectedTime?._id ?? selectedTime?.id
       if (!showId) return null
-
-      // For mock showtimes, generate fake occupied seats instead of calling backend
-      if (typeof showId === 'string' && showId.startsWith('mock_')) {
-        return generateFakeOccupied(showId);
-      }
 
       const { data } = await axios.get(`/api/booking/seat/${showId}`)
       if (data.success) {
@@ -261,17 +196,9 @@ const SeatLayout = () => {
       const showId = selectedTime?.showId ?? selectedTime?._id ?? selectedTime?.id
       if (!showId) return toast.error('No show selected')
 
-      // Include mock showtime metadata for backend to create show on-the-fly
-      const isMock = typeof showId === 'string' && showId.startsWith('mock_');
       const payload = {
         showId,
         selectedSeats,
-        ...(isMock && {
-          movieId: String(show.id || show._id),
-          showDateTime: selectedTime.time,
-          hall: selectedTime.hall,
-          price: selectedTime.price
-        })
       };
 
       setIsBooking(true)
@@ -304,25 +231,31 @@ const SeatLayout = () => {
   useEffect(() => {
     let mounted = true;
     let timerId = null;
+    const controller = new AbortController();
 
     const loadData = async () => {
       setIsLoading(true);
       setIsVisible(false);
+      setLoadError('');
+      setShow(null);
+      setSelectedHall('');
+      setSelectedTime(null);
+      setSelectedSeats([]);
+      setOccupiedSeats([]);
+      setShowPrice(0);
 
       try {
-        const movieData = await fetchShow();
+        const movieData = await fetchShow(controller.signal);
         if (!mounted) return;
 
-        if (movieData) {
-          setShow(movieData);
-          timerId = setTimeout(() => {
-            if (mounted) setIsVisible(true);
-          }, 100);
-        } else {
-          navigate(-1);
-        }
+        setShow(movieData);
+        timerId = setTimeout(() => {
+          if (mounted) setIsVisible(true);
+        }, 100);
       } catch (error) {
+        if (controller.signal.aborted) return;
         console.error('Error loading movie data:', error);
+        setLoadError(error.message || "Can't load seat info. Please try again.");
       } finally {
         if (mounted) setIsLoading(false);
       }
@@ -332,10 +265,11 @@ const SeatLayout = () => {
 
     return () => {
       mounted = false;
+      controller.abort();
       if (timerId) clearTimeout(timerId);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [id, date, reloadToken]);
 
   useEffect(() => {
     let mounted = true
@@ -363,13 +297,11 @@ const SeatLayout = () => {
     return () => { mounted = false }
   }, [selectedTime, showtimeById, fetchOccupiedSeats])
 
-  // REAL-TIME SYNC: Poll for occupied seats every 5 seconds (skip for mock data)
+  // REAL-TIME SYNC: Poll persisted seat inventory every 5 seconds.
   useEffect(() => {
     if (!selectedTime) return
 
     const showId = selectedTime?.showId ?? selectedTime?._id ?? selectedTime?.id
-    // Skip polling for mock showtimes — occupied seats are static/fake
-    if (typeof showId === 'string' && showId.startsWith('mock_')) return
 
     let mounted = true
     const interval = setInterval(async () => {
@@ -513,6 +445,27 @@ const SeatLayout = () => {
     })
     return Math.round(total);
   }, [selectedSeats, rowConfigByLetter, showPrice])
+
+  if (isLoading) return <Loading />
+
+  if (loadError) {
+    return (
+      <main className="min-h-screen bg-black px-6 pt-32 text-white">
+        <div className="catalog-state-panel mx-auto max-w-2xl" role="alert">
+          <h1>Seat selection is unavailable</h1>
+          <p>{loadError}</p>
+          <button
+            type="button"
+            className="catalog-state-panel__button"
+            onClick={() => setReloadToken((value) => value + 1)}
+          >
+            <RefreshCw aria-hidden="true" />
+            Try again
+          </button>
+        </div>
+      </main>
+    )
+  }
 
   return show ? (
     <div className="min-h-screen bg-black relative">
@@ -738,12 +691,6 @@ const SeatLayout = () => {
            <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-3 bg-linear-to-r from-white via-primary to-white bg-clip-text text-transparent">
               Select Your Seat
             </h1>
-            {isMockData && (
-              <div className="inline-flex items-center gap-2 px-4 py-2 bg-amber-500/10 border border-amber-500/25 rounded-full mb-2">
-                <Sparkles className="w-4 h-4 text-amber-400" />
-                <span className="text-amber-400 text-sm font-medium">Demo Mode — Showtimes are simulated</span>
-              </div>
-            )}
             <p className="text-gray-400 text-lg flex items-center justify-center gap-2">
               Choose your preferred seats for the best cinema experience
               {isSyncing && (

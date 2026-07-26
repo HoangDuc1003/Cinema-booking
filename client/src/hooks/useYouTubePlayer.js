@@ -291,10 +291,11 @@ export const useYouTubePlayer = ({
     activeRequestRef.current = meta;
 
     try {
-      // Apply audio preference: try unmuted first if preference says so.
+      // Every autoplay/resume request starts muted. Sound may only be released
+      // by the direct user-gesture handler owned by HeroSection.
       applyAudioPreference(targetPlayer, {
-        muted: currentRequest.muted,
-        volume: currentRequest.volume,
+        muted: true,
+        volume: 0,
       });
       disableCaptionsBestEffort(targetPlayer);
 
@@ -322,8 +323,8 @@ export const useYouTubePlayer = ({
 
       disableCaptionsBestEffort(targetPlayer);
       applyAudioPreference(targetPlayer, {
-        muted: currentRequest.muted,
-        volume: currentRequest.volume,
+        muted: true,
+        volume: 0,
       });
 
       try {
@@ -525,7 +526,8 @@ export const useYouTubePlayer = ({
 
   useEffect(() => {
     if (!enabled || !player || !isReady || !readyRef.current) return;
-    applyAudioPreference(player, { muted: active ? muted : true, volume: active ? (requestRef.current.volume || DEFAULT_HERO_VOLUME) : 0 });
+    if (active && !muted) return;
+    applyAudioPreference(player, { muted: true, volume: 0 });
   }, [active, enabled, isReady, muted, player]);
 
   useEffect(() => {

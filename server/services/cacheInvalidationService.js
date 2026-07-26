@@ -5,6 +5,7 @@ export const invalidateMovieCatalog = async (movieId = null) => {
     const keys = [redisKeys.movies(), redisKeys.nowPlayingMovies(), redisKeys.cinemas(), redisKeys.homeHero()];
     if (movieId) keys.push(redisKeys.movie(movieId), redisKeys.showtimes(movieId));
     await deleteKeys(keys);
+    await deleteByPattern(redisKeys.tmdbSimilarPattern());
     if (!movieId) await deleteByPattern(redisKeys.showtimesPattern());
 };
 

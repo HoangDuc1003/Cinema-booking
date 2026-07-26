@@ -3,9 +3,10 @@ import useYouTubePlayer from '../../hooks/useYouTubePlayer';
 import {
   HERO_BUFFERING_HYSTERESIS_MS,
   HERO_FAILURE_REASONS,
+  HERO_MIN_PLAYBACK_ADVANCE_SECONDS,
   HERO_PLAYBACK_TIMEOUT_MS,
   HERO_PLAYING_HYSTERESIS_MS,
-  HERO_VISUAL_READY_CONFIRM_MS,
+  hasAdvancedPlayback,
 } from './heroMachine';
 
 const now = () => performance.now();
@@ -71,7 +72,6 @@ const HeroYouTubeVideo = ({
   const coverLayoutRef = useRef(null);
   const quarantineCompletedRef = useRef(null);
   const playingTimerRef = useRef(null);
-  const visualTimerRef = useRef(null);
   const bufferingTimerRef = useRef(null);
   const recoveryTimerRef = useRef(null);
   const startupTimerRef = useRef(null);
@@ -93,9 +93,7 @@ const HeroYouTubeVideo = ({
 
   const clearVerificationTimers = useCallback(() => {
     window.clearTimeout(playingTimerRef.current);
-    window.clearTimeout(visualTimerRef.current);
     playingTimerRef.current = null;
-    visualTimerRef.current = null;
   }, []);
 
   const clearBufferingTimers = useCallback(() => {
@@ -153,10 +151,13 @@ const HeroYouTubeVideo = ({
       const currentTime = Number(player?.getCurrentTime?.());
       if (
         !isCurrent(targetGeneration, targetVideoId)
-        || player?.getPlayerState?.() !== playingState
-        || !Number.isFinite(firstTime)
-        || !Number.isFinite(currentTime)
-        || currentTime <= firstTime
+        || !hasAdvancedPlayback({
+          playerState: player?.getPlayerState?.(),
+          playingState,
+          previousTime: firstTime,
+          currentTime,
+          minimumAdvance: HERO_MIN_PLAYBACK_ADVANCE_SECONDS,
+        })
       ) return;
 
       const confirmedAt = now();
@@ -164,30 +165,23 @@ const HeroYouTubeVideo = ({
       startupTimerRef.current = null;
       onPlaybackStable?.({ generation: targetGeneration, now: confirmedAt, currentTime });
 
-      visualTimerRef.current = window.setTimeout(() => {
-        visualTimerRef.current = null;
-        const visualTime = Number(player?.getCurrentTime?.());
-        const layout = coverLayoutRef.current;
-        const shell = shellRef.current;
-        if (
-          !isCurrent(targetGeneration, targetVideoId)
-          || player?.getPlayerState?.() !== playingState
-          || !Number.isFinite(visualTime)
-          || visualTime <= currentTime
-        ) return;
+      const layout = coverLayoutRef.current;
+      const shell = shellRef.current;
+      if (
+        !layout
+        || !shell
+        || layout.width < shell.clientWidth - 1
+        || layout.height < shell.clientHeight - 1
+      ) {
+        quarantineCompletedRef.current = {
+          generation: targetGeneration,
+          videoId: targetVideoId,
+          minTime: currentTime,
+        };
+        return;
+      }
 
-        if (
-          !layout
-          || !shell
-          || layout.width < shell.clientWidth - 1
-          || layout.height < shell.clientHeight - 1
-        ) {
-          quarantineCompletedRef.current = { generation: targetGeneration, videoId: targetVideoId, minTime: currentTime };
-          return;
-        }
-
-        onVisualReady?.({ generation: targetGeneration, now: now(), currentTime: visualTime });
-      }, HERO_VISUAL_READY_CONFIRM_MS);
+      onVisualReady?.({ generation: targetGeneration, now: confirmedAt, currentTime });
     }, HERO_PLAYING_HYSTERESIS_MS);
   }, [clearVerificationTimers, isCurrent, onPlaybackStable, onVisualReady]);
 
@@ -307,39 +301,6 @@ const HeroYouTubeVideo = ({
     }
     return undefined;
   }, [active, clearAllTimers, enabled, generation, onPlaybackPaused, onVisualHidden]);
-
-  useEffect(() => {
-    if (!player || !active || !visible || muted) return undefined;
-
-    try {
-      player.setVolume?.(Math.max(0, Math.min(100, Number(volume) || 60)));
-      const res = player.unMute?.();
-      if (res && typeof res.catch === 'function') {
-        res.catch(() => {
-          try { player.mute?.(); } catch {}
-          handleMutedFallback({ generation, videoId });
-        });
-      }
-      // Recover if browser autoplay policy pauses playback on unMute attempt without user gesture
-      const timer = window.setTimeout(() => {
-        try {
-          const states = window.YT?.PlayerState || {};
-          if (player.getPlayerState?.() === states.PAUSED) {
-            player.mute?.();
-            player.playVideo?.();
-          }
-        } catch {
-          // Recovery check is best effort
-        }
-      }, 120);
-
-      return () => window.clearTimeout(timer);
-    } catch {
-      try { player.mute?.(); } catch {}
-      handleMutedFallback({ generation, videoId });
-      return undefined;
-    }
-  }, [active, generation, handleMutedFallback, muted, player, videoId, visible, volume]);
 
   useEffect(() => () => clearAllTimers(), [clearAllTimers]);
 

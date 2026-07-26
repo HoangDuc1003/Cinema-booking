@@ -9,6 +9,7 @@ import { getPublicHomeHero } from '../services/heroService.js';
 import { getPublicHomeNowShowing } from '../services/homeNowShowingService.js';
 import { fetchTmdbImage } from '../services/tmdbImageService.js';
 import { calculateCurrentSlot, getPublicHomePayload } from '../services/catalogRefreshService.js';
+import { groupPersistedShowtimes, parseCinemaShowDateTime } from '../services/showtimeService.js';
 
 const tmdbHeaders = () => ({ Authorization: `Bearer ${process.env.TMDB_API_KEY}` });
 const setCacheHeader = (res, cache) => res.set('X-Cache', cache);
@@ -205,6 +206,125 @@ export const createGetTmdbVideosHandler = ({
 
 export const getTmdbVideos = createGetTmdbVideosHandler();
 
+const loadBookableMovieIds = async () => Show.distinct('movie', {
+    showDateTime: { $gte: new Date() },
+    hall: { $ne: 'Virtual Hall' },
+});
+
+const loadSimilarMovieFallback = async (movieId, limit = 20) => {
+    const currentMovie = await Movie.findById(movieId).lean();
+    const genreIds = (currentMovie?.genres || [])
+        .map((genre) => genre?.id)
+        .filter(Number.isFinite);
+    const baseFilter = {
+        _id: { $ne: movieId },
+        poster_path: { $nin: [null, ''] },
+    };
+    const genreFilter = genreIds.length
+        ? { ...baseFilter, 'genres.id': { $in: genreIds } }
+        : baseFilter;
+    let movies = await Movie.find(genreFilter).sort({ vote_average: -1, updatedAt: -1 }).limit(limit).lean();
+    if (!movies.length && genreIds.length) {
+        movies = await Movie.find(baseFilter).sort({ vote_average: -1, updatedAt: -1 }).limit(limit).lean();
+    }
+    return {
+        page: 1,
+        total_pages: 1,
+        total_results: movies.length,
+        results: movies.map(toTmdbMovie),
+    };
+};
+
+export const normalizeSimilarMovieResults = ({
+    results = [],
+    movieId,
+    bookableMovieIds = [],
+    limit = 4,
+}) => {
+    const currentMovieId = String(movieId);
+    const bookableIds = new Set(bookableMovieIds.map(String));
+    const seen = new Set([currentMovieId]);
+
+    return results
+        .map((movie, index) => ({ movie, index }))
+        .filter(({ movie }) => {
+            const id = String(movie?.id || movie?._id || '');
+            if (!/^\d+$/.test(id) || seen.has(id) || movie?.adult === true) return false;
+            if (!movie?.poster_path && !movie?.backdrop_path) return false;
+            seen.add(id);
+            return true;
+        })
+        .map(({ movie, index }) => {
+            const id = String(movie.id || movie._id);
+            return {
+                ...movie,
+                id: Number(id),
+                _id: id,
+                hasShowtimes: bookableIds.has(id),
+                __sourceIndex: index,
+            };
+        })
+        .sort((left, right) => (
+            Number(right.hasShowtimes) - Number(left.hasShowtimes)
+            || left.__sourceIndex - right.__sourceIndex
+        ))
+        .slice(0, limit)
+        .map(({ __sourceIndex, ...movie }) => movie);
+};
+
+export const createGetTmdbSimilarHandler = ({
+    fetchJson = fetchTmdbJson,
+    sendResponse = sendTmdbResponse,
+    similarKey = redisKeys.tmdbSimilar,
+    ttl = redisTtl.movies,
+    loadBookableIds = loadBookableMovieIds,
+    loadFallback = loadSimilarMovieFallback,
+} = {}) => async (req, res) => {
+    try {
+        const movieId = String(req.params.movieId || '');
+        if (!validMovieId(movieId)) {
+            return res.status(400).json({ success: false, message: 'Invalid movie ID.' });
+        }
+        const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 4, 1), 20);
+        return await sendResponse(
+            res,
+            similarKey(movieId, limit),
+            ttl,
+            async () => {
+                const [payload, bookableMovieIds] = await Promise.all([
+                    withMovieFallback(
+                        'getTmdbSimilar',
+                        () => fetchJson(`/movie/${movieId}/similar`, {
+                            language: 'en-US',
+                            include_adult: false,
+                            page: 1,
+                        }),
+                        () => loadFallback(movieId, 20),
+                    ),
+                    loadBookableIds(),
+                ]);
+                const results = normalizeSimilarMovieResults({
+                    results: payload?.results,
+                    movieId,
+                    bookableMovieIds,
+                    limit,
+                });
+                return {
+                    page: 1,
+                    total_pages: 1,
+                    total_results: results.length,
+                    results,
+                };
+            },
+        );
+    } catch (error) {
+        console.error('[getTmdbSimilar]', error.message);
+        return res.status(502).json({ success: false, message: 'Unable to load similar movies.' });
+    }
+};
+
+export const getTmdbSimilar = createGetTmdbSimilarHandler();
+
 export const searchTmdbMovies = async (req, res) => {
     try {
         const query = String(req.query.query || '').trim().slice(0, 100);
@@ -327,7 +447,7 @@ export const addShow = async (req, res) => {
             for (const time of show.times || []) {
                 showsToCreate.push({
                     movie: String(movieId),
-                    showDateTime: new Date(`${show.date}T${time}`),
+                    showDateTime: parseCinemaShowDateTime(show.date, time),
                     showPrice: Number(showPrice),
                     hall: show.hall || '',
                     occupiedSeats: {},
@@ -335,15 +455,22 @@ export const addShow = async (req, res) => {
             }
         }
 
+        if (!showsToCreate.length) {
+            return res.status(400).json({ success: false, message: 'At least one valid showtime is required.' });
+        }
         if (showsToCreate.length) await Show.insertMany(showsToCreate, { ordered: false });
         await invalidateMovieCatalog(String(movieId));
         return res.json({ success: true, message: 'Show added successfully.' });
     } catch (error) {
         console.error('[addShow]', error.message);
-        const status = error?.code === 11000 ? 409 : 500;
+        const status = error instanceof RangeError ? 400 : error?.code === 11000 ? 409 : 500;
         return res.status(status).json({
             success: false,
-            message: status === 409 ? 'One or more showtimes already exist.' : 'Unable to add shows.',
+            message: status === 400
+                ? error.message
+                : status === 409
+                    ? 'One or more showtimes already exist.'
+                    : 'Unable to add shows.',
         });
     }
 };
@@ -361,7 +488,10 @@ export const importTrendingMovies = async (req, res) => {
 export const getShows = async (req, res) => {
     try {
         const result = await rememberJson(redisKeys.movies(), redisTtl.movies, async () => {
-            const shows = await Show.find({ showDateTime: { $gte: new Date() } })
+            const shows = await Show.find({
+                showDateTime: { $gte: new Date() },
+                hall: { $ne: 'Virtual Hall' },
+            })
                 .populate('movie')
                 .sort({ showDateTime: 1 })
                 .lean();
@@ -372,42 +502,6 @@ export const getShows = async (req, res) => {
                 const movieId = show.movie?._id && String(show.movie._id);
                 if (movieId && !seenIds.has(movieId)) {
                     uniqueMovies.push(show.movie);
-                    seenIds.add(movieId);
-                }
-            }
-
-            if (uniqueMovies.length < 10) {
-                try {
-                    const payload = await getPublicHomePayload(10, 'US', new Date());
-                    const catalogMovies = payload.nowShowing || [];
-                    for (const movie of catalogMovies) {
-                        const movieId = String(movie._id || movie.id);
-                        if (seenIds.has(movieId)) continue;
-                        uniqueMovies.push({
-                            _id: movieId,
-                            title: movie.title,
-                            poster_path: movie.poster_path,
-                            backdrop_path: movie.backdrop_path,
-                            vote_average: movie.vote_average,
-                            release_date: movie.release_date,
-                            isVirtual: true,
-                        });
-                        seenIds.add(movieId);
-                    }
-                } catch (error) {
-                    console.warn('[getShows] Catalog payload unavailable, continuing with MongoDB:', error.message);
-                }
-            }
-
-            if (uniqueMovies.length < 10) {
-                const databaseMovies = await Movie.find({ _id: { $nin: [...seenIds] } })
-                    .sort({ updatedAt: -1 })
-                    .limit(20 - uniqueMovies.length)
-                    .lean();
-                for (const movie of databaseMovies) {
-                    const movieId = String(movie._id);
-                    if (seenIds.has(movieId)) continue;
-                    uniqueMovies.push({ ...movie, isVirtual: true });
                     seenIds.add(movieId);
                 }
             }
@@ -424,7 +518,10 @@ export const getShows = async (req, res) => {
 export const getCinemas = async (req, res) => {
     try {
         const result = await rememberJson(redisKeys.cinemas(), redisTtl.cinemas, async () => {
-            const halls = await Show.distinct('hall', { showDateTime: { $gte: new Date() } });
+            const halls = await Show.distinct('hall', {
+                showDateTime: { $gte: new Date() },
+                hall: { $ne: 'Virtual Hall' }
+            });
             return [...new Set(halls.map((hall) => hall || 'Standard Hall'))].sort();
         });
         setCacheHeader(res, result.cache).json({ success: true, cinemas: result.value });
@@ -443,49 +540,17 @@ export const getShow = async (req, res) => {
 
         const result = await rememberJson(redisKeys.showtimes(movieId), redisTtl.showtimes, async () => {
             const [shows, cachedMovie] = await Promise.all([
-                Show.find({ movie: movieId, showDateTime: { $gte: new Date() } }).lean(),
+                Show.find({
+                    movie: movieId,
+                    showDateTime: { $gte: new Date() },
+                    hall: { $ne: 'Virtual Hall' },
+                }).sort({ showDateTime: 1 }).lean(),
                 getJson(redisKeys.movie(movieId)),
             ]);
             const databaseMovie = cachedMovie ? null : await Movie.findById(movieId).lean();
             const movie = cachedMovie || databaseMovie || await fetchMovieFromTmdb(movieId);
             await setJson(redisKeys.movie(movieId), movie, redisTtl.movie);
-
-            const showsByTimestamp = new Map();
-            for (const show of shows) {
-                const timestamp = new Date(show.showDateTime).getTime();
-                if (!showsByTimestamp.has(timestamp)) showsByTimestamp.set(timestamp, show);
-            }
-
-            const dateTime = {};
-            const now = new Date();
-            const standardTimes = ['10:00', '13:30', '17:00', '20:30'];
-            for (let dayOffset = 0; dayOffset < 7; dayOffset += 1) {
-                const date = new Date(now);
-                date.setDate(date.getDate() + dayOffset);
-                const dateString = date.toISOString().split('T')[0];
-                dateTime[dateString] = [];
-
-                for (const time of standardTimes) {
-                    const showDateTime = new Date(`${dateString}T${time}:00.000Z`);
-                    if (showDateTime < now) continue;
-                    const existing = showsByTimestamp.get(showDateTime.getTime());
-                    dateTime[dateString].push(existing ? {
-                        time: existing.showDateTime,
-                        showId: existing._id,
-                        price: existing.showPrice,
-                        hall: existing.hall || 'Standard Hall',
-                        isVirtual: false,
-                    } : {
-                        time: showDateTime,
-                        showId: `virtual_${movieId}_${showDateTime.getTime()}`,
-                        price: 50,
-                        hall: 'Virtual Hall',
-                        isVirtual: true,
-                    });
-                }
-            }
-
-            return { movie, dateTime };
+            return { movie, dateTime: groupPersistedShowtimes(shows) };
         });
 
         setCacheHeader(res, result.cache).json({ success: true, ...result.value });
@@ -495,4 +560,13 @@ export const getShow = async (req, res) => {
     }
 };
 
-export default { getNowPlayingMovies, addShow, importTrendingMovies, getShows, getCinemas, getShow, getHomeHero };
+export default {
+    getNowPlayingMovies,
+    addShow,
+    importTrendingMovies,
+    getShows,
+    getCinemas,
+    getShow,
+    getTmdbSimilar,
+    getHomeHero
+};

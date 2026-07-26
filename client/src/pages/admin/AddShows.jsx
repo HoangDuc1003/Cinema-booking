@@ -40,9 +40,9 @@ const AddShows = () => {
   const handleAddDateTime = () => {
     if (!dateTimeInput) return;
 
-    const dateObj = new Date(dateTimeInput);
-    const dateStr = dateObj.toISOString().split('T')[0];
-    const timeStr = dateObj.toTimeString().slice(0, 5);
+    const [dateStr, timeValue] = dateTimeInput.split('T');
+    const timeStr = timeValue?.slice(0, 5);
+    if (!dateStr || !timeStr) return;
 
     setDateTimeSelection((prev) => {
       const updatedSelection = { ...prev };
@@ -75,7 +75,7 @@ const AddShows = () => {
     });
   };
 
-  // Submit handler (mock)
+  // Submit persisted showtimes
   const handleSubmit = async() => {
     try {
       setAddShow(true)

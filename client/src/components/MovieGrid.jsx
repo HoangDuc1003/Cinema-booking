@@ -26,9 +26,9 @@ const MovieGrid = ({
     return movies.map((movie, index) => {
       const key = movie._id || movie.id || index;
       const delay = Math.min(index * staggerDelay, 150);
-      const className = animated
-        ? `catalog-grid-item ${isVisible ? 'is-visible' : ''}`
-        : 'catalog-grid-item is-visible';
+      const className = animated && isVisible
+        ? 'catalog-grid-item is-entering'
+        : 'catalog-grid-item';
 
       return (
         <div key={key} className={className} style={{ '--catalog-card-delay': `${delay}ms` }}>

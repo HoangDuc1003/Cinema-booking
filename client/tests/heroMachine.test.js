@@ -7,6 +7,8 @@ import {
   HERO_PLAYBACK_STATUS,
   HERO_PLAYER_STATUS,
   HERO_COMPACT_PLAYBACK_MS,
+  HERO_MIN_PLAYBACK_ADVANCE_SECONDS,
+  HERO_PLAYING_HYSTERESIS_MS,
   HERO_PREVIEW_PLAYBACK_MS,
   createInitialHeroState,
   getPlaybackRemaining,
@@ -117,7 +119,7 @@ test('poster remains visible until visual readiness is confirmed for the current
   assert.equal(state.posterVisible, true);
 });
 
-test('the playback budget begins only after the 250ms stable-playing confirmation', () => {
+test('the playback budget begins only after the stable-playing confirmation', () => {
   let state = requestTrailer(createInitialHeroState({ movieKey: 'movie-a' }), 1);
   state = heroReducer(state, { type: 'PLAYBACK_PLAYING', generation: 1, now: 1_000 });
   state = heroReducer(state, { type: 'PLAYBACK_STABLE', generation: 1, now: 1_250 });
@@ -215,8 +217,8 @@ test('pause and sustained buffering immediately close the visual latch until pla
 test('buffer and playing hysteresis thresholds are inclusive only at the threshold', () => {
   assert.equal(hasReachedHysteresis(449, 450), false);
   assert.equal(hasReachedHysteresis(450, 450), true);
-  assert.equal(hasReachedHysteresis(249, 250), false);
-  assert.equal(hasReachedHysteresis(250, 250), true);
+  assert.equal(hasReachedHysteresis(HERO_PLAYING_HYSTERESIS_MS - 1, HERO_PLAYING_HYSTERESIS_MS), false);
+  assert.equal(hasReachedHysteresis(HERO_PLAYING_HYSTERESIS_MS, HERO_PLAYING_HYSTERESIS_MS), true);
 });
 
 test('visual readiness requires PLAYING state and advancing current time', () => {
@@ -227,7 +229,15 @@ test('visual readiness requires PLAYING state and advancing current time', () =>
     currentTime: 8.6,
   };
 
-  assert.equal(hasAdvancedPlayback(validProbe), true);
+  assert.equal(hasAdvancedPlayback({
+    ...validProbe,
+    minimumAdvance: HERO_MIN_PLAYBACK_ADVANCE_SECONDS,
+  }), true);
+  assert.equal(hasAdvancedPlayback({
+    ...validProbe,
+    currentTime: 8.55,
+    minimumAdvance: HERO_MIN_PLAYBACK_ADVANCE_SECONDS,
+  }), false);
   assert.equal(hasAdvancedPlayback({ ...validProbe, playerState: 2 }), false);
   assert.equal(hasAdvancedPlayback({ ...validProbe, currentTime: 8.25 }), false);
   assert.equal(hasAdvancedPlayback({ ...validProbe, currentTime: Number.NaN }), false);

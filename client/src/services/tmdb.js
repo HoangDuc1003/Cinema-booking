@@ -9,6 +9,8 @@ export { resolveClientHeroOffset } from './heroCatalogOffset.js';
 const API_BASE = (import.meta.env.VITE_BASE_URL || '').replace(/\/$/, '');
 const IMAGE_BASE = 'https://image.tmdb.org/t/p';
 const API_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS) || 4500;
+const HERO_API_TIMEOUT_MS = Number(import.meta.env.VITE_HERO_API_TIMEOUT_MS) || 12_000;
+const SHOWTIME_API_TIMEOUT_MS = Number(import.meta.env.VITE_SHOWTIME_API_TIMEOUT_MS) || 10_000;
 const TRAILER_CACHE_TTL_MS = 30_000;
 const trailerResponseCache = new Map();
 
@@ -41,12 +43,12 @@ const getTmdbMovieId = (movie) => {
     return /^\d+$/.test(value) ? value : '';
 };
 
-const fetchWithTimeout = async (url, options = {}) => {
-    return requestWithTimeout(url, options, { timeoutMs: API_TIMEOUT_MS });
+const fetchWithTimeout = async (url, options = {}, timeoutMs = API_TIMEOUT_MS) => {
+    return requestWithTimeout(url, options, { timeoutMs });
 };
 
-const fetchBackendJson = async (path, options = {}) => {
-    const response = await fetchWithTimeout(`${API_BASE}/api/show/tmdb${path}`, options);
+const fetchBackendJson = async (path, options = {}, timeoutMs = API_TIMEOUT_MS) => {
+    const response = await fetchWithTimeout(`${API_BASE}/api/show/tmdb${path}`, options, timeoutMs);
     const payload = await response.json().catch(() => null);
     if (!response.ok || !payload?.success) {
         throw new Error(payload?.message || `Movie source request failed (${response.status})`);
@@ -60,7 +62,7 @@ export const fetchHomeHero = async ({ signal, offset, fallbackMode = 'mock' } = 
             ? offset
             : resolveClientHeroOffset();
         const url = `${API_BASE}/api/show/hero?heroOffset=${encodeURIComponent(activeOffset)}`;
-        const response = await fetchWithTimeout(url, { signal });
+        const response = await fetchWithTimeout(url, { signal }, HERO_API_TIMEOUT_MS);
         const payload = await response.json().catch(() => null);
         if (!response.ok || !payload?.success) {
             throw new Error(payload?.message || `Hero request failed (${response.status})`);
@@ -290,7 +292,11 @@ export const fetchMovieDetails = async (id, { signal, fallbackMode = 'mock' } = 
             // Cache read error, proceed with API call
         }
 
-        const data = await fetchBackendJson(`/movie/${encodeURIComponent(id)}`, { signal });
+        const data = await fetchBackendJson(
+            `/movie/${encodeURIComponent(id)}`,
+            { signal },
+            SHOWTIME_API_TIMEOUT_MS,
+        );
 
         // Cache the result
         try {
@@ -308,6 +314,41 @@ export const fetchMovieDetails = async (id, { signal, fallbackMode = 'mock' } = 
         return fallback || null;
     }
 }
+
+export const fetchMovieShowtimes = async (id, { signal } = {}) => {
+    const movieId = String(id || '').trim();
+    if (!/^\d+$/.test(movieId)) throw new TypeError('A valid movie ID is required.');
+    const response = await fetchWithTimeout(
+        `${API_BASE}/api/show/${encodeURIComponent(movieId)}`,
+        { signal },
+        SHOWTIME_API_TIMEOUT_MS,
+    );
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.success || !payload?.movie || !payload?.dateTime) {
+        throw new Error(payload?.message || `Showtime request failed (${response.status})`);
+    }
+    return {
+        movie: payload.movie,
+        dateTime: payload.dateTime,
+    };
+};
+
+export const fetchSimilarMovies = async (id, { signal, limit = 4 } = {}) => {
+    const movieId = String(id || '').trim();
+    if (!/^\d+$/.test(movieId)) throw new TypeError('A valid movie ID is required.');
+    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 4, 1), 20);
+    const data = await fetchBackendJson(
+        `/movie/${encodeURIComponent(movieId)}/similar?limit=${safeLimit}`,
+        { signal },
+        SHOWTIME_API_TIMEOUT_MS,
+    );
+    const movies = Array.isArray(data?.results)
+        ? data.results.map(normalizeMovieCard)
+        : [];
+    return onlyMoviesWithImages(movies)
+        .filter((movie) => String(movie.id || movie._id) !== movieId)
+        .slice(0, safeLimit);
+};
 // services/tmdb.js
 export const fetchLatestTrailers = async (opts = { limit: 10 }) => {
     try {

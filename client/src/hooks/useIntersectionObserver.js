@@ -25,7 +25,7 @@ const useIntersectionObserver = ({
   triggerOnce = true,
 } = {}) => {
   const elementRef = useRef(null);
-  const [isVisible, setIsVisible] = useState(false);
+  const [isVisible, setIsVisible] = useState(() => typeof IntersectionObserver === 'undefined');
   const observerRef = useRef(null);
 
   const cleanup = useCallback(() => {
@@ -38,15 +38,22 @@ const useIntersectionObserver = ({
   useEffect(() => {
     const element = elementRef.current;
     if (!element) return;
+    if (typeof IntersectionObserver === 'undefined') return undefined;
 
     // Avoid creating a new observer if already visible and triggerOnce
     if (triggerOnce && isVisible) return;
 
     cleanup();
 
+    const failOpenTimer = window.setTimeout(() => {
+      setIsVisible(true);
+      cleanup();
+    }, 1200);
+
     observerRef.current = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
+          window.clearTimeout(failOpenTimer);
           setIsVisible(true);
           // Disconnect immediately after first trigger to free resources
           if (triggerOnce) {
@@ -61,7 +68,10 @@ const useIntersectionObserver = ({
 
     observerRef.current.observe(element);
 
-    return cleanup;
+    return () => {
+      window.clearTimeout(failOpenTimer);
+      cleanup();
+    };
   }, [threshold, rootMargin, triggerOnce, isVisible, cleanup]);
 
   return { ref: elementRef, isVisible };

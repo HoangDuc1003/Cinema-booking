@@ -11,6 +11,7 @@ import {
     getTmdbHomeNowShowing,
     getTmdbNowPlaying,
     getTmdbPopular,
+    getTmdbSimilar,
     getTmdbTrailers,
     getTmdbUpcoming,
     getTmdbVideos,
@@ -34,6 +35,7 @@ showRouter.get('/tmdb/image', getTmdbImage)
 showRouter.get('/tmdb/trailers', getTmdbTrailers)
 showRouter.get('/tmdb/search', searchTmdbMovies)
 showRouter.get('/tmdb/movie/:movieId/videos', getTmdbVideos)
+showRouter.get('/tmdb/movie/:movieId/similar', getTmdbSimilar)
 showRouter.get('/tmdb/movie/:movieId', getTmdbMovie)
 showRouter.get('/:movieId',getShow)
 

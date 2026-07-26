@@ -1,16 +1,18 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { fetchMovieDetails, fetchPopularMovies } from '../services/tmdb';
+import {
+  fetchMovieDetails,
+  fetchMovieShowtimes,
+  fetchSimilarMovies,
+} from '../services/tmdb';
 import BlurCircle from '../components/BlurCircle'
-import { StarIcon, Heart, PlayCircleIcon } from 'lucide-react'
+import { StarIcon, Heart, PlayCircleIcon, RefreshCw } from 'lucide-react'
 import timeFormat from '../lib/timeFormat'
 import MovieGrid from '../components/MovieGrid';
 import DateSelect from '../components/DateSelect';
 import Loading from '../components/Loading';
 import TrailerSection from '../components/TrailerSection';
-import { useAppContext } from '../context/AppContext';
 import toast from 'react-hot-toast';
-import generateMockShowtimes from '../lib/generateMockShowtimes';
 
 const MovieDetails = () => {
   const [movies, setMovies] = useState([]);
@@ -19,10 +21,14 @@ const MovieDetails = () => {
   const [availableDates, setAvailableDates] = useState({});
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
+  const [showtimeStatus, setShowtimeStatus] = useState('loading');
+  const [showtimeError, setShowtimeError] = useState('');
+  const [recommendationStatus, setRecommendationStatus] = useState('loading');
+  const [recommendationError, setRecommendationError] = useState('');
+  const [showtimeReloadToken, setShowtimeReloadToken] = useState(0);
+  const [recommendationReloadToken, setRecommendationReloadToken] = useState(0);
   const navigate = useNavigate();
-  const { axios } = useAppContext();
   const [isFavorited, setIsFavorited] = useState(false);
-  const [isMockData, setIsMockData] = useState(false);
   const [showTrailerSection, setShowTrailerSection] = useState(false);
 
   const toggleFavorite = useCallback((e) => {
@@ -51,77 +57,80 @@ const MovieDetails = () => {
   }, [show]);
 
   useEffect(() => {
-    let mounted = true;
+    const controller = new AbortController();
 
     const loadMovieDetails = async () => {
       setShowTrailerSection(false);
       setIsLoading(true);
       setHasError(false);
-      setIsMockData(false);
+      setShowtimeStatus('loading');
+      setShowtimeError('');
+      setAvailableDates({});
+
+      const [movieResult, showtimeResult] = await Promise.allSettled([
+        fetchMovieDetails(id, { signal: controller.signal, fallbackMode: 'none' }),
+        fetchMovieShowtimes(id, { signal: controller.signal }),
+      ]);
+      if (controller.signal.aborted) return;
+
+      if (showtimeResult.status === 'fulfilled') {
+        const realDates = showtimeResult.value.dateTime || {};
+        setAvailableDates(realDates);
+        setShowtimeStatus(Object.keys(realDates).length ? 'ready' : 'empty');
+      } else {
+        setShowtimeStatus('error');
+        setShowtimeError(showtimeResult.reason?.message || 'Unable to load showtimes.');
+      }
+
+      if (movieResult.status === 'fulfilled' && movieResult.value) {
+        setShow(movieResult.value);
+      } else if (showtimeResult.status === 'fulfilled' && showtimeResult.value.movie) {
+        setShow(showtimeResult.value.movie);
+      } else {
+        setShow(null);
+        setHasError(true);
+      }
+
+      setIsLoading(false);
+    };
+
+    loadMovieDetails().catch((error) => {
+      if (controller.signal.aborted) return;
+      console.error('Error loading movie details:', error);
+      setHasError(true);
+      setIsLoading(false);
+      setShowtimeStatus('error');
+      setShowtimeError(error.message || 'Unable to load showtimes.');
+    });
+
+    return () => controller.abort();
+  }, [id, showtimeReloadToken]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const loadRecommendations = async () => {
+      setMovies([]);
+      setRecommendationStatus('loading');
+      setRecommendationError('');
 
       try {
-        // TMDB details — cached in sessionStorage for 24h.
-        // First call: ~300-500ms. Subsequent: ~5ms (cache hit).
-        const movieData = await fetchMovieDetails(id);
-        if (!mounted) return;
-
-        if (movieData) {
-          setShow(movieData);
-          // Generate mock showtimes synchronously (~1ms) — instant dates
-          const mockDates = generateMockShowtimes(movieData.id || id);
-          setAvailableDates(mockDates);
-          setIsMockData(true);
-        } else {
-          setHasError(true);
-        }
+        const data = await fetchSimilarMovies(id, { signal: controller.signal, limit: 4 });
+        if (controller.signal.aborted) return;
+        const relatedMovies = Array.isArray(data) ? data : [];
+        setMovies(relatedMovies);
+        setRecommendationStatus(relatedMovies.length ? 'ready' : 'empty');
       } catch (error) {
-        console.error('Error loading movie details:', error);
-        if (mounted) setHasError(true);
-      } finally {
-        if (mounted) setIsLoading(false);
+        if (controller.signal.aborted || error?.name === 'AbortError') return;
+        setRecommendationStatus('error');
+        setRecommendationError(error.message || 'Unable to load similar movies.');
       }
     };
 
-    loadMovieDetails();
-    return () => { mounted = false; };
-  }, [id]);
+    void loadRecommendations();
 
-  useEffect(() => {
-    // Only run after Phase 1 completes (show is set)
-    if (!show) return;
-    let mounted = true;
-    fetchPopularMovies()
-      .then(data => {
-        if (mounted) setMovies(Array.isArray(data) ? data.slice(0, 4) : []);
-      })
-      .catch(() => {});
-
-    // Check backend for real showtimes (10s timeout — Vercel cold starts can take 5-8s)
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-    axios.get(`/api/show/${id}`, { signal: controller.signal })
-      .then(({ data }) => {
-        if (!mounted) return;
-        if (data?.success && data.movie) {
-          // Backend has this movie — upgrade to real data
-          setShow(data.movie);
-          const realDates = data.dateTime;
-          if (realDates && Object.keys(realDates).length > 0) {
-            setAvailableDates(realDates);
-            setIsMockData(false);
-          }
-        }
-      })
-      .catch(() => {}) // Backend unavailable — keep TMDB data + mock dates
-      .finally(() => clearTimeout(timeoutId));
-
-    return () => {
-      mounted = false;
-      controller.abort();
-      clearTimeout(timeoutId);
-    };
-  }, [show?._id || show?.id, id]); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => controller.abort();
+  }, [id, recommendationReloadToken]);
 
   // Memoize derived values to avoid recalculating on every render
   const imageUrl = useMemo(() => {
@@ -206,7 +215,10 @@ const MovieDetails = () => {
               Buy Tickets
             </a>
             <button
+              type="button"
               onClick={toggleFavorite}
+              aria-label={isFavorited ? `Remove ${show.title} from favorites` : `Add ${show.title} to favorites`}
+              aria-pressed={isFavorited}
               className="p-4 rounded-full bg-white/10 hover:bg-white/20 border border-white/20 transition-all duration-300 hover:scale-110 active:scale-95 cursor-pointer"
             >
               <Heart className={`w-6 h-6 ${isFavorited ? 'text-pink-500 fill-pink-500' : 'text-white'}`} />
@@ -215,7 +227,13 @@ const MovieDetails = () => {
         </div>
       </div>
 
-      <DateSelect id={show._id || show.id} availableDates={availableDates} isMockData={isMockData} />
+      <DateSelect
+        id={show._id || show.id}
+        availableDates={availableDates}
+        status={showtimeStatus}
+        error={showtimeError}
+        onRetry={() => setShowtimeReloadToken((value) => value + 1)}
+      />
 
       {showTrailerSection && (
         <TrailerSection sectionId="movie-trailers" featuredMovie={show} movieOnly />
@@ -229,18 +247,56 @@ const MovieDetails = () => {
       <BlurCircle top='150px' left='0' />
       <BlurCircle bottom='50px' right='50px' />
 
-      <div className="max-w-6xl mx-auto w-full">
-        <MovieGrid
-          movies={movies}
-          columns="sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-          animated={true}
-          staggerDelay={100}
-        />
+      <div className="max-w-6xl mx-auto w-full" aria-live="polite">
+        {recommendationStatus === 'loading' && (
+          <div className="grid sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-6">
+            {Array.from({ length: 4 }, (_, index) => (
+              <div key={index} className="catalog-card-skeleton" aria-hidden="true">
+                <span className="catalog-card-skeleton__art" />
+              </div>
+            ))}
+            <span className="sr-only">Loading similar movies</span>
+          </div>
+        )}
+
+        {recommendationStatus === 'error' && (
+          <div className="catalog-state-panel" role="alert">
+            <h2>Similar movies are unavailable</h2>
+            <p>{recommendationError}</p>
+            <button
+              type="button"
+              className="catalog-state-panel__button"
+              onClick={() => setRecommendationReloadToken((value) => value + 1)}
+            >
+              <RefreshCw aria-hidden="true" />
+              Try again
+            </button>
+          </div>
+        )}
+
+        {recommendationStatus === 'empty' && (
+          <div className="catalog-state-panel" role="status">
+            <h2>No similar movies yet</h2>
+            <p>We could not find another matching title with usable artwork.</p>
+          </div>
+        )}
+
+        {recommendationStatus === 'ready' && (
+          <MovieGrid
+            movies={movies}
+            columns="sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+            animated
+            staggerDelay={100}
+          />
+        )}
       </div>
 
       <div className='flex justify-center mt-10'>
         <button
-          onClick={() => { navigate('/movies'), window.scrollTo({top: 0,behavior:'smooth'}) }}
+          onClick={() => {
+            navigate('/movies');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
           className="group flex items-center gap-3 px-12 py-6 bg-linear-to-r from-primary to-primary-dull
             hover:from-primary-dull hover:to-primary text-white font-semibold rounded-full shadow-lg shadow-primary/30
             hover:shadow-xl hover:shadow-primary/60 hover:scale-105 active:scale-95 transition-all duration-300 border

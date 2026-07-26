@@ -54,12 +54,9 @@ export const HERO_FAILURE_REASONS = Object.freeze({
 export const HERO_PREVIEW_PLAYBACK_MS = 50_000;
 export const HERO_COMPACT_PLAYBACK_MS = 3_000;
 export const HERO_BUFFERING_HYSTERESIS_MS = 450;
-export const HERO_PLAYING_HYSTERESIS_MS = 250;
-// Quarantine after PLAYING + currentTime samples confirm real playback. It is
-// aligned with the closing curtain so transient player chrome stays covered
-// without adding a second fixed hold before the curtain opens.
-export const HERO_VISUAL_READY_CONFIRM_MS = 900;
-export const HERO_PLAYBACK_TIMEOUT_MS = 5_000;
+export const HERO_PLAYING_HYSTERESIS_MS = 500;
+export const HERO_MIN_PLAYBACK_ADVANCE_SECONDS = 0.35;
+export const HERO_PLAYBACK_TIMEOUT_MS = 12_000;
 
 export const createInitialHeroState = ({ movieKey = '', generation = 0, audioPreference = HERO_AUDIO_STATUS.PREFERRED_ON } = {}) => ({
   phase: HERO_PHASES.POSTER,
@@ -137,12 +134,17 @@ export const hasAdvancedPlayback = ({
   playingState,
   previousTime,
   currentTime,
-}) => (
-  playerState === playingState
-  && Number.isFinite(previousTime)
-  && Number.isFinite(currentTime)
-  && currentTime > previousTime
-);
+  minimumAdvance = 0,
+}) => {
+  const advance = currentTime - previousTime;
+  return (
+    playerState === playingState
+    && Number.isFinite(previousTime)
+    && Number.isFinite(currentTime)
+    && advance > 0
+    && advance + 0.005 >= Math.max(0, minimumAdvance)
+  );
+};
 
 const isPlaybackPhase = (phase) => [
   HERO_PHASES.TRAILER_LOADING,
