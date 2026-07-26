@@ -11,8 +11,9 @@ const BlurCircle = ({
   return (
 
     <div
-      className="absolute -z-100 w-68 h-68 aspect-square rounded-full bg-primary/60 blur-3xl animate-float-blob"
+      className="absolute w-72 h-72 aspect-square rounded-full bg-primary/60 blur-3xl animate-float-blob pointer-events-none"
       style={{
+        zIndex: -100,
         top: top,
         left: left,
         right: right,
