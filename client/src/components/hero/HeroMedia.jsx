@@ -5,6 +5,9 @@ const HeroMedia = ({
   posterCandidates = [],
   posterVisible,
   videoVisible,
+  cinematicBackgroundActive,
+  ambientImageUrl,
+  movieId,
   children,
 }) => {
   const candidates = [...new Set(posterCandidates.filter(Boolean))];
@@ -19,7 +22,29 @@ const HeroMedia = ({
   };
 
   return (
-    <div className={`hero-media ${videoVisible ? 'is-video-visible' : ''}`}>
+    <div className={`hero-media ${videoVisible ? 'is-video-visible' : ''}`} data-trailer-active={videoVisible ? 'true' : 'false'}>
+      <div
+        className="hero-ambient"
+        data-active={cinematicBackgroundActive ? 'true' : 'false'}
+        aria-hidden="true"
+      >
+        {ambientImageUrl && (
+          <img
+            key={movieId ?? ambientImageUrl}
+            className="hero-ambient__image"
+            src={ambientImageUrl}
+            alt=""
+            decoding="async"
+            draggable="false"
+            onError={(event) => {
+              event.currentTarget.hidden = true;
+            }}
+          />
+        )}
+
+        <div className="hero-ambient__overlay" />
+      </div>
+
       <div className={`hero-poster-shell ${currentSource ? '' : 'is-fallback'} ${posterVisible ? 'is-visible' : 'is-hidden'}`}>
         {currentSource && (
           <img
@@ -36,7 +61,9 @@ const HeroMedia = ({
         )}
       </div>
 
-      {children}
+      <div className="hero-trailer-layer">
+        {children}
+      </div>
 
       <div className="hero-media__breath" aria-hidden="true" />
       <div className="hero-media__gradient hero-media__gradient--side" aria-hidden="true" />
