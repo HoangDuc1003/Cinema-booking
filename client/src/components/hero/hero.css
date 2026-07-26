@@ -248,11 +248,14 @@
 }
 
 .hero-poster-shell.is-visible {
-  opacity: 1;
-  transition: none;
+  opacity: 1 !important;
+  transition: none !important;
 }
 
-.hero-poster-shell.is-hidden { opacity: 0; }
+.hero-poster-shell.is-hidden {
+  opacity: 0;
+  transition: opacity 300ms ease;
+}
 
 .hero-poster {
   object-fit: cover;
@@ -278,48 +281,30 @@
   transition: none;
 }
 
-.hero-video-shell.is-visible {
-  opacity: 1;
-  transition: opacity 850ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
 .hero-video-frame {
   position: absolute;
   inset: 0;
   overflow: hidden;
   pointer-events: none;
-  transition: filter 650ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.hero-native-video {
-  position: absolute;
-  top: 0;
-  left: 0;
-  display: block;
-  width: 100%;
-  height: 100%;
-  border: 0;
-  object-fit: cover;
-  max-width: none;
-  pointer-events: none;
-  user-select: none;
 }
 
 .hero-youtube-video,
 .hero-youtube-video iframe {
   pointer-events: none !important;
+  user-select: none !important;
 }
 
-.hero-video-shell.hero-youtube-video,
-.hero-video-shell.hero-youtube-video.is-visible {
-  opacity: 0;
-  transition: opacity 200ms ease;
+.hero-video-shell.hero-youtube-video {
+  opacity: 0 !important;
+  transition: opacity 150ms ease;
   transform: translateZ(0);
   backface-visibility: hidden;
   will-change: transform;
 }
 
-.hero-video-shell.hero-youtube-video.is-visible { opacity: 1; }
+.hero-video-shell.hero-youtube-video.is-visible {
+  opacity: 1 !important;
+}
 
 .hero-youtube-video__mount {
   position: absolute;

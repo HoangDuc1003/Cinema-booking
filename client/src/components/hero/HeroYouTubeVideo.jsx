@@ -68,6 +68,7 @@ const HeroYouTubeVideo = ({
 }) => {
   const latestRef = useRef({ enabled, active, videoId, generation });
   const shellRef = useRef(null);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [coverLayout, setCoverLayout] = useState(null);
   const coverLayoutRef = useRef(null);
   const quarantineCompletedRef = useRef(null);
@@ -192,12 +193,14 @@ const HeroYouTubeVideo = ({
 
     const states = window.YT?.PlayerState || {};
     if (event.data === states.PLAYING) {
+      setIsPlaying(true);
       clearBufferingTimers();
       onPlaybackPlaying?.({ generation: targetGeneration, now: now() });
       confirmStablePlayback(event.target, targetGeneration, targetVideoId);
       return;
     }
 
+    setIsPlaying(false);
     clearVerificationTimers();
     if (event.data === states.ENDED) {
       clearAllTimers();
@@ -231,8 +234,16 @@ const HeroYouTubeVideo = ({
       clearBufferingTimers();
       onVisualHidden?.({ generation: targetGeneration });
       onPlaybackPaused?.({ generation: targetGeneration, now: now() });
+      if (active && event.data === states.PAUSED && typeof event.target?.playVideo === 'function') {
+        try {
+          event.target.playVideo();
+        } catch {
+          // ignore auto-resume failure
+        }
+      }
     }
   }, [
+    active,
     clearAllTimers,
     clearBufferingTimers,
     clearVerificationTimers,
@@ -389,12 +400,14 @@ const HeroYouTubeVideo = ({
     willChange: 'transform',
   } : undefined;
 
+  const isFullyVisible = visible && isPlaying;
+
   return (
     <div
       ref={shellRef}
-      className={`hero-video-shell hero-youtube-video ${visible ? 'is-visible' : ''}`}
+      className={`hero-video-shell hero-youtube-video ${isFullyVisible ? 'is-visible' : ''}`}
       aria-hidden="true"
-      data-video-safe={visible ? 'true' : 'false'}
+      data-video-safe={isFullyVisible ? 'true' : 'false'}
       data-video-id={videoId}
     >
       <div className="hero-video-frame">

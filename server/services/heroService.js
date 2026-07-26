@@ -110,6 +110,49 @@ const forcePosterOnly = (movies) => movies.map((movie) => ({
     heroVideoStatus: 'refreshing',
 }));
 
+const loadBalancedHeroMovies = async (rotationIndex = 0) => {
+    try {
+        const [popularMovies, newestMovies, classicMovies] = await Promise.all([
+            Movie.find({ vote_average: { $gt: 0 } }).select(MOVIE_SELECT).sort({ vote_average: -1, _id: 1 }).limit(20).lean(),
+            Movie.find({ release_date: { $exists: true, $ne: '' } }).select(MOVIE_SELECT).sort({ release_date: -1, _id: 1 }).limit(20).lean(),
+            Movie.find({ release_date: { $exists: true, $ne: '' } }).select(MOVIE_SELECT).sort({ release_date: 1, _id: 1 }).limit(20).lean(),
+        ]);
+
+        const selectedSet = new Set();
+        const selected = [];
+
+        const pick = (list, offset, count) => {
+            const available = list.filter((m) => !selectedSet.has(String(m._id)));
+            if (!available.length) return;
+            const start = (offset * count) % available.length;
+            for (let i = 0; i < count && i < available.length; i += 1) {
+                const item = available[(start + i) % available.length];
+                if (item && !selectedSet.has(String(item._id))) {
+                    selectedSet.add(String(item._id));
+                    const normalized = normalizeHeroMovie(item);
+                    if (normalized) selected.push(normalized);
+                }
+            }
+        };
+
+        // 2 Hot/Popular movies
+        pick(popularMovies, rotationIndex, 2);
+        // 1 Newest movie
+        pick(newestMovies, rotationIndex, 1);
+        // 2 Classic movies
+        pick(classicMovies, rotationIndex, 2);
+
+        if (selected.length < HERO_LIMIT) {
+            const remainingAll = await Movie.find({}).select(MOVIE_SELECT).sort({ updatedAt: -1 }).limit(20).lean();
+            pick(remainingAll, rotationIndex, HERO_LIMIT - selected.length);
+        }
+
+        return selected.slice(0, HERO_LIMIT);
+    } catch {
+        return [];
+    }
+};
+
 export const getPublicHomeHero = async (options = {}) => {
     const rotation = resolveHeroRotationWindow(options.nowMs || Date.now());
     const { heroOffset } = options;
@@ -127,46 +170,15 @@ export const getPublicHomeHero = async (options = {}) => {
     }
 
     if (!movies.length) {
-        try {
-            const filter = {
-                createdAt: { $lte: new Date(rotation.startsAt) },
+        const effectiveSlotIndex = typeof heroOffset === 'number' && Number.isFinite(heroOffset) && heroOffset >= 0
+            ? heroOffset
+            : rotation.index;
+        movies = await loadBalancedHeroMovies(effectiveSlotIndex);
+        if (movies.length) {
+            meta = {
+                key: rotation.key,
+                slot: rotation.index,
             };
-            const totalEligible = await Movie.countDocuments(filter);
-
-            if (totalEligible > 0) {
-                const effectiveSlotIndex = typeof heroOffset === 'number' && Number.isFinite(heroOffset) && heroOffset >= 0
-                    ? heroOffset
-                    : rotation.index;
-                const startOffset = (effectiveSlotIndex * HERO_BATCH_SIZE) % totalEligible;
-
-                const firstBatch = await Movie.find(filter)
-                    .select(MOVIE_SELECT)
-                    .sort(STABLE_HERO_SORT)
-                    .skip(startOffset)
-                    .limit(HERO_BATCH_SIZE)
-                    .lean();
-
-                let selectedMovies = firstBatch.map(normalizeHeroMovie).filter(Boolean);
-
-                if (selectedMovies.length < HERO_BATCH_SIZE && totalEligible > selectedMovies.length) {
-                    const remaining = HERO_BATCH_SIZE - selectedMovies.length;
-                    const wrappedBatch = await Movie.find(filter)
-                        .select(MOVIE_SELECT)
-                        .sort(STABLE_HERO_SORT)
-                        .limit(remaining)
-                        .lean();
-                    const wrappedNormalized = wrappedBatch.map(normalizeHeroMovie).filter(Boolean);
-                    selectedMovies = [...selectedMovies, ...wrappedNormalized].slice(0, HERO_BATCH_SIZE);
-                }
-
-                movies = selectedMovies;
-                meta = {
-                    key: rotation.key,
-                    slot: rotation.index,
-                };
-            }
-        } catch {
-            movies = [];
         }
     }
 
