@@ -134,13 +134,19 @@ const MovieDetails = () => {
     return () => controller.abort();
   }, [id, recommendationReloadToken]);
 
-  // Memoize derived values to avoid recalculating on every render
   const imageUrl = useMemo(() => {
     if (!show?.poster_path) return '';
     const path = show.poster_path;
     if (path.startsWith('http')) return path;
     return `https://image.tmdb.org/t/p/original${path}`;
   }, [show?.poster_path]);
+
+  const backdropUrl = useMemo(() => {
+    if (!show?.backdrop_path) return imageUrl;
+    const path = show.backdrop_path;
+    if (path.startsWith('http')) return path;
+    return `https://image.tmdb.org/t/p/original${path}`;
+  }, [show?.backdrop_path, imageUrl]);
 
   // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const releaseYear = useMemo(() =>
@@ -151,7 +157,7 @@ const MovieDetails = () => {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setAmbientLoaded(false);
-  }, [imageUrl]);
+  }, [backdropUrl]);
 
   const genreNames = useMemo(() =>
     show?.genres?.map(g => g.name).join(", ") || '',
@@ -196,10 +202,10 @@ const MovieDetails = () => {
         className="pointer-events-none absolute inset-0 z-0 overflow-hidden"
         aria-hidden="true"
       >
-          {imageUrl && (
+          {backdropUrl && (
             <img
-              key={imageUrl}
-              src={imageUrl}
+              key={backdropUrl}
+              src={backdropUrl}
               alt=""
               draggable="false"
               decoding="async"
@@ -210,7 +216,7 @@ const MovieDetails = () => {
               }}
               className={[
                 "absolute inset-[-8%] h-[116%] w-[116%]",
-                "scale-[1.06] object-cover object-center blur-[34px]",
+                "scale-[1.06] object-cover object-center blur-[12px]",
                 "transition-opacity duration-500 ease-out",
                 "motion-reduce:transition-none",
                 ambientLoaded ? "opacity-[0.10]" : "opacity-0",
