@@ -1,4 +1,10 @@
-import React, { Suspense, lazy } from 'react';
+import React, {
+  Suspense,
+  lazy,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import HeroSection from '../components/HeroSection';
 
 const FeatureSection = lazy(() => import('../components/FeatureSection'));
@@ -19,15 +25,40 @@ const SectionSkeleton = ({ trailer = false }) => (
   </div>
 );
 
+const DeferredSection = ({ children, fallback }) => {
+  const rootRef = useRef(null);
+  const [visible, setVisible] = useState(
+    () => typeof IntersectionObserver === 'undefined',
+  );
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (visible || !root || typeof IntersectionObserver === 'undefined') return undefined;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting) return;
+      setVisible(true);
+      observer.disconnect();
+    }, { rootMargin: '160px 0px', threshold: 0.01 });
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, [visible]);
+
+  return (
+    <div ref={rootRef}>
+      {visible ? <Suspense fallback={fallback}>{children}</Suspense> : fallback}
+    </div>
+  );
+};
+
 const Home = () => (
   <>
     <HeroSection autoPreview />
-    <Suspense fallback={<SectionSkeleton />}>
+    <DeferredSection fallback={<SectionSkeleton />}>
       <FeatureSection />
-    </Suspense>
-    <Suspense fallback={<SectionSkeleton trailer />}>
+    </DeferredSection>
+    <DeferredSection fallback={<SectionSkeleton trailer />}>
       <TrailerSection />
-    </Suspense>
+    </DeferredSection>
   </>
 );
 

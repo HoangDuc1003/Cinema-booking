@@ -1,5 +1,5 @@
 import React from 'react';
-import { CalendarIcon, ClockIcon, Info, LoaderCircle, Play, Square, Star, Ticket, Volume2, VolumeX } from 'lucide-react';
+import { CalendarIcon, ClockIcon, Info, LoaderCircle, Play, Star, Ticket, Volume2, VolumeX } from 'lucide-react';
 
 const HeroContent = ({
   movieKey,
@@ -45,13 +45,13 @@ const HeroContent = ({
 
   const trailerLabel = trailerLoading
     ? 'Loading\u2026'
-    : trailerActive
-      ? 'Poster'
-      : trailerFailed
-        ? 'Play trailer'
-        : 'Trailer';
+    : trailerFailed
+      ? 'Retry trailer'
+      : 'Play trailer';
 
-  const showTrailerButton = trailerAvailable !== false || trailerActive || trailerLoading || trailerFailed;
+  const showTrailerButton = !trailerActive && (
+    trailerAvailable !== false || trailerLoading || trailerFailed
+  );
 
   const handleBlur = (event) => {
     if (onBlurCapture) {
@@ -155,15 +155,14 @@ const HeroContent = ({
             >
               {trailerLoading
                 ? <LoaderCircle className="hero-action__spinner" aria-hidden="true" />
-                : trailerActive
-                  ? <Square aria-hidden="true" />
-                  : <Play aria-hidden="true" />}
+                : <Play aria-hidden="true" />}
               <span>{trailerLabel}</span>
             </button>
           )}
           {showVolumeControl && (
             <button
               type="button"
+              data-hero-sound-control
               onClick={() => {
                 onCtaClick?.();
                 onToggleMuted();

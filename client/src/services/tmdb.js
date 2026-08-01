@@ -1,10 +1,7 @@
 // Service: TMDB API helpers
 import { dummyShowsData } from '../assets/assets';
-import { extractYouTubeVideoId } from '../components/hero/heroVideoSource.js';
+import { extractYouTubeVideoId } from '../lib/youtubeVideo.js';
 import { fetchWithTimeout as requestWithTimeout } from './fetchWithTimeout.js';
-import { resolveClientHeroOffset } from './heroCatalogOffset.js';
-
-export { resolveClientHeroOffset } from './heroCatalogOffset.js';
 
 const RAW_BASE = (import.meta.env.VITE_BASE_URL || '').trim().replace(/\/$/, '');
 const API_BASE = import.meta.env.DEV ? '' : RAW_BASE;
@@ -14,6 +11,10 @@ const HERO_API_TIMEOUT_MS = Number(import.meta.env.VITE_HERO_API_TIMEOUT_MS) || 
 const SHOWTIME_API_TIMEOUT_MS = Number(import.meta.env.VITE_SHOWTIME_API_TIMEOUT_MS) || 10_000;
 const TRAILER_CACHE_TTL_MS = 30_000;
 const trailerResponseCache = new Map();
+const HERO_SHARED_ABORT_GRACE_MS = 75;
+let sharedHeroRequest = null;
+let lastHeroResponse = null;
+let lastHeroEtag = '';
 
 const fallbackMovies = (limit = dummyShowsData.length) => dummyShowsData.slice(0, limit);
 
@@ -65,40 +66,134 @@ const fetchBackendJson = async (path, options = {}, timeoutMs = API_TIMEOUT_MS) 
     return payload.data;
 };
 
-export const fetchHomeHero = async ({ signal, offset, fallbackMode = 'mock' } = {}) => {
-    try {
-        const activeOffset = typeof offset === 'number' && Number.isFinite(offset) && offset >= 0
-            ? offset
-            : resolveClientHeroOffset();
-        const url = `${API_BASE}/api/show/hero?heroOffset=${encodeURIComponent(activeOffset)}`;
-        const response = await fetchWithTimeout(url, { signal }, HERO_API_TIMEOUT_MS);
-        if (!response.ok) {
-            throw new HttpError(response);
-        }
-        const payload = await response.json().catch(() => null);
-        if (!payload?.success) {
-            throw new Error(payload?.message || `Hero request failed (${response.status})`);
-        }
+const normalizeHeroResponse = (payload) => {
+    const movies = onlyMoviesWithImages(
+        Array.isArray(payload?.movies) ? payload.movies : [],
+    ).slice(0, 5);
+    if (!movies.length) throw new Error('Hero returned no usable server movies.');
 
-        const serverMovies = onlyMoviesWithImages(Array.isArray(payload.movies) ? payload.movies : []);
-        if (!serverMovies.length && fallbackMode === 'none') {
-            throw new Error('Hero returned no usable server movies.');
-        }
-        const data = {
-            settings: payload.settings || {},
-            movies: serverMovies.length ? serverMovies : onlyMoviesWithImages(fallbackMovies(5)),
-            source: serverMovies.length ? 'server' : 'fallback',
-        };
-        return data;
-    } catch (error) {
-        if (signal?.aborted) throw error;
-        if (fallbackMode === 'none') throw error;
-        return {
-            settings: { mode: 'fallback', effectiveMode: 'fallback' },
-            movies: onlyMoviesWithImages(fallbackMovies(5)),
-            source: 'fallback',
-        };
+    const rotation = payload.rotation && typeof payload.rotation === 'object'
+        ? payload.rotation
+        : {};
+    const meta = {
+        batchId: String(payload.batchId ?? payload.meta?.batchId ?? ''),
+        version: String(payload.version ?? payload.meta?.version ?? rotation.key ?? ''),
+        generatedAt: payload.generatedAt ?? payload.meta?.generatedAt ?? '',
+        nextRefreshAt: payload.nextRefreshAt ?? payload.meta?.nextRefreshAt ?? rotation.endsAt ?? '',
+        timezone: payload.timezone ?? payload.meta?.timezone ?? 'Asia/Ho_Chi_Minh',
+        fetchedAt: new Date().toISOString(),
+    };
+
+    return {
+        settings: payload.settings || {},
+        meta,
+        rotation: {
+            ...rotation,
+            key: rotation.key || meta.version,
+            endsAt: rotation.endsAt || meta.nextRefreshAt,
+        },
+        movies,
+        source: 'server',
+    };
+};
+
+const loadHomeHeroFromServer = async (signal) => {
+    const headers = {};
+    if (lastHeroEtag && lastHeroResponse) headers['If-None-Match'] = lastHeroEtag;
+    const response = await fetchWithTimeout(
+        `${API_BASE}/api/show/hero`,
+        { signal, headers },
+        HERO_API_TIMEOUT_MS,
+    );
+    if (response.status === 304 && lastHeroResponse) return lastHeroResponse;
+    if (!response.ok) throw new HttpError(response);
+
+    const payload = await response.json().catch(() => null);
+    if (!payload?.success) {
+        throw new Error(payload?.message || `Hero request failed (${response.status})`);
     }
+    const normalized = normalizeHeroResponse(payload);
+    lastHeroEtag = response.headers.get('etag') || '';
+    lastHeroResponse = normalized;
+    return normalized;
+};
+
+const getSharedHeroRequest = () => {
+    if (sharedHeroRequest) {
+        window.clearTimeout(sharedHeroRequest.abortTimer);
+        sharedHeroRequest.abortTimer = null;
+        return sharedHeroRequest;
+    }
+
+    const controller = new AbortController();
+    const request = {
+        controller,
+        consumers: new Set(),
+        abortTimer: null,
+        promise: null,
+        settled: false,
+    };
+    request.promise = loadHomeHeroFromServer(controller.signal)
+        .finally(() => {
+            request.settled = true;
+            if (sharedHeroRequest !== request || request.consumers.size) return;
+            window.clearTimeout(request.abortTimer);
+            request.abortTimer = window.setTimeout(() => {
+                if (!request.consumers.size && sharedHeroRequest === request) {
+                    sharedHeroRequest = null;
+                }
+            }, HERO_SHARED_ABORT_GRACE_MS);
+        });
+    sharedHeroRequest = request;
+    return request;
+};
+
+const releaseHeroConsumer = (request, consumer) => {
+    request.consumers.delete(consumer);
+    if (request.consumers.size || sharedHeroRequest !== request) return;
+    window.clearTimeout(request.abortTimer);
+    request.abortTimer = window.setTimeout(() => {
+        if (!request.consumers.size && sharedHeroRequest === request) {
+            sharedHeroRequest = null;
+            if (!request.settled) {
+                request.controller.abort(new DOMException('Hero request abandoned', 'AbortError'));
+            }
+        }
+    }, HERO_SHARED_ABORT_GRACE_MS);
+};
+
+export const fetchHomeHero = ({ signal } = {}) => {
+    const request = getSharedHeroRequest();
+    const consumer = {};
+    request.consumers.add(consumer);
+
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const cleanup = () => {
+            signal?.removeEventListener?.('abort', handleAbort);
+            releaseHeroConsumer(request, consumer);
+        };
+        const finish = (callback, value) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            callback(value);
+        };
+        const handleAbort = () => finish(
+            reject,
+            signal?.reason || new DOMException('Aborted', 'AbortError'),
+        );
+
+        if (signal?.aborted) {
+            handleAbort();
+            return;
+        }
+        signal?.addEventListener?.('abort', handleAbort, { once: true });
+        request.promise.then(
+            (value) => finish(resolve, value),
+            (error) => finish(reject, error),
+        );
+    });
 };
 
 export const fetchMovieTrailers = async (movie, { signal } = {}) => {

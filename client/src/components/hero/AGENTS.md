@@ -1,61 +1,63 @@
 # Hero Component Invariants
 
 ## Fundamental invariant
-The Hero background has exactly two valid outcomes:
 
-1. an active, verified YouTube IFrame Player trailer;
-2. a poster with a manual play CTA when the player cannot start.
+The Home Hero has exactly two media outcomes:
 
-## YouTube curtain reveal
-- The only embedded provider is YouTube through the IFrame Player API.
-- Only the active movie may mount a player or iframe. After an automatic trailer end, metadata for exactly the next movie may be prefetched without mounting inactive media.
-- Start metadata/player work immediately, preserve the unobscured poster for two seconds, then start playback muted while the cinematic curtain closes over four seconds.
-- Once the curtain is fully closed, hold it for one second; after that hold, open as soon as advancing playback is verified.
-- Invalidate an earlier visual-ready decision whenever playback pauses or buffers before reveal; the curtain may open only after a fresh continuous-advancement verification.
-- Keep the iframe transparent until playback is verified, then reveal it behind the opening curtain.
-- Each trailer playback generation starts muted at volume 0. Once verified playback is ready and the curtain enters the closed-hold phase, attempt at most one generation-scoped volume ramp from 0 to 60 over 800 ms. The ramp must be cancelled on generation change, manual mute, flow reset, or unmount. If sound autoplay is denied, preserve muted playback and manual volume controls. Never unmute a stale or inactive playback generation. A user's explicit mute or unmute action is authoritative for the current playback generation and must not be overridden by automatic audio behavior.
-- The curtain is the sole loading-artifact mask; do not add center-button masks.
-- Reveal only after a real `PLAYING` state and advancing `currentTime`.
-- On player or script failure, retain the poster and expose the manual play CTA.
-- Destroy the player and clear all timers/intervals when the movie changes or the Hero unmounts.
+1. one verified native HTML5 `<video>` for the active server-ordered movie;
+2. that movie's poster while native playback is unavailable, deferred, or unverified.
 
-## Forbidden in Hero
-- Vimeo or arbitrary iframe providers
-- client-side movie reordering
-- inactive movie video preloading
-- direct DOM mutation outside the player wrapper
+YouTube iframe, YouTube Player API, ReactPlayer, TMDB video lookup, and generic
+fallback footage are forbidden in the Hero flow. YouTube may remain in
+non-Hero trailer surfaces.
 
-## Ordering
-Preserve server order:
+## Native playback
 
-```js
-const orderedMovies = rawMovies.slice(0, HERO_MAX_MOVIES);
-```
+- Resolve only server-provided `heroVideoStatus: "ready"` MP4/WebM sources.
+- Production sources must use HTTPS. Development mock video is allowed only
+  behind the explicit `?heroMock=1` development flag.
+- Mount at most one active `<video>`. Never preload inactive movie media.
+- Use `autoPlay`, `playsInline`, `preload="metadata"`, no `controls`,
+  `disablePictureInPicture`, and a restrictive `controlsList`.
+- Keep the poster visible until `play()` resolves, decoded dimensions are
+  positive, and `currentTime` advances.
+- Pause when the document or Hero is not visible. Resume only while playback
+  remains eligible; never create an unbounded retry loop.
+- On ended, media error, sustained stall, or non-advancing playback, show the
+  poster and advance once to the next server-ordered movie.
+- Clear timers, listeners, pending play attempts, and media resources on
+  generation change or unmount.
 
-Do not apply client scoring to a successful server response.
+## Audio
 
-## Required E2E evidence
-For an active desktop trailer:
-- Hero has one YouTube iframe and no native video;
-- five server-ordered movies render as five persistent thumbnail controls while only the active movie owns an iframe;
-- the curtain animates from open to closed while playback begins, then opens with the weighted transform animation and leaves the DOM;
-- the iframe is transparent until playback is verified and becomes visible behind the opening curtain;
-- `currentTime` advances before reveal;
-- volume reaches 60 only after the 800ms post-curtain fade.
-- three seconds after the verified trailer is revealed, hide the thumbnail rail and move compact copy to the lower-left while retaining the title, genres, metadata, a two-line description preview, and the two primary CTAs;
-- the close transition must animate through `is-compacting` before final layout removal; do not snap `top` or secondary controls away on its first frame;
-- compact movie copy can expand again through pointer, keyboard focus, or title interaction and restore the thumbnail rail.
-- selecting `Poster` destroys the active iframe and restores the poster in the same render; while that explicit poster mode remains active, automatic trailer attempts stay disabled, carousel transitions begin every five seconds, and the image swaps 400ms into each transition.
-- after an automatic trailer end, keep that movie's poster for one second while prefetching only the next trailer metadata, then continue with a one-second poster preview; user-selected movie changes retain the full two-second preview.
+- Browser autoplay policy is authoritative.
+- Honor `nitrocine:hero-audio-consent` and `nitrocine:hero-volume`.
+- If audible autoplay is rejected, retry muted once and expose an accessible
+  `Turn trailer sound on` control.
+- Save enabled consent only after a user gesture successfully unmutes and
+  playback remains active.
+- Do not add a pause control. Clicking the video must not pause it.
 
-For a player failure or blocked autoplay:
-- the poster remains visible;
-- the curtain does not uncover an unverified iframe;
-- a manual trailer CTA remains available.
+## Ordering and loading
 
-## Test integrity
-- Use a deterministic YouTube Player test double or a real embeddable trailer.
-- Runtime playback tests must prove the player's `currentTime` advances.
-- Never add CSS classes manually to simulate application state.
-- Never stall a media request and claim playback success.
-- Do not weaken an invariant test to make implementation pass.
+- Preserve the first five movies exactly as returned by `/api/show/hero`.
+- Do not score, shuffle, or select a client-side offset.
+- Cache only the five-movie response with schema version, batch/version, and
+  timestamp; never cache video blobs.
+- Render cached poster content immediately and revalidate in the background.
+- Respect reduced motion, save-data, slow connections, tab visibility, and
+  viewport visibility.
+
+## Required evidence
+
+- zero Hero iframe, YouTube request, and TMDB video request;
+- exactly one native video for the active movie;
+- `play()` resolves and `currentTime` advances;
+- positive decoded video dimensions;
+- no native controls or pause button;
+- bounded failure handoff and correct ended handoff;
+- sound consent and `NotAllowedError` muted fallback;
+- no initial request fan-out to all five video assets.
+
+Runtime media tests must use a playable MP4/WebM. Do not fake success by
+hanging a media request or by manually adding production CSS classes.

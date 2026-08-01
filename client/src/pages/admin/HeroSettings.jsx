@@ -15,6 +15,38 @@ const getImageUrl = (path, size = 'w342') => {
   return `https://image.tmdb.org/t/p/${size}${path}`;
 };
 
+const HeroPoolGrid = ({ movies, onUpdated }) => (
+  <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+    {movies.map((movie) => (
+      <div
+        key={movie._id || movie.id}
+        className={`grid grid-cols-[52px_1fr] gap-3 rounded-lg border p-2 ${
+          movie.active ? 'border-primary/70 bg-primary/10' : 'border-white/10 bg-black/20'
+        }`}
+      >
+        <img
+          src={getImageUrl(movie.poster_path || movie.backdrop_path)}
+          alt={movie.title}
+          loading="lazy"
+          decoding="async"
+          className="h-[74px] w-[52px] rounded object-cover bg-black/40"
+        />
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <p className="truncate text-sm font-medium">{movie.title}</p>
+            {movie.active && <span className="rounded bg-primary px-1.5 py-0.5 text-[10px] uppercase">Active</span>}
+          </div>
+          <p className="mt-1 text-xs uppercase tracking-wide text-gray-500">{movie.category}</p>
+          <p className={`mt-1 text-xs ${movie.nativeVideoValid ? 'text-green-400' : 'text-amber-400'}`}>
+            {movie.nativeVideoValid ? 'Verified native trailer' : (movie.nativeVideoIssues || []).join(', ') || 'Trailer missing'}
+          </p>
+          <HeroVideoUploader movie={movie} onUpdated={onUpdated} />
+        </div>
+      </div>
+    ))}
+  </div>
+);
+
 const HeroSettings = () => {
   const { axios, user } = useAppContext();
   const [loading, setLoading] = useState(true);
@@ -24,6 +56,11 @@ const HeroSettings = () => {
   const [selectedIds, setSelectedIds] = useState([]);
   const [availableMovies, setAvailableMovies] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [rotation, setRotation] = useState(null);
+  const [soundDefaultEnabled, setSoundDefaultEnabled] = useState(false);
+  const [defaultVolume, setDefaultVolume] = useState(0.35);
+  const [savingSound, setSavingSound] = useState(false);
+  const [refreshingHero, setRefreshingHero] = useState(false);
   
   const [dryRun, setDryRun] = useState(false);
   const [refreshingCatalog, setRefreshingCatalog] = useState(() => Boolean(sessionStorage.getItem(CATALOG_JOB_STORAGE_KEY)));
@@ -39,15 +76,54 @@ const HeroSettings = () => {
         toast.error(data.message || 'Unable to randomize hero.');
         return;
       }
-      toast.success('Hero randomized (2-day anti-duplicate active).');
-      const hero = data.hero || {};
-      setMode(hero.settings?.mode || 'manual');
-      setSelectedIds((hero.settings?.movieIds || []).map(String));
-      setAvailableMovies(hero.availableMovies || []);
+      toast.success('The active five were reselected from the current 15-movie pool.');
+      await fetchHeroSettings();
     } catch (error) {
       toast.error(error.response?.data?.message || error.message || 'Unable to randomize hero.');
     } finally {
       setRandomizing(false);
+    }
+  };
+
+  const handleHeroRefresh = async () => {
+    try {
+      setRefreshingHero(true);
+      const idempotencyKey = `admin-${new Date().toISOString().slice(0, 16).replace(/[^0-9]/g, '')}`;
+      const { data } = await axios.post('/api/admin/hero/refresh', { idempotencyKey });
+      if (!data.success) throw new Error(data.message || 'Hero refresh failed.');
+      if (data.result?.skipped) {
+        toast.success(`Hero refresh was idempotent (${data.result.reason}).`);
+      } else {
+        toast.success(`Hero batch v${data.result?.version ?? 'new'} activated.`);
+      }
+      await fetchHeroSettings();
+    } catch (error) {
+      const details = error.response?.data?.details;
+      const missingCount = details?.missingOrInvalid?.length;
+      toast.error(missingCount
+        ? `${error.response?.data?.message || 'Hero refresh failed.'} ${missingCount} catalog movies are missing or invalid.`
+        : error.response?.data?.message || error.message || 'Hero refresh failed.');
+      await fetchHeroSettings();
+    } finally {
+      setRefreshingHero(false);
+    }
+  };
+
+  const handleSaveSound = async () => {
+    try {
+      setSavingSound(true);
+      const { data } = await axios.put('/api/admin/hero/sound', {
+        heroSoundDefaultEnabled: soundDefaultEnabled,
+        heroDefaultVolume: Number(defaultVolume),
+      });
+      if (!data.success) throw new Error(data.message || 'Unable to save sound settings.');
+      setSoundDefaultEnabled(Boolean(data.settings?.heroSoundDefaultEnabled));
+      setDefaultVolume(Number(data.settings?.heroDefaultVolume ?? defaultVolume));
+      toast.success('Hero sound defaults saved.');
+    } catch (error) {
+      toast.error(error.response?.data?.message || error.message || 'Unable to save sound settings.');
+    } finally {
+      setSavingSound(false);
     }
   };
 
@@ -137,9 +213,23 @@ const HeroSettings = () => {
       }
 
       const hero = data.hero || {};
+      const nextRotation = hero.rotation || null;
+      const activeMovies = nextRotation?.activeMovies || [];
+      const combinedMovies = [
+        ...(nextRotation?.pool || []),
+        ...(hero.availableMovies || []),
+      ];
+      const uniqueMovies = [...new Map(
+        combinedMovies.map((movie) => [String(movie._id || movie.id), movie]),
+      ).values()];
+      setRotation(nextRotation);
       setMode(hero.settings?.mode || 'auto');
-      setSelectedIds((hero.settings?.movieIds || []).map(String));
-      setAvailableMovies(hero.availableMovies || []);
+      setSelectedIds((
+        activeMovies.length ? activeMovies : hero.selectedMovies || []
+      ).map((movie) => String(movie._id || movie.id)));
+      setAvailableMovies(uniqueMovies);
+      setSoundDefaultEnabled(Boolean(hero.settings?.heroSoundDefaultEnabled));
+      setDefaultVolume(Number(hero.settings?.heroDefaultVolume ?? 0.35));
     } catch (error) {
       toast.error(error.response?.data?.message || error.message || 'Unable to load hero settings.');
     } finally {
@@ -148,7 +238,6 @@ const HeroSettings = () => {
   };
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (user) fetchHeroSettings();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
@@ -176,8 +265,8 @@ const HeroSettings = () => {
   };
 
   const handleSave = async () => {
-    if (mode === 'manual' && selectedIds.length === 0) {
-      toast.error('Choose at least one movie for manual hero mode.');
+    if (mode === 'manual' && selectedIds.length !== MAX_HERO_MOVIES) {
+      toast.error(`Choose exactly ${MAX_HERO_MOVIES} movies for the emergency poster fallback.`);
       return;
     }
 
@@ -208,7 +297,9 @@ const HeroSettings = () => {
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-4 bg-white/[0.04] border border-white/10 rounded-lg">
           <div>
             <p className="text-sm uppercase tracking-widest text-gray-400">Home page hero</p>
-            <p className="text-gray-300 mt-1">Manual mode displays the selected movies in this exact order.</p>
+            <p className="text-gray-300 mt-1">
+              An active 15-movie rotation is authoritative. Manual mode only defines the ordered emergency poster fallback.
+            </p>
           </div>
 
           <div className="flex items-center gap-3">
@@ -253,6 +344,135 @@ const HeroSettings = () => {
             </button>
           </div>
         </div>
+
+        <div className="grid gap-4 rounded-lg border border-white/10 bg-white/[0.04] p-4 lg:grid-cols-[1fr_auto] lg:items-end">
+          <div>
+            <p className="text-sm uppercase tracking-widest text-gray-400">Default trailer sound</p>
+            <p className="mt-1 text-sm text-gray-300">
+              Audible autoplay remains browser-controlled. Visitors always receive a muted fallback and can grant consent.
+            </p>
+            <label className="mt-4 flex items-center gap-2 text-sm text-gray-200">
+              <input
+                type="checkbox"
+                checked={soundDefaultEnabled}
+                onChange={(event) => setSoundDefaultEnabled(event.target.checked)}
+                className="h-4 w-4 rounded border-white/10 bg-black/30 text-primary focus:ring-0"
+              />
+              Attempt sound by default
+            </label>
+            <label className="mt-3 flex max-w-lg items-center gap-3 text-sm text-gray-300">
+              Volume
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={defaultVolume}
+                onChange={(event) => setDefaultVolume(Number(event.target.value))}
+                className="min-w-0 flex-1"
+                aria-label="Default Hero trailer volume"
+              />
+              <span className="w-12 text-right">{Math.round(defaultVolume * 100)}%</span>
+            </label>
+          </div>
+          <button
+            type="button"
+            onClick={handleSaveSound}
+            disabled={savingSound}
+            className="flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm transition hover:bg-primary-dull disabled:opacity-60"
+          >
+            <SaveIcon className="h-4 w-4" />
+            {savingSound ? 'Saving' : 'Save sound'}
+          </button>
+        </div>
+
+        <div className="flex flex-col justify-between gap-4 rounded-lg border border-white/10 bg-white/[0.04] p-4 lg:flex-row lg:items-center">
+          <div>
+            <p className="text-sm uppercase tracking-widest text-gray-400">Native Hero pool</p>
+            <p className="mt-1 text-gray-300">
+              Build 5 newest, 5 hot, and 5 discovery movies, then activate a seeded five-movie order.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleHeroRefresh}
+            disabled={refreshingHero}
+            className="rounded-md bg-primary px-4 py-2 text-sm transition hover:bg-primary-dull disabled:opacity-60"
+          >
+            {refreshingHero ? 'Refreshing Hero…' : 'Refresh Hero pool'}
+          </button>
+        </div>
+
+        {rotation?.activeBatch && (
+          <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+              <div>
+                <p className="text-xs uppercase tracking-wider text-gray-500">Batch</p>
+                <p className="mt-1 font-medium">v{rotation.activeBatch.version} · {rotation.activeBatch.batchKey}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wider text-gray-500">Pool</p>
+                <p className="mt-1 font-medium">{rotation.activeBatch.movieCount}/15 · {rotation.activeBatch.activeMovieCount}/5 active</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wider text-gray-500">Last refresh</p>
+                <p className="mt-1 text-sm">{
+                  rotation.refreshState?.lastSuccessfulRefreshAt
+                    ? new Date(rotation.refreshState.lastSuccessfulRefreshAt).toLocaleString()
+                    : rotation.activeBatch.activatedAt
+                      ? new Date(rotation.activeBatch.activatedAt).toLocaleString()
+                      : 'Pending'
+                }</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wider text-gray-500">Next refresh</p>
+                <p className="mt-1 text-sm">{
+                  (rotation.refreshState?.nextRefreshAt || rotation.activeBatch.nextRefreshAt)
+                    ? new Date(rotation.refreshState?.nextRefreshAt || rotation.activeBatch.nextRefreshAt).toLocaleString()
+                    : 'Not scheduled'
+                }</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wider text-gray-500">State</p>
+                <p className="mt-1 text-sm">{rotation.refreshState?.refreshing ? 'Refreshing' : 'Ready'}</p>
+              </div>
+            </div>
+
+            <HeroPoolGrid movies={rotation.pool || []} onUpdated={fetchHeroSettings} />
+          </div>
+        )}
+
+        {!rotation?.activeBatch && (rotation?.pool || []).length > 0 && (
+          <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+            <div className="flex flex-col gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="font-medium text-amber-200">No active native Hero batch</p>
+                <p className="mt-1 text-sm text-amber-100/80">
+                  Showing the pending {rotation.pool.length}-movie Hero candidate pool below. Upload and commit verified movie-specific trailers before refreshing.
+                </p>
+              </div>
+              <p className="text-sm text-amber-100">
+                {rotation.refreshState?.refreshing ? 'Refreshing' : 'Awaiting native assets'}
+              </p>
+            </div>
+            <HeroPoolGrid movies={rotation.pool} onUpdated={fetchHeroSettings} />
+          </div>
+        )}
+
+        {(rotation?.missingTrailers || []).length > 0 && (
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
+            <p className="font-medium text-amber-200">
+              {rotation.missingTrailers.length} movies need a verified, movie-specific native trailer
+            </p>
+            <div className="mt-3 flex max-h-48 flex-wrap gap-2 overflow-y-auto">
+              {rotation.missingTrailers.map((movie) => (
+                <span key={movie._id || movie.id} className="rounded bg-black/30 px-2 py-1 text-xs text-amber-100">
+                  {movie.title} · {(movie.nativeVideoIssues || []).join(', ') || 'missing'}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-4 bg-white/[0.04] border border-white/10 rounded-lg">
           <div>
@@ -386,32 +606,37 @@ const HeroSettings = () => {
                 const isSelected = selectedIds.includes(id);
 
                 return (
-                  <button
+                  <div
                     key={id}
-                    type="button"
-                    onClick={() => toggleMovie(id)}
-                    className={`relative text-left rounded-lg overflow-hidden border transition bg-black/30 ${isSelected ? 'border-primary shadow-lg shadow-primary/20' : 'border-white/10 hover:border-primary/50'}`}
+                    className={`overflow-hidden rounded-lg border transition bg-black/30 ${isSelected ? 'border-primary shadow-lg shadow-primary/20' : 'border-white/10 hover:border-primary/50'}`}
                   >
-                    <img
-                      src={getImageUrl(movie.poster_path || movie.backdrop_path)}
-                      alt={movie.title}
-                      loading="lazy"
-                      decoding="async"
-                      className="w-full aspect-2/3 object-cover bg-black/40"
-                    />
-                    <div className="absolute inset-x-0 bottom-0 p-2 bg-linear-to-t from-black via-black/80 to-transparent">
-                      <p className="text-sm font-medium truncate">{movie.title}</p>
-                      <p className="text-xs text-gray-400">{movie.release_date?.slice(0, 4) || 'N/A'}</p>
-                      <div onClick={(e) => e.stopPropagation()}>
-                        <HeroVideoUploader movie={movie} onUpdated={fetchHeroSettings} />
+                    <button
+                      type="button"
+                      onClick={() => toggleMovie(id)}
+                      aria-pressed={isSelected}
+                      className="relative block w-full text-left"
+                    >
+                      <img
+                        src={getImageUrl(movie.poster_path || movie.backdrop_path)}
+                        alt={movie.title}
+                        loading="lazy"
+                        decoding="async"
+                        className="w-full aspect-2/3 object-cover bg-black/40"
+                      />
+                      <div className="absolute inset-x-0 bottom-0 p-2 bg-linear-to-t from-black via-black/80 to-transparent">
+                        <p className="text-sm font-medium truncate">{movie.title}</p>
+                        <p className="text-xs text-gray-400">{movie.release_date?.slice(0, 4) || 'N/A'}</p>
                       </div>
+                      {isSelected && (
+                        <span className="absolute top-2 right-2 flex items-center justify-center w-7 h-7 rounded-md bg-primary text-white">
+                          <CheckIcon className="w-4 h-4" />
+                        </span>
+                      )}
+                    </button>
+                    <div className="border-t border-white/10 p-2">
+                      <HeroVideoUploader movie={movie} onUpdated={fetchHeroSettings} />
                     </div>
-                    {isSelected && (
-                      <span className="absolute top-2 right-2 flex items-center justify-center w-7 h-7 rounded-md bg-primary text-white">
-                        <CheckIcon className="w-4 h-4" />
-                      </span>
-                    )}
-                  </button>
+                  </div>
                 );
               })}
             </div>

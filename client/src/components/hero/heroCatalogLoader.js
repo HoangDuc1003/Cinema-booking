@@ -1,9 +1,9 @@
 import { buildHeroImageCandidates } from './heroImages.js';
-import { getClientHeroDayKey } from '../../services/heroCatalogOffset.js';
 
 export const HERO_MAX_MOVIES = 5;
-export const HERO_CACHE_KEY = 'nitrocine:hero-catalog-cache-v1';
-export const HERO_CACHE_VERSION = 3;
+export const HERO_CACHE_KEY = 'nitrocine:hero-catalog-cache-v2';
+export const HERO_CACHE_VERSION = 4;
+export const HERO_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 export const getNow = () => performance.now();
 
@@ -53,19 +53,8 @@ export const canLoadImage = (url, signal, timeoutMs = 6_000) => new Promise((res
 });
 
 export const validateMovieCandidates = async (movies, signal) => {
-  const findFirstLoadable = async (candidates) => {
-    for (const url of candidates) {
-      if (signal?.aborted) return '';
-      if (await canLoadImage(url, signal)) return url;
-    }
-    return '';
-  };
-
-  const putFirst = (candidates, selected) => (
-    selected ? [selected, ...candidates.filter((candidate) => candidate !== selected)] : candidates
-  );
-
-  const validateMovie = async (movie) => {
+  if (signal?.aborted) return [];
+  const prepareMovie = (movie) => {
     const desktopCandidates = [
       ...buildHeroImageCandidates([
         movie.backdrop_original,
@@ -94,71 +83,109 @@ export const validateMovieCandidates = async (movies, signal) => {
         movie.backdrop_path,
       ], 'w780'),
     ];
-
-    const [heroImageUrl, heroMobileImageUrl] = await Promise.all([
-      findFirstLoadable(desktopCandidates),
-      findFirstLoadable(mobileCandidates),
-    ]);
-    const fallbackUrl = heroImageUrl
-      || heroMobileImageUrl
-      || desktopCandidates[0]
-      || mobileCandidates[0];
+    const heroImageUrl = desktopCandidates[0] || mobileCandidates[0] || '';
+    const heroMobileImageUrl = mobileCandidates[0] || heroImageUrl;
+    const fallbackUrl = heroImageUrl || heroMobileImageUrl;
     if (!fallbackUrl) return null;
-
-    const resolvedHeroImageUrl = heroImageUrl || fallbackUrl;
-    const resolvedHeroMobileImageUrl = heroMobileImageUrl || fallbackUrl;
 
     return {
       ...movie,
-      heroImageUrl: resolvedHeroImageUrl,
-      heroMobileImageUrl: resolvedHeroMobileImageUrl,
-      heroImageCandidates: putFirst(desktopCandidates, resolvedHeroImageUrl),
-      heroMobileImageCandidates: putFirst(mobileCandidates, resolvedHeroMobileImageUrl),
+      heroImageUrl: heroImageUrl || fallbackUrl,
+      heroMobileImageUrl: heroMobileImageUrl || fallbackUrl,
+      heroImageCandidates: desktopCandidates,
+      heroMobileImageCandidates: mobileCandidates,
     };
   };
 
-  const results = await Promise.all(movies.slice(0, HERO_MAX_MOVIES).map(validateMovie));
-  return results.filter(Boolean);
+  return movies.slice(0, HERO_MAX_MOVIES).map(prepareMovie).filter(Boolean);
 };
 
-export const getInitialHeroMovies = (dayKey = getClientHeroDayKey()) => {
-  try {
-    if (typeof window !== 'undefined' && window.sessionStorage) {
-      const cached = window.sessionStorage.getItem(HERO_CACHE_KEY);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        const moviesList = Array.isArray(parsed?.movies) ? parsed.movies : null;
-        const cacheIsCurrent = parsed?.version === HERO_CACHE_VERSION
-          && parsed?.source === 'server'
-          && parsed?.dayKey === dayKey;
-        if (cacheIsCurrent && moviesList?.length > 0) {
-          return moviesList;
-        }
-        window.sessionStorage.removeItem(HERO_CACHE_KEY);
-      }
-    }
-  } catch {
-    /* ignore storage errors */
-  }
-  return [];
+const getStorage = () => (
+  typeof window !== 'undefined' ? window.localStorage : null
+);
+
+const normalizeCacheMeta = (meta = {}) => ({
+  batchId: meta.batchId == null ? '' : String(meta.batchId),
+  version: meta.version == null ? '' : String(meta.version),
+  generatedAt: meta.generatedAt ?? '',
+  nextRefreshAt: meta.nextRefreshAt ?? '',
+  timezone: meta.timezone ?? 'Asia/Ho_Chi_Minh',
+  fetchedAt: meta.fetchedAt ?? '',
+});
+
+const hasUniqueMovieOrder = (movies) => {
+  const ids = movies.map((movie, index) => getHeroMovieKey(movie, index));
+  return ids.every(Boolean) && new Set(ids).size === ids.length;
 };
+
+export const getInitialHeroPayload = (nowMs = Date.now()) => {
+  try {
+    const storage = getStorage();
+    const cached = storage?.getItem(HERO_CACHE_KEY);
+    if (!cached) return null;
+    const parsed = JSON.parse(cached);
+    const rawMovies = Array.isArray(parsed?.movies) ? parsed.movies : [];
+    const movies = rawMovies.slice(0, HERO_MAX_MOVIES);
+    const meta = normalizeCacheMeta(parsed?.meta);
+    const cachedAt = Date.parse(parsed?.cachedAt || '');
+    const valid = parsed?.schemaVersion === HERO_CACHE_VERSION
+      && parsed?.source === 'server'
+      && rawMovies.length === HERO_MAX_MOVIES
+      && movies.length === HERO_MAX_MOVIES
+      && hasUniqueMovieOrder(movies)
+      && meta.version !== ''
+      && Number.isFinite(cachedAt)
+      && nowMs - cachedAt >= 0
+      && nowMs - cachedAt <= HERO_CACHE_MAX_AGE_MS;
+    if (!valid) {
+      storage?.removeItem(HERO_CACHE_KEY);
+      return null;
+    }
+    return {
+      movies,
+      settings: parsed.settings && typeof parsed.settings === 'object' ? parsed.settings : {},
+      meta,
+      source: 'server',
+      cachedAt: parsed.cachedAt,
+    };
+  } catch {
+    try {
+      getStorage()?.removeItem(HERO_CACHE_KEY);
+    } catch {
+      // Storage may be unavailable.
+    }
+  }
+  return null;
+};
+
+export const getInitialHeroMovies = () => getInitialHeroPayload()?.movies || [];
 
 export const saveHeroMoviesCache = (movies, options = {}) => {
   try {
-    if (typeof window !== 'undefined' && window.sessionStorage && Array.isArray(movies) && movies.length > 0) {
-      if (options.source !== 'server') {
-        window.sessionStorage.removeItem(HERO_CACHE_KEY);
-        return;
-      }
-      const payload = {
-        version: HERO_CACHE_VERSION,
-        source: 'server',
-        dayKey: options.dayKey || getClientHeroDayKey(),
-        movies,
-      };
-      window.sessionStorage.setItem(HERO_CACHE_KEY, JSON.stringify(payload));
+    const storage = getStorage();
+    const meta = normalizeCacheMeta(options.meta);
+    if (!storage) return false;
+    if (
+      options.source !== 'server'
+      || !Array.isArray(movies)
+      || movies.length !== HERO_MAX_MOVIES
+      || !hasUniqueMovieOrder(movies)
+      || meta.version === ''
+    ) {
+      storage.removeItem(HERO_CACHE_KEY);
+      return false;
     }
+    const payload = {
+      schemaVersion: HERO_CACHE_VERSION,
+      source: 'server',
+      cachedAt: new Date().toISOString(),
+      meta,
+      settings: options.settings && typeof options.settings === 'object' ? options.settings : {},
+      movies,
+    };
+    storage.setItem(HERO_CACHE_KEY, JSON.stringify(payload));
+    return true;
   } catch {
-    /* ignore storage errors */
+    return false;
   }
 };

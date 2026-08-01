@@ -28,3 +28,21 @@ export const useSaveData = () => {
 
   return saveData;
 };
+
+export const useSlowNetwork = () => {
+  const getSlow = () => {
+    const connection = navigator.connection;
+    return ['slow-2g', '2g'].includes(String(connection?.effectiveType || '').toLowerCase());
+  };
+  const [slowNetwork, setSlowNetwork] = useState(getSlow);
+
+  useEffect(() => {
+    const connection = navigator.connection;
+    if (!connection) return undefined;
+    const handleChange = () => setSlowNetwork(getSlow());
+    connection.addEventListener?.('change', handleChange);
+    return () => connection.removeEventListener?.('change', handleChange);
+  }, []);
+
+  return slowNetwork;
+};

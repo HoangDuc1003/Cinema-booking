@@ -17,7 +17,7 @@ const candidates = Array.from({ length: 5 }, (_, index) => ({
   backdrop_path: `/backdrop-${index}.jpg`,
 }));
 
-test('Home renders immediately without list calls and Trailer resolves at most active plus next', async ({ page }) => {
+test('Home renders immediately and Hero performs no client-side TMDB video lookup', async ({ page }) => {
   let liveListRequests = 0;
   let videoLookups = 0;
 
@@ -34,7 +34,7 @@ test('Home renders immediately without list calls and Trailer resolves at most a
   await page.route(/\/api\/show\/hero(?:\?|$)/, (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
-    body: JSON.stringify({ success: true, movies: [candidates[0]] }),
+    body: JSON.stringify({ success: true, movies: candidates }),
   }));
   await page.route('**/api/show/tmdb/home-now-showing**', (route) => route.fulfill({
     status: 200,
@@ -71,11 +71,11 @@ test('Home renders immediately without list calls and Trailer resolves at most a
   await page.goto('/');
   await expect(page.locator('.hero-section')).toBeVisible();
   await expect(page.getByTestId('home-entry-loader')).toHaveCount(0);
-  await expect.poll(() => videoLookups, { timeout: 10_000 }).toBeGreaterThanOrEqual(1);
   await page.waitForTimeout(1_500);
 
   expect(liveListRequests).toBe(0);
-  expect(videoLookups).toBeLessThanOrEqual(2);
+  expect(videoLookups).toBe(0);
+  await expect(page.locator('.hero-section iframe')).toHaveCount(0);
 });
 
 test('Hero never renders mock data while the server response is pending', async ({ page }) => {
@@ -123,7 +123,7 @@ test('Hero shows retry on failure and preserves the five server movies in order'
   }));
   await page.route(/\/api\/show\/hero(?:\?|$)/, (route) => {
     attempts += 1;
-    if (attempts === 1) return route.fulfill({ status: 503, body: 'Unavailable' });
+    if (attempts <= 2) return route.fulfill({ status: 503, body: 'Unavailable' });
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -139,11 +139,13 @@ test('Hero shows retry on failure and preserves the five server movies in order'
   await page.goto('/');
   const hero = page.locator('.hero-section');
   await expect(page.getByRole('heading', { name: 'Unable to load featured movies' })).toBeVisible();
+  expect(attempts).toBe(2);
   await expect(hero.getByText('In the Lost Lands', { exact: true })).toHaveCount(0);
   await expect(hero.locator('iframe, video')).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Try again' }).click();
   await expect(hero).toHaveAttribute('data-catalog-source', 'server');
+  expect(attempts).toBe(3);
   const railTitles = await hero.locator('.hero-poster-thumb span').allTextContents();
   expect(railTitles).toEqual(candidates.map((movie) => movie.title));
 });

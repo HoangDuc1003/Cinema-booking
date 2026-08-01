@@ -32,4 +32,5 @@
 
 ## High-risk areas
 - Changes under `client/src/components/hero/` must follow the nearest `AGENTS.md`.
-- The Hero background is a verified YouTube IFrame Player trailer or poster fallback, as governed by the nearest `AGENTS.md`.
+- The Hero background is a verified native HTML5 video trailer or poster fallback, as governed by the nearest `AGENTS.md`.
+- YouTube iframes, the YouTube Player API, and generic media loops are forbidden in the Hero flow.

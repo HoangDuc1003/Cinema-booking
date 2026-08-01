@@ -136,6 +136,8 @@ test('buildWeeklyCatalogBatch collects, validates, and buckets movies', async ()
                     runtime: 120,
                     genres: [{ id: 1, name: 'Action' }],
                     vote_average: 8.5,
+                    vote_count: 1200,
+                    popularity: 75,
                     original_language: 'en',
                     credits: {
                         cast: [{ id: 1, name: 'Actor 1' }]
@@ -166,6 +168,9 @@ test('buildWeeklyCatalogBatch collects, validates, and buckets movies', async ()
         
         assert.equal(movies.length, 150);
         assert.equal(movies[0].title, `Test Movie ${movies[0]._id}`);
+        assert.equal(movies[0].vote_count, 1200);
+        assert.equal(movies[0].popularity, 75);
+        assert.equal(movies[0].adult, false);
         assert.ok(maxActiveDetails <= 5, `detail concurrency exceeded five: ${maxActiveDetails}`);
     } finally {
         axios.get = originalGet;

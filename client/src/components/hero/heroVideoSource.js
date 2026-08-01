@@ -1,11 +1,11 @@
-const YOUTUBE_VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
-
 export const NATIVE_VIDEO_MIME_TYPES = Object.freeze({
   mp4: 'video/mp4',
   webm: 'video/webm',
-  ogg: 'video/ogg',
-  ogv: 'video/ogg',
 });
+
+export const HERO_NATIVE_VIDEO_MIME_TYPES = Object.freeze(
+  Object.values(NATIVE_VIDEO_MIME_TYPES),
+);
 
 const isHostOrSubdomain = (hostname, domain) => (
   hostname === domain || hostname.endsWith(`.${domain}`)
@@ -28,44 +28,6 @@ const parseHttpUrl = (value) => {
   }
 };
 
-const normalizeYouTubeVideoId = (value) => {
-  const candidate = String(value || '').trim();
-  return YOUTUBE_VIDEO_ID_PATTERN.test(candidate) ? candidate : '';
-};
-
-const decodePathSegment = (segment) => {
-  try {
-    return decodeURIComponent(segment || '');
-  } catch {
-    return '';
-  }
-};
-
-export const extractYouTubeVideoId = (value) => {
-  const directId = normalizeYouTubeVideoId(value);
-  if (directId) return directId;
-
-  if (typeof value !== 'string') return null;
-  const url = parseHttpUrl(value.trim());
-  if (!url || !isYouTubeHostname(url.hostname.toLowerCase())) return null;
-
-  const hostname = url.hostname.toLowerCase();
-  const pathSegments = url.pathname.split('/').filter(Boolean);
-  let candidate = '';
-
-  if (isHostOrSubdomain(hostname, 'youtu.be')) {
-    candidate = decodePathSegment(pathSegments[0]);
-  } else {
-    const route = String(pathSegments[0] || '').toLowerCase();
-    if (route === 'watch') candidate = url.searchParams.get('v') || '';
-    if (['embed', 'shorts', 'live'].includes(route)) {
-      candidate = decodePathSegment(pathSegments[1]);
-    }
-  }
-
-  return normalizeYouTubeVideoId(candidate) || null;
-};
-
 export const inferNativeVideoMimeType = (source) => {
   const match = String(source || '').match(/\.([a-z0-9]+)(?:[?#].*)?$/i);
   return match ? NATIVE_VIDEO_MIME_TYPES[match[1].toLowerCase()] || '' : '';
@@ -73,7 +35,8 @@ export const inferNativeVideoMimeType = (source) => {
 
 const getExplicitVideoMimeType = (candidate) => {
   const value = typeof candidate === 'string' ? candidate.trim() : '';
-  return /^video\/[a-z0-9][a-z0-9.+-]*(?:\s*;.*)?$/i.test(value) ? value : '';
+  const normalized = value.split(';', 1)[0].trim().toLowerCase();
+  return HERO_NATIVE_VIDEO_MIME_TYPES.includes(normalized) ? normalized : '';
 };
 
 const isIframeVideoUrl = (source) => {
@@ -86,38 +49,55 @@ const isIframeVideoUrl = (source) => {
     || /\/(?:embed|iframe)(?:\/|$)/i.test(url.pathname);
 };
 
-export const resolveNativeHeroVideoSource = (trailer) => {
-  if (!trailer || typeof trailer !== 'object' || trailer.embedUrl) return null;
+const isUnsafeProtocol = (source) => /^(?:blob|data|file|javascript):/i.test(source);
 
-  const src = typeof trailer.videoUrl === 'string'
-    ? trailer.videoUrl.trim()
-    : typeof trailer.src === 'string'
-      ? trailer.src.trim()
-      : '';
-  if (!src || isIframeVideoUrl(src)) return null;
-
-  const explicitMimeType = getExplicitVideoMimeType(trailer.mimeType)
-    || getExplicitVideoMimeType(trailer.type);
-  const mimeType = explicitMimeType || inferNativeVideoMimeType(src);
-  if (!mimeType) return null;
-
-  return { kind: 'native', src, mimeType };
-};
-
-export const resolveYouTubeHeroVideoSource = (trailer) => {
-  if (!trailer || typeof trailer !== 'object') return null;
-
-  const candidates = [trailer.videoId, trailer.embedUrl, trailer.videoUrl, trailer.src];
-  for (const candidate of candidates) {
-    const videoId = extractYouTubeVideoId(candidate);
-    if (videoId) return { kind: 'youtube', videoId };
+const resolveAllowedHosts = (allowedHosts) => {
+  if (Array.isArray(allowedHosts)) {
+    return allowedHosts.map((host) => String(host).trim().toLowerCase()).filter(Boolean);
   }
-  return null;
+  return String(allowedHosts || '')
+    .split(',')
+    .map((host) => host.trim().toLowerCase())
+    .filter(Boolean);
 };
 
-export const resolveHeroVideoSource = (trailer) => (
-  resolveNativeHeroVideoSource(trailer) || resolveYouTubeHeroVideoSource(trailer)
+const isAllowedHost = (hostname, allowedHosts) => (
+  !allowedHosts.length
+  || allowedHosts.some((host) => isHostOrSubdomain(hostname, host))
 );
+
+export const isSafeNativeHeroVideoUrl = (source, options = {}) => {
+  const src = String(source || '').trim();
+  if (!src || isUnsafeProtocol(src) || isIframeVideoUrl(src)) return false;
+
+  const parsed = parseHttpUrl(src);
+  if (!parsed) {
+    return Boolean(options.allowRelative);
+  }
+
+  if (options.isProduction && parsed.protocol !== 'https:') return false;
+  const configuredHosts = resolveAllowedHosts(options.allowedHosts);
+  return isAllowedHost(
+    parsed.hostname.toLowerCase(),
+    configuredHosts.length || !options.isProduction
+      ? configuredHosts
+      : ['res.cloudinary.com'],
+  );
+};
+
+const getNativeSourceFields = (candidate) => {
+  const src = typeof candidate?.videoUrl === 'string'
+    ? candidate.videoUrl.trim()
+    : typeof candidate?.src === 'string'
+      ? candidate.src.trim()
+      : '';
+  const explicitMimeType = getExplicitVideoMimeType(candidate?.mimeType)
+    || getExplicitVideoMimeType(candidate?.type);
+  return {
+    src,
+    mimeType: explicitMimeType || inferNativeVideoMimeType(src),
+  };
+};
 
 export const resolveConfiguredHeroVideoSource = (movie, options = {}) => {
   if (!movie || typeof movie !== 'object') return null;
@@ -127,44 +107,50 @@ export const resolveConfiguredHeroVideoSource = (movie, options = {}) => {
     : typeof movie.background_video_url === 'string'
       ? movie.background_video_url.trim()
       : '';
-  if (!src || isIframeVideoUrl(src)) return null;
+  if (!src) return null;
 
   const isMockUrl = src === '/mock/hero-trailer.mp4' || src.includes('/mock/hero-trailer.mp4');
   if (isMockUrl) {
-    const mockEnabled = options.mockEnabled !== undefined
-      ? Boolean(options.mockEnabled)
-      : true; // Allow explicitly configured mock URLs to play in production without flags
-    if (!mockEnabled) return null;
+    if (!options.mockEnabled || options.isProduction) return null;
   }
 
-  if (movie.heroVideoStatus !== undefined && movie.heroVideoStatus !== 'ready') {
-    return null;
-  }
+  if (movie.heroVideoStatus !== 'ready') return null;
 
   const explicitMimeType = getExplicitVideoMimeType(movie.heroVideoMimeType)
     || getExplicitVideoMimeType(movie.background_video_mime_type);
   const mimeType = explicitMimeType || inferNativeVideoMimeType(src);
-  if (!mimeType) return null;
+  if (
+    !HERO_NATIVE_VIDEO_MIME_TYPES.includes(mimeType)
+    || !isSafeNativeHeroVideoUrl(src, {
+      isProduction: Boolean(options.isProduction),
+      allowedHosts: options.allowedHosts,
+      allowRelative: Boolean(options.mockEnabled && isMockUrl),
+    })
+  ) return null;
+
+  const version = String(movie.heroVideoVersion || movie.videoVersion || '').trim();
+  const poster = String(
+    movie.heroVideoPoster
+    || movie.heroVideoPosterUrl
+    || movie.videoPoster
+    || '',
+  ).trim();
 
   return {
     kind: 'native',
     src,
     mimeType,
+    version,
+    poster,
   };
 };
 
 
 export const canUseHeroBackgroundVideo = (movie, options = {}) => (
-  Boolean(options.mockEnabled) || Boolean(resolveConfiguredHeroVideoSource(movie, options))
+  Boolean(resolveConfiguredHeroVideoSource(movie, options))
 );
 
-/**
- * Returns true when the movie can potentially resolve a Hero trailer, either
- * because it already has a configured native source or because mock is enabled.
- */
 export const canUseNativeHeroVideo = (movie, options = {}) => {
   if (!movie || typeof movie !== 'object') return false;
-  if (options.mockEnabled) return true;
   return Boolean(resolveConfiguredHeroVideoSource(movie, options));
 };
-

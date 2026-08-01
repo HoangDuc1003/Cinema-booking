@@ -10,7 +10,9 @@
     "test:concurrency": "node scripts/simulate-booking-concurrency.js",
     "seed:catalog": "node scripts/seed.js",
     "migrate:catalog-v2": "node scripts/migrate-catalog-v2.js",
-    "rollback:catalog": "node scripts/rollback-catalog.js"
+    "rollback:catalog": "node scripts/rollback-catalog.js",
+    "migrate:hero-rotation": "node scripts/migrate-hero-rotation.js",
+    "rollback:hero-rotation": "node scripts/rollback-hero-rotation.js"
   },
   "keywords": [],
   "author": "",

@@ -4,6 +4,11 @@ import User from '../models/User.js';
 import { reconcileHeroAssets } from '../services/heroVideoService.js';
 import { getISOWeekKey, refreshWeeklyCatalog, rotateActiveCatalogSlot } from '../services/catalogRefreshService.js';
 import { createEnrichHeroVideosFunction } from './functions/enrichHeroVideos.js';
+import {
+    getHeroLocalDateKey,
+    refreshHeroRotation,
+    shouldRetryHeroRefreshError,
+} from '../services/heroRotationService.js';
 
 
 // Gracefully handle missing Inngest keys (avoids crashing on Vercel)
@@ -60,6 +65,38 @@ try {
                 dryRun: Boolean(dryRun),
                 requestedBy,
             }));
+        },
+    );
+
+    const dailyHeroRotationRefresh = inngest.createFunction(
+        {
+            id: 'daily-native-hero-rotation-refresh',
+            cron: 'TZ=Asia/Ho_Chi_Minh 0 0 * * *',
+            retries: 3,
+            concurrency: { limit: 1, key: '"hero-rotation-refresh"', scope: 'env' },
+        },
+        async ({ event, step }) => {
+            await connectDB();
+            const scheduledAt = new Date(event?.ts || Date.now());
+            const runId = `cron:${getHeroLocalDateKey(scheduledAt)}`;
+            return step.run('refresh-native-hero-rotation-if-due', async () => {
+                try {
+                    return await refreshHeroRotation({
+                        source: 'cron',
+                        requestedBy: 'inngest-cron',
+                        runId,
+                        now: scheduledAt,
+                        force: false,
+                    });
+                } catch (error) {
+                    if (shouldRetryHeroRefreshError(error)) throw error;
+                    return {
+                        success: false,
+                        code: error?.code || 'HERO_REFRESH_FAILED',
+                        message: error?.message || 'Hero rotation refresh failed.',
+                    };
+                }
+            });
         },
     );
 
@@ -152,6 +189,7 @@ try {
         syncUserUpdation,
         weeklyCatalogRefresh,
         requestedCatalogRefresh,
+        dailyHeroRotationRefresh,
         rotateActiveCatalogSlotJob,
         reconcileHeroAssetsJob,
         enrichHeroVideosJob
@@ -163,4 +201,3 @@ try {
 }
 
 export { inngest, functions };
-

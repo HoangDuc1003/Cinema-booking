@@ -194,6 +194,9 @@ seat holds, but it is not the only double-booking guard. See
 index rollout, health behavior, and concurrency testing.
 See [`docs/payment-booking-debug.md`](./docs/payment-booking-debug.md) for Stripe
 configuration, pending-hold recovery, safe logs, and pay-now/pay-all retries.
+See [`docs/hero-native-rotation.md`](./docs/hero-native-rotation.md) for the
+15-movie native Hero pool, licensed trailer upload/mapping, 48-hour scheduler,
+cache verification, migration, and rollback.
 
 ```bash
 git clone https://github.com/hoangduc1003/cinema-booking.git

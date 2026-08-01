@@ -8,6 +8,51 @@ const state = globalThis.__nitroCineRedisState || {
 
 globalThis.__nitroCineRedisState = state;
 
+const getMaxReconnectAttempts = () => {
+    const configured = Number(process.env.REDIS_MAX_RECONNECT_ATTEMPTS);
+    return Number.isInteger(configured) && configured >= 0 && configured <= 20
+        ? configured
+        : 1;
+};
+
+const getCommandTimeoutMs = () => {
+    const configured = Number(process.env.REDIS_COMMAND_TIMEOUT_MS);
+    return Number.isFinite(configured) && configured >= 100 && configured <= 30000
+        ? configured
+        : 2000;
+};
+
+const getConnectTimeoutMs = () => {
+    const configured = Number(process.env.REDIS_CONNECT_TIMEOUT_MS);
+    return Number.isFinite(configured) && configured >= 100 && configured <= 30000
+        ? configured
+        : 5000;
+};
+
+const invalidateClient = (client) => {
+    if (state.client === client) state.client = null;
+    try {
+        client.destroy();
+    } catch {
+        // The client may already have closed while the command timed out.
+    }
+};
+
+export const runWithCommandTimeout = async (client, operation) => {
+    let timeoutId;
+    const timeout = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => {
+            invalidateClient(client);
+            reject(new Error('Redis command timed out'));
+        }, getCommandTimeoutMs());
+    });
+    try {
+        return await Promise.race([operation(client), timeout]);
+    } finally {
+        clearTimeout(timeoutId);
+    }
+};
+
 const createRedisClient = () => {
     const url = process.env.REDIS_URL;
     if (!url) return null;
@@ -15,8 +60,13 @@ const createRedisClient = () => {
     const client = createClient({
         url,
         socket: {
-            connectTimeout: Number(process.env.REDIS_CONNECT_TIMEOUT_MS) || 5000,
-            reconnectStrategy: (retries) => Math.min(retries * 100, 3000),
+            connectTimeout: getConnectTimeoutMs(),
+            reconnectStrategy: (retries) => {
+                if (retries >= getMaxReconnectAttempts()) {
+                    return new Error('Redis reconnect attempt limit reached');
+                }
+                return Math.min((retries + 1) * 100, 3000);
+            },
         },
     });
 
@@ -48,7 +98,38 @@ export const connectRedis = async ({ required = false } = {}) => {
 
     if (state.client.isOpen) return state.client;
 
-    state.connectPromise = state.client.connect()
+    const client = state.client;
+    const connectTimeoutMs = getConnectTimeoutMs();
+    let timedOut = false;
+    let timeoutId;
+    const timeout = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => {
+            timedOut = true;
+            if (state.client === client) state.client = null;
+            try {
+                client.destroy();
+            } catch {
+                // The client may already have closed while the timeout fired.
+            }
+            reject(new Error('Redis connection timed out'));
+        }, connectTimeoutMs);
+        timeoutId.unref?.();
+    });
+    let connectionAttempt;
+    try {
+        connectionAttempt = client.connect();
+    } catch (error) {
+        connectionAttempt = Promise.reject(error);
+    }
+    connectionAttempt.then(
+        () => {
+            if (timedOut || state.client !== client) {
+                invalidateClient(client);
+            }
+        },
+        () => {},
+    );
+    state.connectPromise = Promise.race([connectionAttempt, timeout])
         .then(() => state.client)
         .catch((error) => {
             state.lastError = error;
@@ -56,6 +137,7 @@ export const connectRedis = async ({ required = false } = {}) => {
             throw error;
         })
         .finally(() => {
+            clearTimeout(timeoutId);
             state.connectPromise = null;
         });
 
@@ -74,7 +156,7 @@ export const getRedisHealth = async () => {
     try {
         const client = await connectRedis({ required: true });
         const startedAt = performance.now();
-        await client.ping();
+        await runWithCommandTimeout(client, (redisClient) => redisClient.ping());
         return {
             configured: true,
             connected: true,

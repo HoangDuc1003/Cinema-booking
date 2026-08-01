@@ -1,3 +1,10 @@
+import {
+    CACHE_HERO_ACTIVE_TTL_SECONDS,
+    CACHE_HERO_LAST_GOOD_TTL_SECONDS,
+    HERO_REFRESH_LOCK_TTL_MS,
+    HERO_REFRESH_RUN_TTL_SECONDS,
+} from '../configs/heroRotation.js';
+
 const parsePositiveInteger = (value, fallback) => {
     const parsed = Number.parseInt(value, 10);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -32,6 +39,13 @@ export const redisKeys = {
     catalogRefreshFence: () => key('lock', 'catalog-refresh', 'fence'),
     catalogRefreshState: () => key('catalog', 'refresh-state'),
     catalogRefreshJob: (runId) => key('catalog', 'refresh-job', runId),
+    heroActive: (batchId, version, generation = 0) => key('hero', 'active', batchId, version, generation),
+    heroActivePattern: () => key('hero', 'active', '*'),
+    heroLastGood: () => key('hero', 'last-good'),
+    heroRefreshLock: () => key('lock', 'hero-refresh'),
+    heroRefreshFence: () => key('lock', 'hero-refresh', 'fence'),
+    heroRefreshRun: (runId) => key('hero', 'refresh-run', runId),
+    heroRefreshIdempotency: (windowKey) => key('idempotency', 'hero-refresh', windowKey),
     tmdbSearch: (query, page) => key('cache', 'tmdb', 'search', encodeURIComponent(query.toLowerCase()).slice(0, 120), page),
     seatMap: (showId) => key('cache', 'seat-map', showId),
     seatHold: (showId, seat) => key('hold', 'show', showId, 'seat', seat),
@@ -54,4 +68,8 @@ export const redisTtl = Object.freeze({
     paymentIdempotency: parsePositiveInteger(process.env.PAYMENT_IDEMPOTENCY_TTL_SECONDS, 604800),
     catalogRefreshLockMs: parsePositiveInteger(process.env.CATALOG_REFRESH_LOCK_TTL_MS, 120000),
     catalogRefreshJob: parsePositiveInteger(process.env.CATALOG_REFRESH_JOB_TTL_SECONDS, 86400),
+    heroActive: CACHE_HERO_ACTIVE_TTL_SECONDS,
+    heroLastGood: CACHE_HERO_LAST_GOOD_TTL_SECONDS,
+    heroRefreshLockMs: HERO_REFRESH_LOCK_TTL_MS,
+    heroRefreshRun: HERO_REFRESH_RUN_TTL_SECONDS,
 });

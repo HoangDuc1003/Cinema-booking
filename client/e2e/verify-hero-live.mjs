@@ -7,167 +7,110 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const OUTPUT_DIR = path.resolve(HERE, '../../artifacts/hero-live');
 const BASE_URL = process.env.HERO_LIVE_BASE_URL || 'http://127.0.0.1:4174';
 const HEADLESS = process.env.HERO_LIVE_HEADLESS === '1';
-const PLAYING = 1;
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
 };
 
-const waitForSettledHero = async (page) => {
-  await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' });
-  await page.locator('.hero-section .hero-title').waitFor({ state: 'visible', timeout: 20_000 });
-  await page.waitForTimeout(750);
+const fixtureUrl = () => {
+  const url = new URL(BASE_URL);
+  url.searchParams.set('heroMock', '1');
+  return url.toString();
 };
 
-const waitForHeroPlaying = async (page) => {
+const waitForAdvancingPlayback = async (page, video) => {
   await page.waitForFunction(() => {
-    const snapshot = window.__NITROCINE_HERO_MEDIA_DIAGNOSTICS__?.getSnapshot?.();
-    const playingState = window.YT?.PlayerState?.PLAYING;
-    return Boolean(snapshot && playingState != null && snapshot.playerState === playingState && snapshot.currentTime > 0.1);
-  }, undefined, { timeout: 30_000 });
-  await page.locator('.hero-youtube-video.is-visible').waitFor({ state: 'visible', timeout: 5_000 });
+    const element = document.querySelector('.hero-section video');
+    return Boolean(
+      element
+      && element.readyState >= 2
+      && element.videoWidth > 0
+      && element.videoHeight > 0
+      && !element.paused
+      && !element.error
+      && element.currentTime > 0.35
+    );
+  }, undefined, { timeout: 20_000 });
+
+  const sampleA = await video.evaluate((element) => element.currentTime);
+  await page.waitForTimeout(800);
+  const sampleB = await video.evaluate((element) => element.currentTime);
+  assert(sampleB > sampleA + 0.15, 'Hero currentTime did not advance.');
+  return { sampleA, sampleB };
 };
 
-const getHeroSnapshot = (page) => page.evaluate(() => (
-  window.__NITROCINE_HERO_MEDIA_DIAGNOSTICS__?.getSnapshot?.() || null
-));
-
-const verifyDesktopAndTrailerSection = async (browser) => {
+const verifyViewport = async (browser, {
+  name,
+  viewport,
+  isMobile = false,
+}) => {
   const context = await browser.newContext({
-    viewport: { width: 1440, height: 900 },
+    viewport,
+    isMobile,
+    hasTouch: isMobile,
     locale: 'en-US',
     storageState: undefined,
   });
   const page = await context.newPage();
-  const metadataRequests = [];
-  page.on('request', (request) => {
-    if (/\/api\/show\/tmdb\/movie\/\d+\/videos(?:\?|$)/.test(request.url())) {
-      metadataRequests.push(request.url());
-    }
-  });
+  const requests = [];
+  page.on('request', (request) => requests.push(request.url()));
 
-  await waitForSettledHero(page);
+  await page.goto(fixtureUrl(), { waitUntil: 'domcontentloaded' });
   const hero = page.locator('.hero-section');
-  const title = (await hero.locator('.hero-title').innerText()).replace(/\s+/g, ' ').trim();
-  const scrollBefore = await page.evaluate(() => window.scrollY);
+  await hero.locator('.hero-title').waitFor({ state: 'visible', timeout: 20_000 });
+  const video = hero.locator('video');
+  await video.waitFor({ state: 'attached', timeout: 20_000 });
+  const playback = await waitForAdvancingPlayback(page, video);
+  await hero.screenshot({ path: path.join(OUTPUT_DIR, `hero-${name}-playing.png`) });
 
-  // --- Desktop auto-start: NO click ---
-  await hero.screenshot({ path: path.join(OUTPUT_DIR, 'hero-startup.png') });
-
-  // Poster should cover the player during startup
-  const preStable = await page.evaluate(() => ({
-    posterVisible: document.querySelector('.hero-poster-shell')?.classList.contains('is-visible') || false,
-    videoVisible: document.querySelector('.hero-youtube-video')?.classList.contains('is-visible') || false,
+  const contract = await video.evaluate((element) => ({
+    autoPlay: element.autoplay,
+    playsInline: element.playsInline,
+    controls: element.controls,
+    controlsAttribute: element.hasAttribute('controls'),
+    preload: element.preload,
+    disablePictureInPicture: element.disablePictureInPicture,
+    disableRemotePlayback: element.disableRemotePlayback,
+    controlsList: element.getAttribute('controlslist'),
+    pointerEvents: getComputedStyle(element).pointerEvents,
+    videoWidth: element.videoWidth,
+    videoHeight: element.videoHeight,
+    currentSrc: element.currentSrc,
+    muted: element.muted,
+    volume: element.volume,
   }));
-
-  await page.waitForTimeout(500);
-  await hero.screenshot({ path: path.join(OUTPUT_DIR, 'hero-500ms.png') });
-  await page.waitForTimeout(1_000);
-  await hero.screenshot({ path: path.join(OUTPUT_DIR, 'hero-1500ms.png') });
-
-  await waitForHeroPlaying(page);
-  const sampleA = await getHeroSnapshot(page);
-  await page.waitForTimeout(2_500);
-  const sampleB = await getHeroSnapshot(page);
-
-  assert(sampleA?.playerState === PLAYING, 'Hero did not reach YouTube PLAYING via auto-start.');
-  assert(sampleB?.currentTime > sampleA?.currentTime, 'Hero currentTime did not advance.');
-  assert(metadataRequests.length === 1, `Expected one metadata request, received ${metadataRequests.length}.`);
-  const scrollAfterPlayback = await page.evaluate(() => window.scrollY);
-  assert(
-    scrollAfterPlayback === scrollBefore,
-    `Hero playback changed scroll position (${scrollBefore} -> ${scrollAfterPlayback}).`,
-  );
-
-  await hero.screenshot({ path: path.join(OUTPUT_DIR, 'hero-5s.png') });
-  await page.waitForTimeout(5_000);
-  await hero.screenshot({ path: path.join(OUTPUT_DIR, 'hero-desktop-playing.png') });
-  await page.waitForTimeout(250);
-  await hero.screenshot({ path: path.join(OUTPUT_DIR, 'hero-10s.png') });
-
-  const heroVideoId = await hero.locator('.hero-youtube-video').getAttribute('data-video-id');
-  const heroPlayerCount = await hero.locator('.hero-youtube-video iframe').count();
-  const centerButtonCount = await page.locator('.cinematic-center-btn').count()
-    + await hero.getByRole('button', { name: /^(Play|Pause)$/ }).count();
-  const heroInternalButtonCount = await hero.locator('.hero-youtube-video button').count();
-  const iframePointerEvents = await hero.locator('.hero-youtube-video iframe').evaluate(
-    (iframe) => getComputedStyle(iframe).pointerEvents,
-  );
-  const endpoint = metadataRequests[0];
-  const movieId = endpoint?.match(/\/movie\/(\d+)\/videos/)?.[1] || '';
-  const heroMetadataRequestCount = metadataRequests.length;
-
-  // Switch to poster, then verify TrailerSection independently
-  await hero.getByRole('button', { name: 'Poster', exact: true }).click();
-
-  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-  const trailerCard = page.locator('.cinematic-player-card').first();
-  await trailerCard.scrollIntoViewIfNeeded();
-  await trailerCard.locator('iframe').waitFor({ state: 'visible', timeout: 30_000 });
-  await page.waitForFunction(() => {
-    const snapshot = window.__NITROCINE_TRAILER_PLAYER_DIAGNOSTICS__?.getSnapshot?.();
-    const playingState = window.YT?.PlayerState?.PLAYING;
-    return Boolean(snapshot && playingState != null && snapshot.playerState === playingState && snapshot.currentTime > 0.1);
-  }, undefined, { timeout: 30_000 });
-  const trailerSampleA = await page.evaluate(() => (
-    window.__NITROCINE_TRAILER_PLAYER_DIAGNOSTICS__?.getSnapshot?.() || null
+  const title = (await hero.locator('.hero-title').innerText()).replace(/\s+/g, ' ').trim();
+  const videoRequestUrls = [...new Set(requests.filter((url) => /\/mock\/hero-trailer\.mp4/.test(url)))];
+  const nativeMediaRequestUrls = [...new Set(requests.filter((url) => /\.(?:mp4|webm)(?:[?#]|$)/i.test(url)))];
+  const heroApiRequestUrls = requests.filter((url) => /\/api\/show\/hero(?:\?|$)/.test(url));
+  const forbiddenHeroRequests = requests.filter((url) => (
+    /\/tmdb\/movie\/[^/]+\/videos(?:\?|$)/i.test(url)
+    || /^https?:\/\/(?:[^/]+\.)?(?:youtube\.com|youtube-nocookie\.com|youtu\.be)\//i.test(url)
   ));
-  await page.waitForTimeout(5_000);
-  await trailerCard.screenshot({ path: path.join(OUTPUT_DIR, 'trailer-section-caption-05s.png') });
-  await page.waitForTimeout(5_000);
-  const trailerSampleB = await page.evaluate(() => (
-    window.__NITROCINE_TRAILER_PLAYER_DIAGNOSTICS__?.getSnapshot?.() || null
-  ));
-  await trailerCard.screenshot({ path: path.join(OUTPUT_DIR, 'trailer-section-playing.png') });
-  await page.waitForTimeout(250);
-  await trailerCard.screenshot({ path: path.join(OUTPUT_DIR, 'trailer-section-caption-10s.png') });
 
-  assert(trailerSampleB?.currentTime > trailerSampleA?.currentTime, 'TrailerSection currentTime did not advance.');
-  assert(await page.locator('.cinematic-center-btn').count() === 0, 'TrailerSection center control is present.');
+  assert(await hero.locator('video').count() === 1, 'Hero must mount exactly one native video.');
+  assert(await hero.locator('iframe').count() === 0, 'Hero contains an iframe.');
+  assert(await hero.getByRole('button', { name: /pause/i }).count() === 0, 'Hero exposes a pause button.');
+  assert(contract.autoPlay && contract.playsInline, 'Native autoplay/playsInline contract is missing.');
+  assert(!contract.controls && !contract.controlsAttribute, 'Native controls are enabled.');
+  assert(contract.preload === 'metadata', `Expected preload=metadata, received ${contract.preload}.`);
+  assert(contract.videoWidth > 0 && contract.videoHeight > 0, 'Decoded video dimensions are invalid.');
+  assert(contract.pointerEvents === 'none', 'Video accepts pointer events.');
+  assert(heroApiRequestUrls.length === 1, `Expected one Hero API request, received ${heroApiRequestUrls.length}.`);
+  assert(videoRequestUrls.length <= 1, `Expected at most one initial video URL, received ${videoRequestUrls.length}.`);
+  assert(nativeMediaRequestUrls.length <= 1, `Expected at most one initial native media URL, received ${nativeMediaRequestUrls.length}.`);
+  assert(forbiddenHeroRequests.length === 0, 'Hero made a forbidden YouTube/TMDB-video request.');
 
   await context.close();
   return {
     title,
-    movieId,
-    videoId: heroVideoId,
-    endpoint,
-    autoStarted: true,
-    metadataRequestCount: heroMetadataRequestCount,
-    youtubePlayerCount: heroPlayerCount,
-    playbackState: sampleB.playerState,
-    currentTimeSampleA: sampleA.currentTime,
-    currentTimeSampleB: sampleB.currentTime,
-    centerPlayPauseButtonCount: centerButtonCount,
-    heroInternalButtonCount,
-    iframePointerEvents,
-    preStable,
-    trailerSection: {
-      videoId: trailerSampleB.videoId,
-      playbackState: trailerSampleB.playerState,
-      currentTimeSampleA: trailerSampleA.currentTime,
-      currentTimeSampleB: trailerSampleB.currentTime,
-      centerPlayPauseButtonCount: 0,
-    },
+    playback,
+    contract,
+    heroApiRequestCount: heroApiRequestUrls.length,
+    uniqueInitialVideoRequestCount: videoRequestUrls.length,
+    uniqueInitialNativeMediaRequestCount: nativeMediaRequestUrls.length,
+    forbiddenHeroRequests,
   };
-};
-
-const verifyMobile = async (browser) => {
-  const context = await browser.newContext({
-    viewport: { width: 390, height: 844 },
-    isMobile: true,
-    hasTouch: true,
-    locale: 'en-US',
-    storageState: undefined,
-  });
-  const page = await context.newPage();
-  await waitForSettledHero(page);
-  await page.locator('.hero-section').getByRole('button', { name: 'Trailer', exact: true }).click();
-  await waitForHeroPlaying(page);
-  await page.waitForTimeout(1_000);
-  const snapshot = await getHeroSnapshot(page);
-  await page.locator('.hero-section').screenshot({ path: path.join(OUTPUT_DIR, 'hero-mobile-playing.png') });
-  await context.close();
-  return snapshot;
 };
 
 await mkdir(OUTPUT_DIR, { recursive: true });
@@ -177,19 +120,21 @@ const browser = await chromium.launch({
 });
 
 try {
-  const hero = await verifyDesktopAndTrailerSection(browser);
-  const mobile = await verifyMobile(browser);
+  const desktop = await verifyViewport(browser, {
+    name: 'desktop',
+    viewport: { width: 1440, height: 900 },
+  });
+  const mobile = await verifyViewport(browser, {
+    name: 'mobile',
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+  });
   const evidence = {
     capturedAt: new Date().toISOString(),
     browser: `Google Chrome (${HEADLESS ? 'headless' : 'headed'})`,
-    context: 'fresh contexts without cookies, localStorage, storageState, or YouTube account',
-    hero,
+    context: 'fresh storage context using the explicit development-only native MP4 fixture',
+    desktop,
     mobile,
-    visualReview: {
-      heroCaptionVisible: 'pending screenshot review',
-      trailerSectionCaptionVisible: 'pending screenshot review',
-      youtubeCenterOverlayVisible: 'pending screenshot review',
-    },
   };
   await writeFile(
     path.join(OUTPUT_DIR, 'raw-evidence.json'),

@@ -1,10 +1,10 @@
-import { connectRedis } from '../configs/redis.js';
+import { connectRedis, runWithCommandTimeout } from '../configs/redis.js';
 
 const withRedis = async (operation, fallback = null) => {
     try {
         const client = await connectRedis();
         if (!client?.isReady) return fallback;
-        return await operation(client);
+        return await runWithCommandTimeout(client, operation);
     } catch (error) {
         console.warn('[Redis cache] Bypassed:', error.message);
         return fallback;
@@ -14,7 +14,7 @@ const withRedis = async (operation, fallback = null) => {
 export const withRequiredRedis = async (operation) => {
     const client = await connectRedis({ required: true });
     if (!client?.isReady) throw new Error('Redis is not ready');
-    return operation(client);
+    return runWithCommandTimeout(client, operation);
 };
 
 export const getJson = async (key) => withRedis(async (client) => {

@@ -1,6 +1,21 @@
 import express from 'express'
 import { protectAdmin } from '../middleware/auth.js';
-import { getAllBookings, getDashboardData, getHeroSettings, isAdmin, getAllShows, updateHeroSettings, getHeroVideoSignature, commitHeroVideoAction, removeHeroVideoAction, refreshCatalogAction, getCatalogRefreshStatusAction, randomizeHeroAction } from '../controllers/adminController.js';
+import {
+    getAllBookings,
+    getDashboardData,
+    getHeroSettings,
+    isAdmin,
+    getAllShows,
+    updateHeroSettings,
+    getHeroVideoSignature,
+    commitHeroVideoAction,
+    removeHeroVideoAction,
+    refreshCatalogAction,
+    getCatalogRefreshStatusAction,
+    randomizeHeroAction,
+    refreshHeroRotationAction,
+    updateHeroSoundAction,
+} from '../controllers/adminController.js';
 
 const adminRouter = express.Router();
 
@@ -9,6 +24,8 @@ adminRouter.get('/dashboard', protectAdmin,getDashboardData)
 adminRouter.get('/hero', protectAdmin,getHeroSettings)
 adminRouter.put('/hero', protectAdmin,updateHeroSettings)
 adminRouter.post('/hero/randomize', protectAdmin, randomizeHeroAction)
+adminRouter.post('/hero/refresh', protectAdmin, refreshHeroRotationAction)
+adminRouter.put('/hero/sound', protectAdmin, updateHeroSoundAction)
 adminRouter.get('/hero/upload-signature', protectAdmin, getHeroVideoSignature)
 adminRouter.post('/hero/:movieId/commit', protectAdmin, commitHeroVideoAction)
 adminRouter.delete('/hero/:movieId/video', protectAdmin, removeHeroVideoAction)

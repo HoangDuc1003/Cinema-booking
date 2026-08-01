@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { connectRedis } from '../configs/redis.js';
+import { connectRedis, runWithCommandTimeout } from '../configs/redis.js';
 
 const RELEASE_SCRIPT = `
 if redis.call('GET', KEYS[1]) == ARGV[1] then
@@ -43,10 +43,10 @@ export class LockBusyError extends Error {
 export const releaseLock = async ({ client, key, token }) => {
     if (!client?.isReady) return false;
     try {
-        return await client.eval(RELEASE_SCRIPT, {
+        return await runWithCommandTimeout(client, (redisClient) => redisClient.eval(RELEASE_SCRIPT, {
             keys: [key],
             arguments: [token],
-        });
+        }));
     } catch (error) {
         console.warn('[Redis lock] Release failed:', error.message);
         return false;
@@ -70,12 +70,19 @@ export const acquireLock = async (key, {
 
     const token = randomUUID();
     const deadline = Date.now() + waitMs;
-    do {
-        const result = await client.set(key, token, { NX: true, PX: ttlMs });
-        if (result === 'OK') return { available: true, acquired: true, client, key, token };
-        if (Date.now() >= deadline) break;
-        await sleep(retryMs);
-    } while (true);
+    try {
+        do {
+            const result = await runWithCommandTimeout(client, (redisClient) => (
+                redisClient.set(key, token, { NX: true, PX: ttlMs })
+            ));
+            if (result === 'OK') return { available: true, acquired: true, client, key, token };
+            if (Date.now() >= deadline) break;
+            await sleep(retryMs);
+        } while (true);
+    } catch (error) {
+        console.warn('[Redis lock] Command unavailable, using database invariant:', error.message);
+        return { available: false, acquired: false };
+    }
 
     return { available: true, acquired: false };
 };
@@ -103,10 +110,10 @@ export const acquireFencedLock = async (key, fenceKey, {
     const ownerId = randomUUID();
     const deadline = Date.now() + waitMs;
     do {
-        const result = await client.eval(ACQUIRE_FENCED_SCRIPT, {
+        const result = await runWithCommandTimeout(client, (redisClient) => redisClient.eval(ACQUIRE_FENCED_SCRIPT, {
             keys: [key, fenceKey],
             arguments: [ownerId, String(ttlMs), String(Math.max(0, Number(minimumFencingToken) || 0))],
-        });
+        }));
         if (Array.isArray(result) && result.length === 2) {
             return {
                 acquired: true,
@@ -128,19 +135,19 @@ export const acquireFencedLock = async (key, fenceKey, {
 
 export const renewFencedLock = async (lock) => {
     if (!lock?.client?.isReady) return false;
-    const result = await lock.client.eval(RENEW_FENCED_SCRIPT, {
+    const result = await runWithCommandTimeout(lock.client, (client) => client.eval(RENEW_FENCED_SCRIPT, {
         keys: [lock.key],
         arguments: [lock.value, String(lock.ttlMs)],
-    });
+    }));
     return Number(result) === 1;
 };
 
 export const verifyFencedLock = async (lock) => {
     if (!lock?.client?.isReady) return false;
-    const [value, fence] = await Promise.all([
-        lock.client.get(lock.key),
-        lock.client.get(lock.fenceKey),
-    ]);
+    const [value, fence] = await runWithCommandTimeout(lock.client, (client) => Promise.all([
+        client.get(lock.key),
+        client.get(lock.fenceKey),
+    ]));
     return value === lock.value && Number(fence) === lock.fencingToken;
 };
 

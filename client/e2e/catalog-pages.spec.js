@@ -83,7 +83,7 @@ test('Favorites renders a shared empty state when localStorage is empty', async 
   await expect(page.getByRole('heading', { name: 'Your collection is waiting' })).toBeVisible();
 });
 
-test('MovieCard restores the poster overlay without per-card detail requests', async ({ page }) => {
+test('MovieCard restores the poster overlay on hover and keyboard focus without per-card detail requests', async ({ page }) => {
   let detailRequests = 0;
   await fulfillImages(page);
   page.on('request', (request) => {
@@ -100,10 +100,22 @@ test('MovieCard restores the poster overlay without per-card detail requests', a
   const cardInfo = firstCard.locator('.movie-card__info');
   const cardCta = firstCard.locator('.movie-card__cta');
   await expect(firstCard).toBeVisible();
+  await firstCard.evaluate(async (element) => {
+    const animations = element.parentElement?.getAnimations?.() || [];
+    await Promise.all(animations.map((animation) => animation.finished.catch(() => undefined)));
+  });
   await expect(cardInfo).toHaveCSS('opacity', '0');
   await expect(cardCta).toHaveCSS('opacity', '0');
 
   await firstCard.hover();
+  await expect(cardInfo).toHaveCSS('opacity', '1');
+  await expect(cardCta).toHaveCSS('opacity', '1');
+
+  await page.mouse.move(0, 0);
+  await expect(cardInfo).toHaveCSS('opacity', '0');
+  await expect(cardCta).toHaveCSS('opacity', '0');
+
+  await firstCard.locator('.movie-card__main').focus();
   await expect(cardInfo).toHaveCSS('opacity', '1');
   await expect(cardCta).toHaveCSS('opacity', '1');
   await page.waitForTimeout(350);

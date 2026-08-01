@@ -1,9 +1,10 @@
-# Project: Restore NitroCine Hero Native-Only Architecture
+# Project: NitroCine Native Hero Rotation
 
 ## Architecture
 - `client/src/components/HeroSection.jsx` is the top-level container for the Hero banner.
-- `client/src/components/hero/` contains components like `HeroVideoRenderer`, `HeroNativeVideo`, `HeroYouTubeVideo`, `HeroMedia`, `HeroContent`, `HeroPosterRail`, and state management logic.
-- Data Flow: Fetch movie list from `/api/show/hero` (or fallback). Resolve movie media using `loadHeroVideoSource` inside `HeroSection.jsx`. Pass resolved native media source to `HeroVideoRenderer`, which renders `HeroNativeVideo` or poster.
+- `client/src/components/hero/` contains the native video renderer, poster/media components, ordered navigation, and state management logic.
+- `server/models/HeroRotationBatch.js` owns the dedicated 15-movie Hero pool; it does not replace or shrink the 150-movie catalog.
+- Data flow: the server selects and orders five native-ready movies from the active 15-movie batch. The client preserves that order and renders one native `<video>` or a poster fallback.
 - Layout: React/Vite frontend using Tailwind/CSS classes, Express/MongoDB backend.
 
 ## Code Layout
@@ -14,12 +15,13 @@
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| 1 | Baseline Investigation | Inspect files, run baseline test/lint/build, root-cause report | None | DONE |
-| 2 | Failing Invariant Tests | Write unit/E2E tests that fail on current HEAD to prove regression | M1 | DONE |
-| 3 | Architectural Correction (R1-R4) | Remove YouTube, clean up delays, enforce mute, remove prefetch, preserve server order | M2 | DONE |
-| 4 | Test Migration & Verification | Rewrite obsolete tests to native, pass focused unit & E2E tests | M3 | DONE |
-| 5 | Full Build & Audit | Pass full build, lint, and run Forensic Auditor | M4 | DONE |
+| 1 | Baseline Investigation | Inspect files, run baseline test/lint/build, reproduce API/DOM/media behavior | None | DONE |
+| 2 | Server Rotation | Add the 15-movie batch, seeded selection, cache, scheduler, admin operations, and safe migration | M1 | DONE |
+| 3 | Native Client | Remove YouTube from Hero; implement native playback, bounded failover, audio consent, and batch cache | M2 | DONE |
+| 4 | Test Migration & Verification | Replace obsolete Hero tests and prove playback with advancing `currentTime` | M2, M3 | DONE |
+| 5 | Production Activation | Upload and verify 15 distinct, licensed native trailers and activate the first valid batch | M2, M4 | BLOCKED ON ASSETS |
 
 ## Interface Contracts
-- `/api/show/hero`: Returns array of movies, order must be preserved.
-- `loadHeroVideoSource`: Resolves only configured native sources, returns null for non-native.
+- `/api/show/hero`: returns batch/version/schedule metadata and exactly five server-ordered movies when an active batch exists.
+- Hero source resolution accepts only server-verified native MP4/WebM sources and returns `null` for YouTube, iframe, mock-production, or unsupported sources.
+- Missing or invalid trailer assets never cause a partially built batch to replace the last active batch.

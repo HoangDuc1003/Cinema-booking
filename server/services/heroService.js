@@ -1,28 +1,31 @@
 import Movie from '../models/Movie.js';
 import Show from '../models/Show.js';
 import SiteConfig from '../models/SiteConfig.js';
-import CatalogBatch from '../models/CatalogBatch.js';
-import { deleteByPattern, deleteKeys, getJson } from './cacheService.js';
-import { redisKeys } from './redisKeys.js';
-import { getPublicHomePayload } from './catalogRefreshService.js';
-
-import { resolveHeroRotationWindow, HERO_BATCH_SIZE } from '../configs/heroRotation.js';
+import { HERO_DEFAULT_VOLUME } from '../configs/heroRotation.js';
+import {
+    bumpHeroCacheGeneration,
+    getAdminHeroRotation,
+    getPublicHeroRotation,
+    invalidateHeroCaches,
+    normalizeHeroMovie,
+    rerandomizeActiveHero,
+    updateHeroSoundSettings,
+} from './heroRotationService.js';
 
 const HERO_CONFIG_KEY = 'homeHero';
-const HERO_LIMIT = HERO_BATCH_SIZE;
-const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
-const MOVIE_SELECT = '_id title overview poster_path backdrop_path release_date vote_average runtime genres heroVideoId heroVideoUrl heroVideoMimeType heroVideoPosterUrl heroVideoStatus heroVideoVersion updatedAt';
-const STABLE_HERO_SORT = { heroPriority: -1, heroCatalogOrder: 1, _id: 1 };
+const HERO_LIMIT = 5;
+const MOVIE_SELECT = '_id title overview poster_path backdrop_path release_date vote_average vote_count popularity adult runtime genres heroVideoId heroVideoMovieId heroVideoUrl heroVideoMimeType heroVideoPosterUrl heroVideoStatus heroVideoVersion heroVideoDuration heroVideoWidth heroVideoHeight heroVideoBytes heroVideoCodec heroVideoVerifiedAt heroVideoSource heroVideoAttribution updatedAt';
 
 const createHttpError = (status, message) => {
     const error = new Error(message);
     error.status = status;
+    error.statusCode = status;
     return error;
 };
 
 const sanitizeMovieIds = (movieIds = []) => {
     const seen = new Set();
-    return movieIds
+    return (Array.isArray(movieIds) ? movieIds : [])
         .map((id) => String(id || '').trim())
         .filter(Boolean)
         .filter((id) => {
@@ -33,314 +36,161 @@ const sanitizeMovieIds = (movieIds = []) => {
         .slice(0, HERO_LIMIT);
 };
 
-const normalizeGenres = (genres) => (Array.isArray(genres) ? genres : [])
-    .slice(0, 3)
-    .map((genre) => (typeof genre === 'string' ? { id: genre, name: genre } : genre))
-    .filter((genre) => genre?.name);
-
-export const normalizeHeroMovie = (movie) => {
-    if (!movie) return null;
-    const id = String(movie._id || movie.id || '');
-    if (!id) return null;
-    return {
-        _id: id,
-        id,
-        title: movie.title || movie.name || 'Untitled',
-        overview: movie.overview || '',
-        poster_path: movie.poster_path || null,
-        backdrop_path: movie.backdrop_path || null,
-        release_date: movie.release_date || '',
-        vote_average: Number.isFinite(Number(movie.vote_average)) ? Number(movie.vote_average) : null,
-        runtime: Number.isFinite(Number(movie.runtime)) ? Number(movie.runtime) : null,
-        genres: normalizeGenres(movie.genres),
-        heroVideoUrl: movie.heroVideoUrl || '',
-        heroVideoMimeType: movie.heroVideoMimeType || '',
-        heroVideoPosterUrl: movie.heroVideoPosterUrl || '',
-        heroVideoStatus: movie.heroVideoStatus || '',
-        heroVideoVersion: movie.heroVideoVersion || '',
-    };
-};
-
-export const getHomeHeroConfig = async () => {
-    const config = await SiteConfig.findOneAndUpdate(
-        { key: HERO_CONFIG_KEY },
-        { $setOnInsert: { key: HERO_CONFIG_KEY, homeHero: { mode: 'auto', movieIds: [] } } },
-        { new: true, upsert: true, setDefaultsOnInsert: true },
-    ).lean();
-    return {
-        mode: config?.homeHero?.mode === 'manual' ? 'manual' : 'auto',
-        movieIds: sanitizeMovieIds(config?.homeHero?.movieIds),
-        updatedAt: config?.updatedAt,
-    };
-};
-
 const loadMoviesByIds = async (movieIds) => {
     const ids = sanitizeMovieIds(movieIds);
     if (!ids.length) return [];
     const movies = await Movie.find({ _id: { $in: ids } }).select(MOVIE_SELECT).lean();
     const byId = new Map(movies.map((movie) => [String(movie._id), movie]));
-    return ids.map((id) => normalizeHeroMovie(byId.get(id))).filter(Boolean);
+    return ids.map((id) => byId.get(id)).filter(Boolean);
 };
 
-const loadStoredHeroMovies = async () => {
-    const [nativeMovies, activeShows, recentMovies] = await Promise.all([
-        Movie.find({ heroVideoStatus: 'ready' }).select(MOVIE_SELECT).sort({ heroVideoVersion: -1 }).limit(20).lean(),
-        Show.find({ showDateTime: { $gte: new Date() } })
-            .populate({ path: 'movie', select: MOVIE_SELECT })
-            .sort({ showDateTime: 1 })
-            .limit(20)
-            .lean(),
-        Movie.find({}).select(MOVIE_SELECT).sort({ updatedAt: -1 }).limit(20).lean(),
-    ]);
-    const movies = new Map();
-    const add = (movie) => {
-        const normalized = normalizeHeroMovie(movie);
-        if (normalized && !movies.has(normalized.id)) movies.set(normalized.id, normalized);
-    };
-    nativeMovies.forEach(add);
-    activeShows.forEach((show) => add(show.movie));
-    recentMovies.forEach(add);
-    return [...movies.values()].slice(0, HERO_LIMIT);
-};
+export { normalizeHeroMovie };
 
-const forcePosterOnly = (movies) => movies.map((movie) => ({
-    ...movie,
-    heroVideoUrl: '',
-    heroVideoMimeType: '',
-    heroVideoStatus: 'refreshing',
-}));
-
-const loadBalancedHeroMovies = async (rotationIndex = 0) => {
-    try {
-        const [popularMovies, newestMovies, classicMovies] = await Promise.all([
-            Movie.find({ vote_average: { $gt: 0 } }).select(MOVIE_SELECT).sort({ vote_average: -1, _id: 1 }).limit(20).lean(),
-            Movie.find({ release_date: { $exists: true, $ne: '' } }).select(MOVIE_SELECT).sort({ release_date: -1, _id: 1 }).limit(20).lean(),
-            Movie.find({ release_date: { $exists: true, $ne: '' } }).select(MOVIE_SELECT).sort({ release_date: 1, _id: 1 }).limit(20).lean(),
-        ]);
-
-        const selectedSet = new Set();
-        const selected = [];
-
-        const pick = (list, offset, count) => {
-            const available = list.filter((m) => !selectedSet.has(String(m._id)));
-            if (!available.length) return;
-            const start = (offset * count) % available.length;
-            for (let i = 0; i < count && i < available.length; i += 1) {
-                const item = available[(start + i) % available.length];
-                if (item && !selectedSet.has(String(item._id))) {
-                    selectedSet.add(String(item._id));
-                    const normalized = normalizeHeroMovie(item);
-                    if (normalized) selected.push(normalized);
-                }
-            }
-        };
-
-        // 2 Hot/Popular movies
-        pick(popularMovies, rotationIndex, 2);
-        // 1 Newest movie
-        pick(newestMovies, rotationIndex, 1);
-        // 2 Classic movies
-        pick(classicMovies, rotationIndex, 2);
-
-        if (selected.length < HERO_LIMIT) {
-            const remainingAll = await Movie.find({}).select(MOVIE_SELECT).sort({ updatedAt: -1 }).limit(20).lean();
-            pick(remainingAll, rotationIndex, HERO_LIMIT - selected.length);
-        }
-
-        return selected.slice(0, HERO_LIMIT);
-    } catch {
-        return [];
-    }
-};
-
-export const getPublicHomeHero = async (options = {}) => {
-    const rotation = resolveHeroRotationWindow(options.nowMs || Date.now());
-    const { heroOffset } = options;
-    const [config, refreshState] = await Promise.all([
-        getHomeHeroConfig(),
-        getJson(redisKeys.catalogRefreshState()),
-    ]);
-    let movies = [];
-    let effectiveMode = 'auto';
-    let meta = null;
-
-    if (config.mode === 'manual' && config.movieIds.length) {
-        movies = await loadMoviesByIds(config.movieIds);
-        if (movies.length) effectiveMode = 'manual';
-    }
-
-    if (!movies.length) {
-        const effectiveSlotIndex = typeof heroOffset === 'number' && Number.isFinite(heroOffset) && heroOffset >= 0
-            ? heroOffset
-            : rotation.index;
-        movies = await loadBalancedHeroMovies(effectiveSlotIndex);
-        if (movies.length) {
-            meta = {
-                key: rotation.key,
-                slot: rotation.index,
-            };
-        }
-    }
-
-    if (!movies.length && typeof heroOffset === 'number' && Number.isFinite(heroOffset) && heroOffset >= 0) {
-        try {
-            const siteConfig = await SiteConfig.findOne({ key: 'catalog' }).lean();
-            let batch = siteConfig?.catalog?.activeBatchId
-                ? await CatalogBatch.findById(siteConfig.catalog.activeBatchId).lean()
-                : null;
-            if (!batch || batch.status !== 'active') batch = await CatalogBatch.findOne({ status: 'active' }).lean();
-            const all150Ids = Array.isArray(batch?.movieIds) && batch.movieIds.length === 150
-                ? batch.movieIds
-                : (batch ? [...(batch.buckets?.newest || []), ...(batch.buckets?.popular || []), ...(batch.buckets?.classics || [])] : []);
-            if (all150Ids.length > 0) {
-                const startIdx = (heroOffset * 5) % all150Ids.length;
-                const selectedIds = [
-                    ...all150Ids.slice(startIdx, startIdx + 5),
-                    ...all150Ids.slice(0, Math.max(0, 5 - (all150Ids.length - startIdx))),
-                ].slice(0, 5);
-                const rawMovies = await Movie.find({ _id: { $in: selectedIds } }).lean();
-                const movieMap = new Map(rawMovies.map((m) => [String(m._id), normalizeHeroMovie(m)]));
-                movies = selectedIds.map((id) => movieMap.get(String(id))).filter(Boolean);
-            }
-        } catch {
-            movies = [];
-        }
-    }
-
-    if (!movies.length) {
-        try {
-            const payload = await getPublicHomePayload(5, 'US', new Date());
-            movies = payload.hero || [];
-        } catch {
-            movies = [];
-        }
-    }
-
-    if (!movies.length) movies = await loadStoredHeroMovies();
-    if (refreshState?.active) movies = forcePosterOnly(movies);
-
-    return {
-        settings: {
-            mode: config.mode,
-            effectiveMode,
-            movieIds: config.movieIds,
-            updatedAt: config.updatedAt,
-            catalog: meta,
+export const getHomeHeroConfig = async () => {
+    const defaultVolume = HERO_DEFAULT_VOLUME;
+    const config = await SiteConfig.findOneAndUpdate(
+        { key: HERO_CONFIG_KEY },
+        {
+            $setOnInsert: {
+                key: HERO_CONFIG_KEY,
+                'homeHero.mode': 'auto',
+                'homeHero.movieIds': [],
+                'homeHero.heroSoundDefaultEnabled': false,
+                'homeHero.heroDefaultVolume': defaultVolume,
+            },
         },
-        movies,
-        rotation,
-        cache: meta ? 'catalog' : 'bypass',
+        { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true },
+    ).lean();
+    const volume = Number(config?.homeHero?.heroDefaultVolume);
+    return {
+        mode: config?.homeHero?.mode === 'manual' ? 'manual' : 'auto',
+        movieIds: sanitizeMovieIds(config?.homeHero?.movieIds),
+        heroSoundDefaultEnabled: Boolean(config?.homeHero?.heroSoundDefaultEnabled),
+        heroDefaultVolume: Number.isFinite(volume) ? Math.min(Math.max(volume, 0), 1) : defaultVolume,
+        updatedAt: config?.updatedAt || null,
     };
 };
 
-export const getAdminHomeHero = async () => {
-    const config = await getHomeHeroConfig();
-    const [manualMovies, activeShows, recentMovies] = await Promise.all([
-        loadMoviesByIds(config.movieIds),
+/**
+ * Public Hero selection is always server-authoritative. `heroOffset` is ignored
+ * deliberately so a client cannot reshuffle the active five-movie batch.
+ */
+export const getPublicHomeHero = async (options = {}) => getPublicHeroRotation({
+    now: options.now ? new Date(options.now) : new Date(),
+});
+
+const getLegacyAvailableMovies = async () => {
+    const [activeShows, recentMovies] = await Promise.all([
         Show.find({ showDateTime: { $gte: new Date() } })
             .populate({ path: 'movie', select: MOVIE_SELECT })
             .sort({ showDateTime: 1 })
             .limit(80)
             .lean(),
-        Movie.find({}).select(MOVIE_SELECT).sort({ updatedAt: -1 }).limit(120).lean(),
+        Movie.find({})
+            .select(MOVIE_SELECT)
+            .sort({ updatedAt: -1 })
+            .limit(120)
+            .lean(),
     ]);
     const available = new Map();
     const add = (movie) => {
-        const normalized = normalizeHeroMovie(movie);
+        const normalized = normalizeHeroMovie(movie, { posterOnly: true });
         if (normalized && !available.has(normalized.id)) available.set(normalized.id, normalized);
     };
-    manualMovies.forEach(add);
     activeShows.forEach((show) => add(show.movie));
     recentMovies.forEach(add);
-    return { settings: config, selectedMovies: manualMovies, availableMovies: [...available.values()] };
+    return [...available.values()];
 };
 
-export const updateHomeHero = async ({ mode, movieIds }) => {
+export const getAdminHomeHero = async () => {
+    const [rotation, settings, availableMovies] = await Promise.all([
+        getAdminHeroRotation(),
+        getHomeHeroConfig(),
+        getLegacyAvailableMovies(),
+    ]);
+    const selectedMovies = rotation.activeMovies?.length
+        ? rotation.activeMovies
+        : await loadMoviesByIds(settings.movieIds).then((movies) => (
+            movies.map((movie) => normalizeHeroMovie(movie, { posterOnly: true }))
+        ));
+    return {
+        settings,
+        selectedMovies,
+        availableMovies,
+        rotation,
+    };
+};
+
+/**
+ * Retained for backward compatibility with the existing Admin screen. Manual
+ * IDs only affect the poster-only emergency fallback; an active rotation batch
+ * remains authoritative for public playback.
+ */
+export const updateHomeHero = async ({
+    mode,
+    movieIds,
+    heroSoundDefaultEnabled,
+    heroDefaultVolume,
+}) => {
     const nextMode = mode === 'manual' ? 'manual' : 'auto';
     const ids = sanitizeMovieIds(movieIds);
     if (nextMode === 'manual') {
-        if (!ids.length) throw createHttpError(400, 'Choose at least one movie for manual hero mode.');
+        if (ids.length !== HERO_LIMIT) {
+            throw createHttpError(400, 'Manual poster fallback requires exactly five unique movies.');
+        }
         const count = await Movie.countDocuments({ _id: { $in: ids } });
         if (count !== ids.length) throw createHttpError(400, 'One or more selected movies no longer exist.');
     }
+    const update = {
+        'homeHero.mode': nextMode,
+        'homeHero.movieIds': ids,
+    };
+    if (typeof heroSoundDefaultEnabled === 'boolean') {
+        update['homeHero.heroSoundDefaultEnabled'] = heroSoundDefaultEnabled;
+    }
+    if (heroDefaultVolume !== undefined) {
+        const volume = Number(heroDefaultVolume);
+        if (!Number.isFinite(volume) || volume < 0 || volume > 1) {
+            throw createHttpError(400, 'heroDefaultVolume must be between 0 and 1.');
+        }
+        update['homeHero.heroDefaultVolume'] = volume;
+    }
     const config = await SiteConfig.findOneAndUpdate(
         { key: HERO_CONFIG_KEY },
-        { $set: { 'homeHero.mode': nextMode, 'homeHero.movieIds': ids } },
-        { new: true, upsert: true, setDefaultsOnInsert: true },
+        { $setOnInsert: { key: HERO_CONFIG_KEY }, $set: update },
+        { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true },
     ).lean();
-    await deleteKeys(redisKeys.homeHero());
-    await deleteByPattern(redisKeys.homeHeroPattern());
+    const soundUpdateRequested = typeof heroSoundDefaultEnabled === 'boolean'
+        || heroDefaultVolume !== undefined;
+    const persistedVolume = Number(config.homeHero.heroDefaultVolume);
+    let soundSettings = {
+        heroSoundDefaultEnabled: Boolean(config.homeHero.heroSoundDefaultEnabled),
+        heroDefaultVolume: Number.isFinite(persistedVolume) ? persistedVolume : HERO_DEFAULT_VOLUME,
+        updatedAt: config.updatedAt,
+    };
+    if (soundUpdateRequested) {
+        soundSettings = await updateHeroSoundSettings(soundSettings);
+    } else {
+        await bumpHeroCacheGeneration();
+        await invalidateHeroCaches();
+    }
     return {
-        mode: config?.homeHero?.mode || nextMode,
-        movieIds: sanitizeMovieIds(config?.homeHero?.movieIds),
-        updatedAt: config?.updatedAt,
+        mode: config.homeHero.mode,
+        movieIds: sanitizeMovieIds(config.homeHero.movieIds),
+        ...soundSettings,
     };
 };
 
-export const randomizeHomeHero = async () => {
-    const adminData = await getAdminHomeHero();
-    const availableList = adminData.availableMovies || [];
-    if (!availableList.length) {
-        throw createHttpError(400, 'No available movies to randomize.');
-    }
+export const randomizeHomeHero = async ({ requestedBy, selectionSeed } = {}) => (
+    rerandomizeActiveHero({ requestedBy, selectionSeed })
+);
 
-    const now = Date.now();
-    const doc = await SiteConfig.findOne({ key: HERO_CONFIG_KEY }).lean();
-    const currentHistory = Array.isArray(doc?.homeHero?.randomHistory) ? doc.homeHero.randomHistory : [];
+export { updateHeroSoundSettings };
 
-    const validHistory = currentHistory.filter((entry) => {
-        const time = entry?.timestamp ? new Date(entry.timestamp).getTime() : 0;
-        return now - time < TWO_DAYS_MS;
-    });
-
-    const usedIdsSet = new Set(
-        validHistory.flatMap((entry) => (Array.isArray(entry.movieIds) ? entry.movieIds : [])),
-    );
-
-    const freshCandidates = availableList.filter((movie) => !usedIdsSet.has(String(movie.id)));
-
-    const shuffle = (array) => {
-        const arr = [...array];
-        for (let i = arr.length - 1; i > 0; i -= 1) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [arr[i], arr[j]] = [arr[j], arr[i]];
-        }
-        return arr;
-    };
-
-    let selectedMovies = [];
-    if (freshCandidates.length >= HERO_LIMIT) {
-        selectedMovies = shuffle(freshCandidates).slice(0, HERO_LIMIT);
-    } else {
-        selectedMovies = shuffle(freshCandidates);
-        const selectedIdsSet = new Set(selectedMovies.map((m) => String(m.id)));
-        const remainingPool = shuffle(
-            availableList.filter((m) => !selectedIdsSet.has(String(m.id))),
-        );
-        selectedMovies = [...selectedMovies, ...remainingPool].slice(0, HERO_LIMIT);
-    }
-
-    const newPickedIds = selectedMovies.map((m) => String(m.id));
-
-    const updatedHistory = [
-        ...validHistory,
-        { movieIds: newPickedIds, timestamp: new Date(now) },
-    ];
-
-    await SiteConfig.findOneAndUpdate(
-        { key: HERO_CONFIG_KEY },
-        {
-            $set: {
-                'homeHero.mode': 'manual',
-                'homeHero.movieIds': newPickedIds,
-                'homeHero.randomHistory': updatedHistory,
-            },
-        },
-        { new: true, upsert: true, setDefaultsOnInsert: true },
-    ).lean();
-
-    await deleteKeys(redisKeys.homeHero());
-    await deleteByPattern(redisKeys.homeHeroPattern());
-
-    return getAdminHomeHero();
+export default {
+    getPublicHomeHero,
+    getAdminHomeHero,
+    updateHomeHero,
+    randomizeHomeHero,
+    updateHeroSoundSettings,
 };

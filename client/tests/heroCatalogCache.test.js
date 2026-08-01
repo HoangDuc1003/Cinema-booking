@@ -1,86 +1,95 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-    getClientHeroDayKey,
-    millisecondsUntilNextHeroRotation,
-    resolveClientHeroOffset,
-} from '../src/services/heroCatalogOffset.js';
-import {
-    HERO_CACHE_KEY,
-    HERO_CACHE_VERSION,
-    getInitialHeroMovies,
+  HERO_CACHE_KEY,
+  HERO_CACHE_MAX_AGE_MS,
+  HERO_CACHE_VERSION,
+  getInitialHeroPayload,
+  saveHeroMoviesCache,
 } from '../src/components/hero/heroCatalogLoader.js';
 
-const setupMockSessionStorage = () => {
-    const store = new Map();
-    globalThis.window = {
-        sessionStorage: {
-            getItem: (key) => store.get(key) || null,
-            setItem: (key, value) => store.set(key, String(value)),
-            removeItem: (key) => store.delete(key),
-        },
-    };
-    return store;
+const setupLocalStorage = () => {
+  const store = new Map();
+  globalThis.window = {
+    localStorage: {
+      getItem: (key) => store.get(key) ?? null,
+      setItem: (key, value) => store.set(key, String(value)),
+      removeItem: (key) => store.delete(key),
+    },
+  };
+  return store;
 };
 
-test('reloads during the same 48-hour window keep the same Hero slice', () => {
-    const earlyTime = new Date(1784700000000);
-    const sameWindowTime = new Date(1784700000000 + 3600000);
+const movies = Array.from({ length: 5 }, (_, index) => ({
+  id: String(42 + index),
+  title: `Server title ${index}`,
+  backdrop_path: `/server-${index}.jpg`,
+  heroVideoStatus: 'ready',
+  heroVideoUrl: `https://cdn.test/server-${index}.mp4`,
+  heroVideoMimeType: 'video/mp4',
+  heroVideoVersion: 2,
+}));
 
-    assert.equal(getClientHeroDayKey(earlyTime), getClientHeroDayKey(sameWindowTime));
-    assert.equal(resolveClientHeroOffset(earlyTime), resolveClientHeroOffset(sameWindowTime));
-});
+test('Hero cache admits only fresh server-authoritative payloads and preserves their order', () => {
+  const store = setupLocalStorage();
+  const now = Date.now();
+  try {
+    const saved = saveHeroMoviesCache(movies, {
+      source: 'server',
+      meta: {
+        batchId: 'batch-2',
+        version: 2,
+        nextRefreshAt: '2026-08-01T17:00:00.000Z',
+        timezone: 'Asia/Ho_Chi_Minh',
+      },
+      settings: {
+        heroSoundDefaultEnabled: true,
+        heroDefaultVolume: 0.35,
+      },
+    });
+    assert.equal(saved, true);
 
-test('crossing 48-hour period advances the Hero slice', () => {
-    const periodMs = 48 * 60 * 60 * 1000;
-    const endOfPeriod = new Date(periodMs - 1);
-    const startOfNextPeriod = new Date(periodMs + 1);
+    const payload = getInitialHeroPayload();
+    assert.deepEqual(payload.movies, movies);
+    assert.equal(payload.meta.batchId, 'batch-2');
+    assert.equal(payload.meta.version, '2');
+    assert.equal(payload.meta.timezone, 'Asia/Ho_Chi_Minh');
+    assert.equal(payload.settings.heroDefaultVolume, 0.35);
 
-    assert.equal(
-        resolveClientHeroOffset(startOfNextPeriod),
-        (resolveClientHeroOffset(endOfPeriod) + 1) % 30,
-    );
-});
+    const fallbackSaved = saveHeroMoviesCache(movies, {
+      source: 'server',
+      meta: {
+        batchId: null,
+        version: 0,
+        nextRefreshAt: '2026-08-02T17:00:00.000Z',
+        timezone: 'Asia/Ho_Chi_Minh',
+      },
+    });
+    assert.equal(fallbackSaved, true);
+    assert.equal(getInitialHeroPayload().meta.version, '0');
 
-test('millisecondsUntilNextHeroRotation targets rotation end boundary', () => {
-    const periodMs = 48 * 60 * 60 * 1000;
-    const nearBoundary = new Date(periodMs - 500);
-    assert.equal(millisecondsUntilNextHeroRotation(nearBoundary), 500);
-});
-
-test('Hero cache hydrates only current half-day server movies', () => {
-    const store = setupMockSessionStorage();
-    const movies = [{ id: 42, title: 'Server title', backdrop_path: '/server.jpg' }];
-    try {
-        store.set(HERO_CACHE_KEY, JSON.stringify({
-            version: HERO_CACHE_VERSION,
-            source: 'server',
-            dayKey: '2026-07-22-AM',
-            movies,
-        }));
-        assert.deepEqual(getInitialHeroMovies('2026-07-22-AM'), movies);
-
-        // Different half-day key should miss
-        assert.deepEqual(getInitialHeroMovies('2026-07-22-PM'), []);
-        assert.equal(store.has(HERO_CACHE_KEY), false);
-    } finally {
-        delete globalThis.window;
+    const invalidPayloads = [
+      { schemaVersion: HERO_CACHE_VERSION, source: 'fallback', cachedAt: new Date(now).toISOString(), movies },
+      { schemaVersion: HERO_CACHE_VERSION, source: 'server', cachedAt: new Date(now).toISOString(), movies: [movies[0], movies[0]] },
+      { schemaVersion: HERO_CACHE_VERSION, source: 'server', cachedAt: new Date(now).toISOString(), movies: [...movies, { id: '99' }] },
+      { schemaVersion: HERO_CACHE_VERSION, source: 'server', cachedAt: new Date(now - HERO_CACHE_MAX_AGE_MS - 1).toISOString(), movies },
+    ];
+    for (const payload of invalidPayloads) {
+      store.set(HERO_CACHE_KEY, JSON.stringify(payload));
+      assert.equal(getInitialHeroPayload(now), null);
+      assert.equal(store.has(HERO_CACHE_KEY), false);
     }
-});
+    store.set(HERO_CACHE_KEY, '{not-json');
+    assert.equal(getInitialHeroPayload(now), null);
+    assert.equal(store.has(HERO_CACHE_KEY), false);
 
-test('Hero cache rejects fallback sources', () => {
-    const store = setupMockSessionStorage();
-    try {
-        store.set(HERO_CACHE_KEY, JSON.stringify({
-            version: HERO_CACHE_VERSION,
-            source: 'fallback',
-            dayKey: '2026-07-22-AM',
-            movies: [{ id: 1, title: 'Mock title' }],
-        }));
-
-        assert.deepEqual(getInitialHeroMovies('2026-07-22-AM'), []);
-        assert.equal(store.has(HERO_CACHE_KEY), false);
-    } finally {
-        delete globalThis.window;
-    }
+    assert.equal(saveHeroMoviesCache(movies, { source: 'fallback' }), false);
+    assert.equal(saveHeroMoviesCache(movies, { source: 'server' }), false);
+    assert.equal(store.has(HERO_CACHE_KEY), false);
+    assert.equal(saveHeroMoviesCache([movies[0], movies[0]], { source: 'server' }), false);
+    assert.equal(store.has(HERO_CACHE_KEY), false);
+    assert.equal(saveHeroMoviesCache([], { source: 'server' }), false);
+  } finally {
+    delete globalThis.window;
+  }
 });

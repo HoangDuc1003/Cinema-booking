@@ -4,7 +4,7 @@ import { fetchLatestTrailers, fetchMovieTrailers } from '../services/tmdb';
 import Loading from './Loading';
 import BlurCircle from './BlurCircle';
 import CinematicTrailerPlayer from './CinematicTrailerPlayer';
-import { extractYouTubeVideoId } from './hero/heroVideoSource';
+import { extractYouTubeVideoId } from '../lib/youtubeVideo';
 import { useMediaQuery, useSaveData } from './hero/useHeroEnvironment';
 
 const CARD_SLIDE_INTERVAL = 4000;

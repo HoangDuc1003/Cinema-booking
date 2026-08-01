@@ -42,16 +42,9 @@ export const HERO_FAILURE_REASONS = Object.freeze({
   AUTOPLAY_BLOCKED: 'autoplay-blocked',
   TIMEOUT: 'timeout',
   VIDEO_ERROR: 'video-error',
-  UNSAFE_VIDEO_FRAME: 'unsafe-video-frame',
-  YOUTUBE_API_ERROR: 'youtube-api-error',
-  YOUTUBE_INVALID_PARAMETER: 'youtube-invalid-parameter',
-  YOUTUBE_HTML5_ERROR: 'youtube-html5-error',
-  YOUTUBE_NOT_FOUND: 'youtube-not-found',
-  YOUTUBE_EMBEDDING_BLOCKED: 'youtube-embedding-blocked',
   MISSING_VIDEO: 'missing-video',
 });
 
-export const HERO_PREVIEW_PLAYBACK_MS = 50_000;
 export const HERO_COMPACT_PLAYBACK_MS = 3_000;
 export const HERO_BUFFERING_HYSTERESIS_MS = 450;
 export const HERO_PLAYING_HYSTERESIS_MS = 500;
@@ -75,7 +68,6 @@ export const createInitialHeroState = ({ movieKey = '', generation = 0, audioPre
   overviewRevealed: true,
   playbackStartedAt: null,
   compactRemainingMs: HERO_COMPACT_PLAYBACK_MS,
-  previewRemainingMs: HERO_PREVIEW_PLAYBACK_MS,
 });
 
 const isStale = (state, action) => (
@@ -89,7 +81,6 @@ const spendPlayback = (state, now) => {
     ...state,
     playbackStartedAt: null,
     compactRemainingMs: Math.max(0, state.compactRemainingMs - elapsed),
-    previewRemainingMs: Math.max(0, state.previewRemainingMs - elapsed),
   };
 };
 
@@ -97,14 +88,12 @@ export const getPlaybackRemaining = (state, now) => {
   if (state.playbackStartedAt == null || !Number.isFinite(now)) {
     return {
       compactRemainingMs: state.compactRemainingMs,
-      previewRemainingMs: state.previewRemainingMs,
     };
   }
 
   const elapsed = Math.max(0, now - state.playbackStartedAt);
   return {
     compactRemainingMs: Math.max(0, state.compactRemainingMs - elapsed),
-    previewRemainingMs: Math.max(0, state.previewRemainingMs - elapsed),
   };
 };
 
@@ -278,21 +267,6 @@ export const heroReducer = (state, action) => {
         compactRemainingMs: 0,
         overviewRevealed: false,
         hasCompacted: true,
-        playbackStartedAt: action.now,
-      };
-    }
-
-    case 'PREVIEW_ELAPSED': {
-      if (
-        isStale(state, action)
-        || state.playbackStatus !== HERO_PLAYBACK_STATUS.STABLE
-        || state.playbackStartedAt == null
-        || !isPlaybackPhase(state.phase)
-      ) return state;
-      const spent = spendPlayback(state, action.now);
-      return {
-        ...spent,
-        previewRemainingMs: 0,
         playbackStartedAt: action.now,
       };
     }

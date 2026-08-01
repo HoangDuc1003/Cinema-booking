@@ -1,8 +1,14 @@
 import Booking from "../models/Booking.js"
 import Show from "../models/Show.js"
 import User from "../models/User.js"
-import { getAdminHomeHero, randomizeHomeHero, updateHomeHero } from "../services/heroService.js"
+import {
+    getAdminHomeHero,
+    randomizeHomeHero,
+    updateHeroSoundSettings,
+    updateHomeHero,
+} from "../services/heroService.js"
 import { getUploadSignature, commitHeroVideo, removeHeroVideo } from "../services/heroVideoService.js"
+import { refreshHeroRotation } from "../services/heroRotationService.js"
 import { randomUUID } from 'node:crypto';
 import { inngest } from '../inngest/index.js';
 import {
@@ -10,6 +16,18 @@ import {
     getCatalogRefreshRun,
     queueCatalogRefreshRun,
 } from "../services/catalogRefreshService.js"
+
+const serializeHeroVideoState = (movie) => ({
+    id: String(movie?._id || movie?.id || ''),
+    heroVideoStatus: movie?.heroVideoStatus || 'missing',
+    heroVideoMimeType: movie?.heroVideoMimeType || '',
+    heroVideoVersion: String(movie?.heroVideoVersion || ''),
+    heroVideoDuration: Number(movie?.heroVideoDuration) || 0,
+    heroVideoWidth: Number(movie?.heroVideoWidth) || 0,
+    heroVideoHeight: Number(movie?.heroVideoHeight) || 0,
+    heroVideoBytes: Number(movie?.heroVideoBytes) || 0,
+    heroVideoVerifiedAt: movie?.heroVideoVerifiedAt || null,
+});
 
 export const isAdmin = async (req,res) => {
     res.json({success:true, isAdmin:true})
@@ -75,18 +93,68 @@ export const updateHeroSettings = async (req,res) =>{
         const settings = await updateHomeHero(req.body || {});
         res.json({success:true,message:"Hero updated successfully.",settings});
     } catch (error) {
-        console.log(error);
         return res.status(error.status || 500).json({ success: false, message: error.message });
     }
 }
 
 export const randomizeHeroAction = async (req, res) => {
     try {
-        const hero = await randomizeHomeHero();
-        res.json({ success: true, message: "Hero randomized successfully without 2-day duplicates.", hero });
+        const requestedBy = req.auth()?.userId || 'admin';
+        const hero = await randomizeHomeHero({
+            requestedBy,
+            selectionSeed: req.body?.selectionSeed,
+        });
+        res.json({ success: true, message: "Hero selection randomized within the active 15-movie pool.", hero });
     } catch (error) {
-        console.log(error);
-        return res.status(error.status || 500).json({ success: false, message: error.message });
+        return res.status(error.status || error.statusCode || 500).json({
+            success: false,
+            code: error.code,
+            message: error.message,
+        });
+    }
+}
+
+export const refreshHeroRotationAction = async (req, res) => {
+    try {
+        const requestedBy = req.auth()?.userId || 'admin';
+        const idempotencyKey = req.body?.idempotencyKey;
+        if (
+            idempotencyKey !== undefined
+            && !/^[a-zA-Z0-9:_-]{8,160}$/.test(String(idempotencyKey))
+        ) {
+            return res.status(400).json({
+                success: false,
+                code: 'HERO_IDEMPOTENCY_KEY_INVALID',
+                message: 'idempotencyKey must contain 8-160 safe characters.',
+            });
+        }
+        const result = await refreshHeroRotation({
+            source: 'admin',
+            requestedBy,
+            force: true,
+            runId: idempotencyKey,
+        });
+        return res.json({ success: true, result });
+    } catch (error) {
+        return res.status(error.status || error.statusCode || 500).json({
+            success: false,
+            code: error.code || 'HERO_REFRESH_FAILED',
+            message: error.message,
+            details: error.details || undefined,
+        });
+    }
+}
+
+export const updateHeroSoundAction = async (req, res) => {
+    try {
+        const settings = await updateHeroSoundSettings(req.body || {});
+        return res.json({ success: true, settings });
+    } catch (error) {
+        return res.status(error.status || error.statusCode || 500).json({
+            success: false,
+            code: error.code,
+            message: error.message,
+        });
     }
 }
 
@@ -97,19 +165,32 @@ export const getHeroVideoSignature = async (req, res) => {
         const signatureData = await getUploadSignature(movieId);
         res.json({ success: true, signatureData });
     } catch (error) {
-        console.log(error);
-        return res.status(500).json({ success: false, message: error.message });
+        return res.status(error.status || error.statusCode || 500).json({
+            success: false,
+            code: error.code,
+            message: error.message,
+            details: error.details || undefined,
+        });
     }
 }
 
 export const commitHeroVideoAction = async (req, res) => {
     try {
         const { movieId } = req.params;
-        const movie = await commitHeroVideo(movieId, req.body);
-        res.json({ success: true, message: "Video committed successfully.", movie });
+        const result = await commitHeroVideo(movieId, req.body || {});
+        res.json({
+            success: true,
+            message: "Video committed successfully.",
+            movie: serializeHeroVideoState(result.movie || result),
+            activation: result.activation || null,
+        });
     } catch (error) {
-        console.log(error);
-        return res.status(500).json({ success: false, message: error.message });
+        return res.status(error.status || error.statusCode || 500).json({
+            success: false,
+            code: error.code,
+            message: error.message,
+            details: error.details || undefined,
+        });
     }
 }
 
@@ -117,10 +198,17 @@ export const removeHeroVideoAction = async (req, res) => {
     try {
         const { movieId } = req.params;
         const movie = await removeHeroVideo(movieId);
-        res.json({ success: true, message: "Video removed successfully.", movie });
+        res.json({
+            success: true,
+            message: "Video removed successfully.",
+            movie: serializeHeroVideoState(movie),
+        });
     } catch (error) {
-        console.log(error);
-        return res.status(500).json({ success: false, message: error.message });
+        return res.status(error.status || error.statusCode || 500).json({
+            success: false,
+            code: error.code,
+            message: error.message,
+        });
     }
 }
 

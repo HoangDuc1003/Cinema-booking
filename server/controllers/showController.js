@@ -6,6 +6,7 @@ import { getJson, rememberJson, setJson } from '../services/cacheService.js';
 import { invalidateMovieCatalog } from '../services/cacheInvalidationService.js';
 import { redisKeys, redisTtl } from '../services/redisKeys.js';
 import { getPublicHomeHero } from '../services/heroService.js';
+import { createHeroEtag, matchesHeroEtag } from '../services/heroRotationService.js';
 import { getPublicHomeNowShowing } from '../services/homeNowShowingService.js';
 import { fetchTmdbImage } from '../services/tmdbImageService.js';
 import { calculateCurrentSlot, getPublicHomePayload } from '../services/catalogRefreshService.js';
@@ -71,17 +72,33 @@ export const getTmdbPopular = async (req, res) => {
         return res.status(502).json({ success: false, message: 'Unable to load popular movies.' });
     }
 };
-export const getHomeHero = async (req, res) => {
+export const createGetHomeHeroHandler = ({
+    loadHero = getPublicHomeHero,
+    makeEtag = createHeroEtag,
+    etagMatches = matchesHeroEtag,
+} = {}) => async (req, res) => {
     try {
-        const heroOffset = req.query.heroOffset !== undefined && !Number.isNaN(parseInt(req.query.heroOffset, 10))
-            ? parseInt(req.query.heroOffset, 10)
-            : undefined;
-        const payload = await getPublicHomeHero({ heroOffset });
-        return setCacheHeader(res, payload.cache).json({
+        const payload = await loadHero();
+        const etag = makeEtag(payload);
+        res.set('ETag', etag);
+        res.set('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=86400');
+        res.set('Vary', 'Origin');
+        setCacheHeader(res, payload.cache);
+        if (etagMatches(req.get('if-none-match'), etag)) {
+            return res.status(304).end();
+        }
+        return res.json({
             success: true,
+            version: payload.version,
+            batchId: payload.batchId,
+            batchKey: payload.batchKey,
+            generatedAt: payload.generatedAt,
+            nextRefreshAt: payload.nextRefreshAt,
+            timezone: payload.timezone,
             settings: payload.settings,
             movies: payload.movies,
             rotation: payload.rotation,
+            cache: payload.cache,
         });
     } catch (error) {
         console.error('[getHomeHero]', error.message);
@@ -322,6 +339,8 @@ export const createGetTmdbSimilarHandler = ({
         return res.status(502).json({ success: false, message: 'Unable to load similar movies.' });
     }
 };
+
+export const getHomeHero = createGetHomeHeroHandler();
 
 export const getTmdbSimilar = createGetTmdbSimilarHandler();
 

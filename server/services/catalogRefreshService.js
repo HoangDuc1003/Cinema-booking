@@ -244,7 +244,14 @@ function validateMovie(details, { classicCutoff } = {}) {
     if (classicCutoff && details.release_date > classicCutoff) return false;
     if (!String(details.poster_path || '').trim() || !String(details.backdrop_path || '').trim()) return false;
     if (details.adult === true || !Number.isFinite(details.runtime) || details.runtime <= 0) return false;
-    if (!Array.isArray(details.genres) || !Number.isFinite(details.vote_average)) return false;
+    if (
+        !Array.isArray(details.genres)
+        || !Number.isFinite(details.vote_average)
+        || !Number.isFinite(details.vote_count)
+        || details.vote_count < 0
+        || !Number.isFinite(details.popularity)
+        || details.popularity < 0
+    ) return false;
     return Boolean(String(details.original_language || '').trim());
 }
 
@@ -260,6 +267,9 @@ const toMovieDocument = (movie) => ({
     genres: movie.genres || [],
     casts: (movie.credits?.cast || []).slice(0, 20),
     vote_average: movie.vote_average,
+    vote_count: movie.vote_count,
+    popularity: movie.popularity,
+    adult: movie.adult === true,
     runtime: movie.runtime,
 });
 
@@ -634,6 +644,9 @@ const movieBulkOperations = (movies) => movies.map((movie) => ({
                 genres: movie.genres || [],
                 casts: movie.casts || [],
                 vote_average: movie.vote_average,
+                vote_count: Number(movie.vote_count) || 0,
+                popularity: Number(movie.popularity) || 0,
+                adult: movie.adult === true,
                 runtime: movie.runtime,
             },
             $setOnInsert: {
@@ -740,6 +753,9 @@ const normalizeMovieForPayload = (movie) => ({
     genres: movie.genres || [],
     casts: movie.casts || [],
     vote_average: movie.vote_average,
+    vote_count: movie.vote_count,
+    popularity: movie.popularity,
+    adult: movie.adult === true,
     runtime: movie.runtime,
     heroVideoId: movie.heroVideoId || '',
     heroVideoUrl: movie.heroVideoUrl || '',
