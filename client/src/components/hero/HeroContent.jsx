@@ -1,5 +1,6 @@
 import React from 'react';
 import { CalendarIcon, ClockIcon, Info, LoaderCircle, Play, Star, Ticket, Volume2, VolumeX } from 'lucide-react';
+import { HERO_FAILURE_REASONS } from './heroMachine';
 
 const HeroContent = ({
   movieKey,
@@ -39,6 +40,8 @@ const HeroContent = ({
   const isOverviewRevealedEffective = overviewRevealed || disclosureState === 'expanded' || disclosureState === 'expanding';
   const stateClass = disclosureState ? `is-${disclosureState}` : '';
   const overviewCollapsed = isCompactEffective && !isOverviewRevealedEffective;
+  const trailerUnavailable = failureReason === HERO_FAILURE_REASONS.MISSING_VIDEO
+    || (trailerAvailable === false && !trailerLoading);
 
   const contentKey = movieKey || movie.id || movie._id || title;
   const flyDirection = (index || 0) % 2 === 0 ? 'hero-fly-left' : 'hero-fly-right';
@@ -49,9 +52,9 @@ const HeroContent = ({
       ? 'Retry trailer'
       : 'Play trailer';
 
-  const showTrailerButton = !trailerActive && (
-    trailerAvailable !== false || trailerLoading || trailerFailed
-  );
+  const showTrailerButton = !trailerActive
+    && !trailerUnavailable
+    && (trailerAvailable !== false || trailerLoading || trailerFailed);
 
   const handleBlur = (event) => {
     if (onBlurCapture) {
@@ -124,7 +127,11 @@ const HeroContent = ({
           {movie.overview}
         </p>
 
-        {trailerFailed && (
+        {trailerUnavailable ? (
+          <p className="hero-trailer-status hero-fade-up d3" role="status">
+            Trailer for this movie is currently unavailable.
+          </p>
+        ) : trailerFailed && (
           <p className="hero-trailer-status hero-fade-up d3" role="status">
             {`Trailer could not start automatically (${failureReason}). Use Play trailer to try again.`}
           </p>

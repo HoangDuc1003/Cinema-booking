@@ -4,6 +4,7 @@ import User from '../models/User.js';
 import { reconcileHeroAssets } from '../services/heroVideoService.js';
 import { getISOWeekKey, refreshWeeklyCatalog, rotateActiveCatalogSlot } from '../services/catalogRefreshService.js';
 import { createEnrichHeroVideosFunction } from './functions/enrichHeroVideos.js';
+import { syncNowPlayingShows } from '../services/nowPlayingShowSyncService.js';
 import {
     getHeroLocalDateKey,
     refreshHeroRotation,
@@ -127,6 +128,23 @@ try {
         }
     );
 
+    const syncVnNowPlayingShows = inngest.createFunction(
+        {
+            id: 'sync-vn-now-playing-shows',
+            cron: 'TZ=Asia/Ho_Chi_Minh 5 0 * * *',
+            retries: 3,
+            concurrency: { limit: 1, key: '"vn-now-playing-shows"', scope: 'env' },
+        },
+        async ({ event, step }) => {
+            await connectDB();
+            const scheduledAt = new Date(event?.ts || Date.now());
+            return step.run('sync-vn-now-playing-shows', () => syncNowPlayingShows({
+                now: scheduledAt,
+                requestedBy: 'inngest-cron',
+            }));
+        },
+    );
+
     // Sync user creation from Clerk to MongoDB
     const syncUserCreation = inngest.createFunction(
         {
@@ -208,6 +226,7 @@ try {
         requestedCatalogRefresh,
         dailyHeroRotationRefresh,
         rotateActiveCatalogSlotJob,
+        syncVnNowPlayingShows,
         reconcileHeroAssetsJob,
         enrichHeroVideosJob
     ];
