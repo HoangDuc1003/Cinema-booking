@@ -1,3 +1,4 @@
+import { env } from 'node:process';
 import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
@@ -30,6 +31,7 @@ export default defineConfig({
     env: {
       VITE_E2E_PROFILE_TEST: 'true',
       VITE_HERO_VIDEO_ALLOWED_HOSTS: '127.0.0.1',
+      VITE_ENABLE_MOCK_DATA: env.VITE_ENABLE_MOCK_DATA || 'false',
     },
   },
 });

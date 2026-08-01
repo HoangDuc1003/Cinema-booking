@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import axios from 'axios';
 import Movie from '../models/Movie.js';
 import Show from '../models/Show.js';
@@ -7,13 +8,36 @@ import { invalidateMovieCatalog } from '../services/cacheInvalidationService.js'
 import { redisKeys, redisTtl } from '../services/redisKeys.js';
 import { getPublicHomeHero } from '../services/heroService.js';
 import { createHeroEtag, matchesHeroEtag } from '../services/heroRotationService.js';
-import { getPublicHomeNowShowing } from '../services/homeNowShowingService.js';
+import {
+    createHomeNowShowingEtag,
+    getPublicHomeNowShowing,
+} from '../services/homeNowShowingService.js';
 import { fetchTmdbImage } from '../services/tmdbImageService.js';
 import { calculateCurrentSlot, getPublicHomePayload } from '../services/catalogRefreshService.js';
 import { groupPersistedShowtimes, parseCinemaShowDateTime } from '../services/showtimeService.js';
 
 const tmdbHeaders = () => ({ Authorization: `Bearer ${process.env.TMDB_API_KEY}` });
 const setCacheHeader = (res, cache) => res.set('X-Cache', cache);
+const HOME_BROWSER_CACHE_CONTROL = 'public, max-age=60, stale-if-error=86400';
+const HOME_CDN_CACHE_CONTROL = 's-maxage=300, stale-while-revalidate=43200, stale-if-error=86400';
+
+const requestIdFor = (req) => {
+    const candidate = req.get?.('x-request-id');
+    return /^[A-Za-z0-9._:-]{1,100}$/.test(String(candidate || ''))
+        ? String(candidate)
+        : randomUUID();
+};
+
+const setTimingHeader = (res, timing = {}) => {
+    const entries = [
+        ['db', timing.dbConnectMs],
+        ['indexes', timing.indexVerificationMs],
+        ['redis', timing.redisMs],
+        ['catalog', timing.catalogMs],
+        ['total', timing.totalMs],
+    ].filter(([, value]) => Number.isFinite(value));
+    if (entries.length) res.set('Server-Timing', entries.map(([name, value]) => `${name};dur=${Number(value).toFixed(2)}`).join(', '));
+};
 
 const fetchTmdbJson = async (path, params = {}) => {
     if (!process.env.TMDB_API_KEY) throw new Error('TMDB_API_KEY is not configured');
@@ -106,18 +130,95 @@ export const createGetHomeHeroHandler = ({
     }
 };
 
-export const getTmdbHomeNowShowing = async (req, res) => {
+export const createGetHomeNowShowingHandler = ({
+    loadHome = getPublicHomeNowShowing,
+    makeEtag = createHomeNowShowingEtag,
+    etagMatches = matchesHeroEtag,
+} = {}) => async (req, res) => {
+    const requestId = requestIdFor(req);
+    const startedAt = performance.now();
+    res.set('X-Request-Id', requestId);
+
     try {
-        const result = await getPublicHomeNowShowing({
+        const result = await loadHome({
             limit: req.query.limit,
             region: req.query.region,
         });
-        return setCacheHeader(res, result.cache).json({ success: true, data: result.value });
+        const value = result?.value;
+        const timing = {
+            ...(req.nitroTiming || {}),
+            ...(result?.timing || {}),
+            totalMs: performance.now() - startedAt,
+        };
+
+        if (!Array.isArray(value?.results) || !value.results.length) {
+            res.set('Cache-Control', 'private, no-store');
+            setTimingHeader(res, timing);
+            console.warn(JSON.stringify({
+                event: 'home-now-showing-unavailable',
+            requestId,
+            totalMs: Number(timing.totalMs.toFixed(2)),
+            dbConnectionState: timing.dbConnectionState,
+            source: value?.meta?.source || 'empty',
+                cache: 'bypass',
+            }));
+            return res.status(503).json({ success: false, message: 'Home now-showing movies are temporarily unavailable.' });
+        }
+
+        const etag = makeEtag(value);
+        const catalog = value.meta?.catalog || {};
+        res.set('ETag', etag);
+        res.set('Cache-Control', HOME_BROWSER_CACHE_CONTROL);
+        res.set('Vercel-CDN-Cache-Control', HOME_CDN_CACHE_CONTROL);
+        res.set('Vary', 'Origin');
+        setCacheHeader(res, result.cache || 'bypass');
+        res.set('X-Data-Source', value.meta?.source || 'unknown');
+        res.set('X-Catalog-Version', String(catalog.version ?? ''));
+        res.set('X-Catalog-Slot', String(catalog.slot ?? ''));
+        setTimingHeader(res, timing);
+
+        if (etagMatches(req.get?.('if-none-match'), etag)) {
+            console.info(JSON.stringify({
+                event: 'home-now-showing',
+                requestId,
+                totalMs: Number(timing.totalMs.toFixed(2)),
+                source: value.meta?.source || 'unknown',
+                cache: result.cache || 'bypass',
+                status: 304,
+            }));
+            return res.status(304).end();
+        }
+
+        console.info(JSON.stringify({
+            event: 'home-now-showing',
+            requestId,
+            totalMs: Number(timing.totalMs.toFixed(2)),
+            dbConnectMs: timing.dbConnectMs,
+            indexVerificationMs: timing.indexVerificationMs,
+            dbConnectionState: timing.dbConnectionState,
+            redisMs: timing.redisMs,
+            catalogMs: timing.catalogMs,
+            source: value.meta?.source || 'unknown',
+            cache: result.cache || 'bypass',
+            status: 200,
+        }));
+        return res.json({ success: true, data: value });
     } catch (error) {
-        console.error('[getTmdbHomeNowShowing]', error.message);
+        const timing = { ...(req.nitroTiming || {}), totalMs: performance.now() - startedAt };
+        res.set('Cache-Control', 'private, no-store');
+        setTimingHeader(res, timing);
+        console.error(JSON.stringify({
+            event: 'home-now-showing-error',
+            requestId,
+            totalMs: Number(timing.totalMs.toFixed(2)),
+            dbConnectionState: timing.dbConnectionState,
+            errorCode: error?.code || error?.name || 'UNKNOWN',
+        }));
         return res.status(502).json({ success: false, message: 'Unable to load home now-showing movies.' });
     }
 };
+
+export const getTmdbHomeNowShowing = createGetHomeNowShowingHandler();
 
 export const getTmdbImage = async (req, res) => {
     try {

@@ -66,17 +66,20 @@ app.use(clerkMiddleware({
 }));
 
 app.use(async (req, res, next) => {
-    const catalogBackedTmdbPath = req.path === '/api/show/tmdb/home-now-showing'
-        || req.path === '/api/show/tmdb/trailers';
-    if (req.path.startsWith('/api/show/tmdb') && !catalogBackedTmdbPath) {
-        return next();
-    }
-
+    const isPublicShowRead = req.method === 'GET' && req.path.startsWith('/api/show');
+    const timing = {};
     try {
-        await connectDB();
+        await connectDB({ ensureIndexes: !isPublicShowRead, timing });
+        req.nitroTiming = timing;
         next();
     } catch (error) {
-        console.error('[DB middleware] Connection failed:', error.message);
+        console.error(JSON.stringify({
+            event: 'database-connection-failed',
+            path: req.path,
+            method: req.method,
+            errorCode: error?.code || error?.name || 'UNKNOWN',
+        }));
+        res.set('Cache-Control', 'private, no-store');
         return res.status(503).json({
             success: false,
             message: 'Database temporarily unavailable. Please retry.',

@@ -103,10 +103,27 @@ try {
     // Background job: Rotate active catalog slot
     const rotateActiveCatalogSlotJob = inngest.createFunction(
         { id: "rotate-active-catalog-slot", cron: "TZ=Asia/Ho_Chi_Minh 0 8,20 * * *" },
-        async () => {
+        async ({ event }) => {
             await connectDB();
-            await rotateActiveCatalogSlot();
-            return { success: true };
+            const scheduledAt = new Date(event?.ts || Date.now());
+            try {
+                const result = await rotateActiveCatalogSlot(scheduledAt);
+                console.info(JSON.stringify({
+                    event: 'catalog-slot-rotation',
+                    jobId: 'rotate-active-catalog-slot',
+                    scheduledAt: scheduledAt.toISOString(),
+                    ...result,
+                }));
+                return { success: true, ...result };
+            } catch (error) {
+                console.error(JSON.stringify({
+                    event: 'catalog-slot-rotation-failed',
+                    jobId: 'rotate-active-catalog-slot',
+                    scheduledAt: scheduledAt.toISOString(),
+                    errorCode: error?.code || error?.name || 'UNKNOWN',
+                }));
+                throw error;
+            }
         }
     );
 

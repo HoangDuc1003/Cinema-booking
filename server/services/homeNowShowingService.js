@@ -1,8 +1,11 @@
+import { createHash } from 'node:crypto';
 import Movie from '../models/Movie.js';
+import { getPublicCacheTimeoutMs } from '../configs/redis.js';
 import { getPublicHomePayload } from './catalogRefreshService.js';
 
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 20;
+const roundMs = (value) => Math.round(value * 100) / 100;
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
@@ -32,6 +35,20 @@ export const normalizeHomeNowShowingMovie = (movie) => {
     };
 };
 
+export const createHomeNowShowingEtag = (value) => {
+    const catalog = value?.meta?.catalog || {};
+    const identity = JSON.stringify({
+        batchId: catalog.batchId || '',
+        version: catalog.version ?? '',
+        slot: catalog.slot ?? '',
+        region: value?.meta?.region || 'US',
+        limit: value?.meta?.limit || 0,
+        movies: (value?.results || []).map((movie) => String(movie?._id || movie?.id || '')),
+    });
+    const digest = createHash('sha256').update(identity).digest('hex').slice(0, 24);
+    return `"home-now-showing-${digest}"`;
+};
+
 const loadMongoFallback = async (limit) => {
     const movies = await Movie.find({ poster_path: { $nin: [null, ''] } })
         .sort({ release_date: -1, vote_average: -1, updatedAt: -1 })
@@ -47,8 +64,14 @@ export const getPublicHomeNowShowing = async ({
 } = {}) => {
     const limit = parseHomeNowShowingLimit(rawLimit);
     const region = normalizeHomeNowShowingRegion(rawRegion);
+    const startedAt = performance.now();
+    const timing = {};
     try {
-        const payload = await getPublicHomePayload(limit, region, now);
+        const payload = await getPublicHomePayload(limit, region, now, {
+            cacheTimeoutMs: getPublicCacheTimeoutMs(),
+            timing,
+            waitForCacheWrites: false,
+        });
         let results = (payload.nowShowing || []).slice(0, limit).map(normalizeHomeNowShowingMovie).filter(Boolean);
         let source = 'weekly-catalog';
         if (!results.length) {
@@ -68,6 +91,11 @@ export const getPublicHomeNowShowing = async ({
                 },
             },
             cache: source === 'weekly-catalog' ? 'catalog' : 'bypass',
+            timing: {
+                ...timing,
+                catalogMs: roundMs(performance.now() - startedAt),
+                totalMs: roundMs(performance.now() - startedAt),
+            },
         };
     } catch (error) {
         const results = await loadMongoFallback(limit).catch(() => []);
@@ -84,6 +112,11 @@ export const getPublicHomeNowShowing = async ({
                 },
             },
             cache: 'bypass',
+            timing: {
+                ...timing,
+                catalogMs: roundMs(performance.now() - startedAt),
+                totalMs: roundMs(performance.now() - startedAt),
+            },
         };
     }
 };

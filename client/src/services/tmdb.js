@@ -1,14 +1,26 @@
 // Service: TMDB API helpers
 import { dummyShowsData } from '../assets/assets';
 import { extractYouTubeVideoId } from '../lib/youtubeVideo.js';
-import { fetchWithTimeout as requestWithTimeout } from './fetchWithTimeout.js';
+import {
+    fetchWithTimeout as requestWithTimeout,
+    FetchTimeoutError,
+} from './fetchWithTimeout.js';
+import {
+    isValidHomeNowShowingMovies,
+    readHomeNowShowingCache,
+    saveHomeNowShowingCache,
+} from './homeNowShowingCache.js';
 
-const RAW_BASE = (import.meta.env.VITE_BASE_URL || '').trim().replace(/\/$/, '');
-const API_BASE = import.meta.env.DEV ? '' : RAW_BASE;
+const runtimeEnv = import.meta.env || {};
+const MOCK_DATA_ENABLED = runtimeEnv.DEV === true && runtimeEnv.VITE_ENABLE_MOCK_DATA === 'true';
+const RAW_BASE = (runtimeEnv.VITE_BASE_URL || '').trim().replace(/\/$/, '');
+const API_BASE = runtimeEnv.DEV ? '' : RAW_BASE;
 const IMAGE_BASE = 'https://image.tmdb.org/t/p';
-const API_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS) || 4500;
-const HERO_API_TIMEOUT_MS = Number(import.meta.env.VITE_HERO_API_TIMEOUT_MS) || 12_000;
-const SHOWTIME_API_TIMEOUT_MS = Number(import.meta.env.VITE_SHOWTIME_API_TIMEOUT_MS) || 10_000;
+const API_TIMEOUT_MS = Number(runtimeEnv.VITE_API_TIMEOUT_MS) || 4500;
+const HOME_NOW_SHOWING_API_TIMEOUT_MS = Number(runtimeEnv.VITE_HOME_NOW_SHOWING_API_TIMEOUT_MS) || 12_000;
+const HOME_NOW_SHOWING_REQUEST_BUDGET_MS = Number(runtimeEnv.VITE_HOME_NOW_SHOWING_REQUEST_BUDGET_MS) || 14_000;
+const HERO_API_TIMEOUT_MS = Number(runtimeEnv.VITE_HERO_API_TIMEOUT_MS) || 12_000;
+const SHOWTIME_API_TIMEOUT_MS = Number(runtimeEnv.VITE_SHOWTIME_API_TIMEOUT_MS) || 10_000;
 const TRAILER_CACHE_TTL_MS = 30_000;
 const trailerResponseCache = new Map();
 const HERO_SHARED_ABORT_GRACE_MS = 75;
@@ -46,10 +58,18 @@ const getTmdbMovieId = (movie) => {
 };
 
 export class HttpError extends Error {
-    constructor(response) {
-        super(`HTTP ${response.status} ${response.statusText}`.trim());
+    constructor(response, payload = null) {
+        super(payload?.message || `HTTP ${response.status} ${response.statusText}`.trim());
         this.name = 'HttpError';
         this.status = response.status;
+    }
+}
+
+export class InvalidPayloadError extends Error {
+    constructor(message, { cause } = {}) {
+        super(message, { cause });
+        this.name = 'InvalidPayloadError';
+        this.code = 'EINVALIDPAYLOAD';
     }
 }
 
@@ -59,9 +79,17 @@ const fetchWithTimeout = async (url, options = {}, timeoutMs = API_TIMEOUT_MS) =
 
 const fetchBackendJson = async (path, options = {}, timeoutMs = API_TIMEOUT_MS) => {
     const response = await fetchWithTimeout(`${API_BASE}/api/show/tmdb${path}`, options, timeoutMs);
-    const payload = await response.json().catch(() => null);
-    if (!response.ok || !payload?.success) {
-        throw new Error(payload?.message || `Movie source request failed (${response.status})`);
+    let payload;
+    try {
+        payload = await response.json();
+    } catch (error) {
+        throw new InvalidPayloadError('Movie source returned invalid JSON.', { cause: error });
+    }
+    if (!response.ok) {
+        throw new HttpError(response, payload);
+    }
+    if (!payload?.success) {
+        throw new InvalidPayloadError(payload?.message || 'Movie source returned an invalid payload.');
     }
     return payload.data;
 };
@@ -256,23 +284,100 @@ export const fetchMovieTrailers = async (movie, { signal } = {}) => {
         }));
 };
 
+const waitForRetry = (delayMs, signal) => new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+        reject(signal.reason || new DOMException('Aborted', 'AbortError'));
+        return;
+    }
+    let settled = false;
+    const timer = globalThis.setTimeout(() => {
+        settled = true;
+        signal?.removeEventListener?.('abort', handleAbort);
+        resolve();
+    }, delayMs);
+    const handleAbort = () => {
+        if (settled) return;
+        settled = true;
+        globalThis.clearTimeout(timer);
+        signal?.removeEventListener?.('abort', handleAbort);
+        reject(signal.reason || new DOMException('Aborted', 'AbortError'));
+    };
+    signal?.addEventListener?.('abort', handleAbort, { once: true });
+});
+
+const loadHomeNowShowingFromServer = async ({ query, signal }) => {
+    const startedAt = Date.now();
+    let lastError;
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+        const remainingBudget = HOME_NOW_SHOWING_REQUEST_BUDGET_MS - (Date.now() - startedAt);
+        if (remainingBudget <= 0) break;
+        try {
+            return await fetchBackendJson(
+                `/home-now-showing?${query.toString()}`,
+                { signal },
+                Math.min(HOME_NOW_SHOWING_API_TIMEOUT_MS, remainingBudget),
+            );
+        } catch (error) {
+            if (error?.name === 'AbortError') throw error;
+            lastError = error;
+            if (attempt === 1) break;
+            const retryDelay = Math.min(350, 150 + Math.floor(Math.random() * 151));
+            const remainingAfterDelay = HOME_NOW_SHOWING_REQUEST_BUDGET_MS - (Date.now() - startedAt);
+            if (remainingAfterDelay <= retryDelay) break;
+            await waitForRetry(retryDelay, signal);
+        }
+    }
+
+    throw lastError || new FetchTimeoutError(HOME_NOW_SHOWING_REQUEST_BUDGET_MS);
+};
+
+const developmentMockResult = (limit) => ({
+    movies: onlyMoviesWithImages(fallbackMovies(limit).map(normalizeMovieCard)),
+    meta: { reason: 'explicit-development-mock' },
+    source: 'development-mock',
+});
+
 export const fetchHomeNowShowing = async ({ limit = 10, region, signal } = {}) => {
     const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 10, 1), 20);
     const safeRegion = /^[A-Za-z]{2}$/.test(String(region || ''))
         ? String(region).toUpperCase()
         : '';
+    const query = new URLSearchParams({ limit: String(safeLimit) });
+    if (safeRegion) query.set('region', safeRegion);
+
     try {
-        const query = new URLSearchParams({ limit: String(safeLimit) });
-        if (safeRegion) query.set('region', safeRegion);
-        const data = await fetchBackendJson(`/home-now-showing?${query.toString()}`, { signal });
+        const data = await loadHomeNowShowingFromServer({ query, signal });
         const rawMovies = Array.isArray(data?.results) ? data.results : [];
         const movies = onlyMoviesWithImages(rawMovies.map(normalizeMovieCard));
-        if (!movies.length) throw new Error('Home Now Showing returned no usable movies.');
+        if (!isValidHomeNowShowingMovies(movies)) {
+            throw new InvalidPayloadError('Home Now Showing returned no usable server movies.');
+        }
 
-        return movies.slice(0, safeLimit);
+        const result = {
+            movies: movies.slice(0, safeLimit),
+            meta: data?.meta && typeof data.meta === 'object' ? data.meta : {},
+            source: 'server',
+        };
+        saveHomeNowShowingCache(result);
+        return result;
     } catch (error) {
         if (error?.name === 'AbortError') throw error;
-        return onlyMoviesWithImages(fallbackMovies(safeLimit).map(normalizeMovieCard));
+        const cached = readHomeNowShowingCache();
+        if (cached) {
+            return {
+                movies: cached.movies.slice(0, safeLimit),
+                meta: {
+                    ...cached.meta,
+                    staleReason: error?.name || 'RequestError',
+                    staleAgeMs: cached.ageMs,
+                },
+                source: 'stale-server-cache',
+                error,
+            };
+        }
+        if (MOCK_DATA_ENABLED) return developmentMockResult(safeLimit);
+        throw error;
     }
 };
 
@@ -280,7 +385,15 @@ export const fetchHomeNowShowing = async ({ limit = 10, region, signal } = {}) =
 const CACHE_KEY = 'tmdb_popular_v1';
 const CACHE_TTL = 1000 * 60 * 15;
 
-export const fetchPopularMovies = async (options = { includeDetails: false, detailLimit: 10, dailyRotate: false, dailySeedSize: 20, pages: 1, maxAdult: 2 }) => {
+export const fetchPopularMovies = async (options = {
+    includeDetails: false,
+    detailLimit: 10,
+    dailyRotate: false,
+    dailySeedSize: 20,
+    pages: 1,
+    maxAdult: 2,
+    fallbackMode: 'mock',
+}) => {
     try {
         const randomRotate = options && options.randomRotate;
         const seedSize = options && Number.isInteger(options.dailySeedSize) ? options.dailySeedSize : 20;
@@ -375,9 +488,10 @@ export const fetchPopularMovies = async (options = { includeDetails: false, deta
         return results;
     } catch (error) {
         if (options?.signal?.aborted || error?.name === 'AbortError') throw error;
-        if (options?.fallbackMode === 'none') throw error;
-        console.error('Error:', error);
-        return onlyMoviesWithImages(fallbackMovies(20));
+        if (options?.fallbackMode !== 'none' && MOCK_DATA_ENABLED) {
+            return onlyMoviesWithImages(fallbackMovies(20));
+        }
+        throw error;
     }
 }
 
@@ -415,10 +529,10 @@ export const fetchMovieDetails = async (id, { signal, fallbackMode = 'mock' } = 
         return { ...data };
     } catch (e) {
         if (signal?.aborted || e?.name === 'AbortError') throw e;
-        if (fallbackMode === 'none') throw e;
-        console.error('fetchMovieDetails error', e);
-        const fallback = dummyShowsData.find((movie) => String(movie._id || movie.id) === String(id));
-        return fallback || null;
+        if (fallbackMode !== 'none' && MOCK_DATA_ENABLED) {
+            return dummyShowsData.find((movie) => String(movie._id || movie.id) === String(id)) || null;
+        }
+        throw e;
     }
 }
 
@@ -474,9 +588,10 @@ export const fetchUpcomingMovies = async ({ signal, fallbackMode = 'mock' } = {}
         })));
     } catch (error) {
         if (signal?.aborted || error?.name === 'AbortError') throw error;
-        if (fallbackMode === 'none') throw error;
-        console.error(error);
-        return onlyMoviesWithImages(fallbackMovies(12));
+        if (fallbackMode !== 'none' && MOCK_DATA_ENABLED) {
+            return onlyMoviesWithImages(fallbackMovies(12));
+        }
+        throw error;
     }
 }
 
@@ -490,9 +605,10 @@ export const fetchNowPlayingMovies = async ({ signal, fallbackMode = 'mock' } = 
         })));
     } catch (error) {
         if (signal?.aborted || error?.name === 'AbortError') throw error;
-        if (fallbackMode === 'none') throw error;
-        console.error(error);
-        return onlyMoviesWithImages(fallbackMovies(12));
+        if (fallbackMode !== 'none' && MOCK_DATA_ENABLED) {
+            return onlyMoviesWithImages(fallbackMovies(12));
+        }
+        throw error;
     }
 }
 

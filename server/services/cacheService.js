@@ -1,10 +1,13 @@
 import { connectRedis, runWithCommandTimeout } from '../configs/redis.js';
 
-const withRedis = async (operation, fallback = null) => {
+const withRedis = async (operation, fallback = null, options = {}) => {
     try {
-        const client = await connectRedis();
+        const client = await connectRedis({ timeoutMs: options.timeoutMs });
         if (!client?.isReady) return fallback;
-        return await runWithCommandTimeout(client, operation);
+        return await runWithCommandTimeout(client, operation, {
+            timeoutMs: options.timeoutMs,
+            invalidateOnTimeout: options.invalidateOnTimeout ?? true,
+        });
     } catch (error) {
         console.warn('[Redis cache] Bypassed:', error.message);
         return fallback;
@@ -17,14 +20,15 @@ export const withRequiredRedis = async (operation) => {
     return runWithCommandTimeout(client, operation);
 };
 
-export const getJson = async (key) => withRedis(async (client) => {
+export const getJson = async (key, options = {}) => withRedis(async (client) => {
     const value = await client.get(key);
     return value === null ? null : JSON.parse(value);
-});
+}, null, options);
 
-export const setJson = async (key, value, ttlSeconds) => withRedis(
+export const setJson = async (key, value, ttlSeconds, options = {}) => withRedis(
     (client) => client.set(key, JSON.stringify(value), { EX: ttlSeconds }),
     false,
+    options,
 );
 
 export const setRequiredJson = async (key, value, ttlSeconds) => withRequiredRedis(

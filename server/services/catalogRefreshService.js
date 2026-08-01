@@ -775,12 +775,29 @@ const posterOnlyPayload = (payload) => ({
     })),
 });
 
-export async function getPublicHomePayload(limit = 10, region = 'US', now = new Date()) {
+export async function getPublicHomePayload(
+    limit = 10,
+    region = 'US',
+    now = new Date(),
+    { cacheTimeoutMs, timing, waitForCacheWrites = true } = {},
+) {
     void limit;
     void region;
+    const cacheOptions = Number.isFinite(cacheTimeoutMs)
+        ? { timeoutMs: cacheTimeoutMs, invalidateOnTimeout: false }
+        : {};
+    const readCache = async (key) => {
+        const startedAt = performance.now();
+        try {
+            return await getJson(key, cacheOptions);
+        } finally {
+            if (timing) timing.redisMs = (timing.redisMs || 0) + (performance.now() - startedAt);
+        }
+    };
+    const writeCache = (key, value, ttlSeconds) => setJson(key, value, ttlSeconds, cacheOptions);
     const [config, refreshState] = await Promise.all([
         SiteConfig.findOne({ key: 'catalog' }).lean(),
-        getJson(redisKeys.catalogRefreshState()),
+        readCache(redisKeys.catalogRefreshState()),
     ]);
     const refreshing = Boolean(refreshState?.active || config?.catalog?.refreshing);
     let batch = config?.catalog?.activeBatchId
@@ -788,14 +805,14 @@ export async function getPublicHomePayload(limit = 10, region = 'US', now = new 
         : null;
     if (!batch || batch.status !== 'active') batch = await CatalogBatch.findOne({ status: 'active' }).lean();
     if (!batch) {
-        const lastGood = await getJson(redisKeys.catalogLastGood());
+        const lastGood = await readCache(redisKeys.catalogLastGood());
         if (!lastGood) return { hero: [], nowShowing: [], popular: [], classics: [], recommended: [], meta: null };
         return refreshing ? posterOnlyPayload(lastGood) : lastGood;
     }
 
     const slot = calculateCurrentSlot(now);
     const cacheKey = redisKeys.catalogSlot(batch._id, slot);
-    let payload = await getJson(cacheKey);
+    let payload = await readCache(cacheKey);
     if (!payload) {
         const sectionIds = allocateCatalogSectionIds(batch, slot);
         const orderedIds = [
@@ -827,8 +844,12 @@ export async function getPublicHomePayload(limit = 10, region = 'US', now = new 
         if (payloadIds.length !== 85 || new Set(payloadIds).size !== 85) {
             throw new CatalogRefreshError('PAYLOAD_MOVIES_INCOMPLETE', 'Catalog payload must resolve 85 unique Movie documents');
         }
-        await setJson(cacheKey, payload, 86400 * 7);
-        await setJson(redisKeys.catalogLastGood(), payload, 86400 * 30);
+        const cacheWrites = [
+            writeCache(cacheKey, payload, 86400 * 7),
+            writeCache(redisKeys.catalogLastGood(), payload, 86400 * 30),
+        ];
+        if (waitForCacheWrites) await Promise.all(cacheWrites);
+        else void Promise.all(cacheWrites).catch(() => undefined);
     }
     return refreshing ? posterOnlyPayload(payload) : payload;
 }

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { runWithCommandTimeout } from '../configs/redis.js';
 
 test('Redis health fails fast when a configured endpoint is unreachable', () => {
     const script = `
@@ -38,4 +39,17 @@ test('Redis health fails fast when a configured endpoint is unreachable', () => 
     assert.equal(parsed.health.connected, false);
     assert.equal(parsed.health.status, 'unavailable');
     assert.ok(parsed.elapsedMs < 1000, `Redis health took ${parsed.elapsedMs}ms`);
+});
+
+test('optional public cache timeout does not change required command invalidation semantics', async () => {
+    let destroyed = false;
+    const client = { destroy: () => { destroyed = true; } };
+    await assert.rejects(
+        runWithCommandTimeout(client, () => new Promise(() => {}), {
+            timeoutMs: 20,
+            invalidateOnTimeout: false,
+        }),
+        /Redis command timed out/,
+    );
+    assert.equal(destroyed, false);
 });

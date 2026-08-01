@@ -34,7 +34,9 @@ const useMobileHomeData = ({ enabled = true } = {}) => {
     ]).then(([heroResult, nowResult]) => {
       if (!alive || controller.signal.aborted) return;
       const hero = heroResult.status === 'fulfilled' ? heroResult.value : null;
-      const nowShowing = nowResult.status === 'fulfilled' ? nowResult.value : [];
+      const nowShowing = nowResult.status === 'fulfilled'
+        ? (nowResult.value?.movies || [])
+        : [];
       setState((current) => ({
         ...current,
         hero,

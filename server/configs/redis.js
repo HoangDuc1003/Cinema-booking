@@ -29,6 +29,13 @@ const getConnectTimeoutMs = () => {
         : 5000;
 };
 
+export const getPublicCacheTimeoutMs = () => {
+    const configured = Number(process.env.REDIS_PUBLIC_CACHE_TIMEOUT_MS);
+    return Number.isFinite(configured) && configured >= 500 && configured <= 1000
+        ? configured
+        : 750;
+};
+
 const invalidateClient = (client) => {
     if (state.client === client) state.client = null;
     try {
@@ -38,13 +45,17 @@ const invalidateClient = (client) => {
     }
 };
 
-export const runWithCommandTimeout = async (client, operation) => {
+export const runWithCommandTimeout = async (client, operation, {
+    timeoutMs = getCommandTimeoutMs(),
+    invalidateOnTimeout = true,
+} = {}) => {
     let timeoutId;
     const timeout = new Promise((_, reject) => {
         timeoutId = setTimeout(() => {
-            invalidateClient(client);
+            if (invalidateOnTimeout) invalidateClient(client);
             reject(new Error('Redis command timed out'));
-        }, getCommandTimeoutMs());
+        }, timeoutMs);
+        timeoutId.unref?.();
     });
     try {
         return await Promise.race([operation(client), timeout]);
@@ -83,14 +94,22 @@ const createRedisClient = () => {
     return client;
 };
 
-export const connectRedis = async ({ required = false } = {}) => {
+export const connectRedis = async ({ required = false, timeoutMs } = {}) => {
     if (!process.env.REDIS_URL) {
         if (required) throw new Error('REDIS_URL environment variable is not set');
         return null;
     }
 
     if (state.client?.isReady) return state.client;
-    if (state.connectPromise) return state.connectPromise;
+    if (state.connectPromise) {
+        if (!Number.isFinite(timeoutMs)) return state.connectPromise;
+        let timeoutId;
+        const timeout = new Promise((_, reject) => {
+            timeoutId = setTimeout(() => reject(new Error('Redis connection timed out')), timeoutMs);
+            timeoutId.unref?.();
+        });
+        return Promise.race([state.connectPromise, timeout]).finally(() => clearTimeout(timeoutId));
+    }
 
     if (!state.client || !state.client.isOpen) {
         state.client = createRedisClient();
@@ -99,7 +118,7 @@ export const connectRedis = async ({ required = false } = {}) => {
     if (state.client.isOpen) return state.client;
 
     const client = state.client;
-    const connectTimeoutMs = getConnectTimeoutMs();
+    const connectTimeoutMs = Number.isFinite(timeoutMs) ? timeoutMs : getConnectTimeoutMs();
     let timedOut = false;
     let timeoutId;
     const timeout = new Promise((_, reject) => {
