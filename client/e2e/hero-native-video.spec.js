@@ -191,6 +191,30 @@ test('Hero mounts one native video, advances currentTime, and makes no YouTube r
   expect(forbiddenRequests).toEqual([]);
 });
 
+test('hovering the sound control reveals an accessible volume slider', async ({ page }) => {
+  await mockHome(page);
+  await page.goto('/?heroMock=1');
+
+  const hero = page.locator('.hero-section');
+  const video = hero.locator('video');
+  await waitForAdvancingPlayback(video);
+
+  const soundControl = page.locator('button[data-hero-sound-control]');
+  const volumePopover = page.locator('.hero-volume-popover');
+  const volumeSlider = page.getByRole('slider', { name: 'Trailer volume' });
+  await expect(soundControl).toBeVisible();
+  await soundControl.hover();
+  await expect(volumePopover).toHaveCSS('opacity', '1');
+  await expect(volumeSlider).toHaveAttribute('aria-valuetext', /percent/);
+
+  await volumeSlider.fill('0.7');
+  await expect.poll(() => video.evaluate((element) => element.volume)).toBeGreaterThan(0.65);
+  await expect.poll(() => video.evaluate((element) => element.muted)).toBe(false);
+  await expect.poll(
+    () => page.evaluate(() => localStorage.getItem('nitrocine:hero-volume')),
+  ).toBe('0.7');
+});
+
 test('ended and failed native trailers hand off in server order with only one active video', async ({ page }) => {
   await mockHome(page);
   await page.goto('/?heroMock=1');

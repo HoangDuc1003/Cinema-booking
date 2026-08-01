@@ -38,6 +38,7 @@ const HERO_POSTER_TRANSITION_MS = 1_200;
 const HERO_AUTO_CAROUSEL_MS = 5_000;
 const HERO_ENDED_POSTER_HOLD_MS = 1_000;
 const HERO_FAILED_POSTER_HOLD_MS = HERO_AUTO_CAROUSEL_MS;
+const HERO_VOLUME_STEP = 0.05;
 const HERO_AUDIO_RAMP_MS = 450;
 const HERO_AUDIO_CONSENT_KEY = 'nitrocine:hero-audio-consent';
 const HERO_AUDIO_VOLUME_KEY = 'nitrocine:hero-volume';
@@ -719,7 +720,7 @@ const HeroSection = ({ autoPreview = false, onTrailerRequest = null }) => {
     audioFrameRef.current = window.requestAnimationFrame(step);
   }), [cancelAudioRamp]);
 
-  const enableSound = useCallback(async ({ persist = true } = {}) => {
+  const enableSound = useCallback(async ({ persist = true, volume = targetVolume } = {}) => {
     const player = playerRef.current;
     const generation = generationRef.current;
     if (!player || player.ended || generation !== videoGeneration) return false;
@@ -730,13 +731,14 @@ const HeroSection = ({ autoPreview = false, onTrailerRequest = null }) => {
       await Promise.resolve(player.play());
       setMuted(false);
       setAudioStatus('ramping');
-      const active = await rampVolume(player, generation, targetVolume);
+      const active = await rampVolume(player, generation, volume);
       if (!active) throw new Error('Audible playback did not remain active.');
       setAudioStatus('audible');
       if (persist) {
-        persistAudio({ consent: 'enabled', volume: targetVolume });
+        persistAudio({ consent: 'enabled', volume });
         setAudioConsent('enabled');
       }
+      setTargetVolume(volume);
       return true;
     } catch {
       player.muted = true;
@@ -761,6 +763,33 @@ const HeroSection = ({ autoPreview = false, onTrailerRequest = null }) => {
     }
     void enableSound({ persist: true });
   }, [audioStatus, cancelAudioRamp, enableSound, muted, targetVolume]);
+
+  const handleVolumeChange = useCallback((value) => {
+    const nextVolume = clampVolume(value);
+    const player = playerRef.current;
+    setTargetVolume(nextVolume);
+    if (!player) return;
+
+    if (nextVolume <= 0) {
+      cancelAudioRamp();
+      player.muted = true;
+      player.volume = 0;
+      setMuted(true);
+      setAudioStatus('muted');
+      persistAudio({ consent: 'disabled', volume: 0 });
+      setAudioConsent('disabled');
+      return;
+    }
+
+    if (muted || audioStatus === 'blocked') {
+      void enableSound({ persist: true, volume: nextVolume });
+      return;
+    }
+
+    player.volume = nextVolume;
+    persistAudio({ consent: 'enabled', volume: nextVolume });
+    setAudioConsent('enabled');
+  }, [audioStatus, cancelAudioRamp, enableSound, muted]);
 
   useEffect(() => {
     if (audioStatus !== 'blocked') return undefined;
@@ -967,6 +996,9 @@ const HeroSection = ({ autoPreview = false, onTrailerRequest = null }) => {
         )}
         muted={muted}
         onToggleMuted={handleToggleMuted}
+        volume={targetVolume}
+        volumeStep={HERO_VOLUME_STEP}
+        onVolumeChange={handleVolumeChange}
         onPointerEnter={disclosure.handlePointerEnter}
         onPointerMove={disclosure.handlePointerMove}
         onPointerLeave={disclosure.handlePointerLeave}

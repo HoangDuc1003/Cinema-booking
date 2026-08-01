@@ -23,6 +23,9 @@ const HeroContent = ({
   showVolumeControl,
   muted,
   onToggleMuted,
+  volume = 0.35,
+  volumeStep = 0.05,
+  onVolumeChange,
   onReveal,
   onScheduleRecompact,
   onCancelRecompact,
@@ -156,19 +159,40 @@ const HeroContent = ({
             </button>
           )}
           {showVolumeControl && (
-            <button
-              type="button"
-              data-hero-sound-control
-              onClick={() => {
-                onCtaClick?.();
-                onToggleMuted();
-              }}
-              aria-label={muted ? 'Turn trailer sound on' : 'Mute trailer'}
-              aria-pressed={!muted}
-              className="hero-control hero-control--icon"
-            >
-              {muted ? <VolumeX aria-hidden="true" /> : <Volume2 aria-hidden="true" />}
-            </button>
+            <div className="hero-volume-control" data-hero-sound-control>
+              <button
+                type="button"
+                data-hero-sound-control
+                onClick={() => {
+                  onCtaClick?.();
+                  onToggleMuted();
+                }}
+                aria-label={muted ? 'Turn trailer sound on' : 'Mute trailer'}
+                aria-pressed={!muted}
+                className="hero-control hero-control--icon"
+              >
+                {muted ? <VolumeX aria-hidden="true" /> : <Volume2 aria-hidden="true" />}
+              </button>
+              <div
+                className="hero-volume-popover"
+                role="group"
+                aria-label="Trailer volume controls"
+              >
+                <VolumeX aria-hidden="true" />
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step={volumeStep}
+                  value={volume}
+                  aria-label="Trailer volume"
+                  aria-valuetext={`${Math.round(volume * 100)} percent${muted ? ', muted' : ''}`}
+                  onChange={(event) => onVolumeChange?.(event.target.value)}
+                />
+                <Volume2 aria-hidden="true" />
+                <span className="hero-volume-value">{Math.round(volume * 100)}%</span>
+              </div>
+            </div>
           )}
           <button
             type="button"
