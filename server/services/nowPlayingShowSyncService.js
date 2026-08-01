@@ -1,13 +1,19 @@
 import axios from 'axios';
+import { randomUUID } from 'node:crypto';
 import Movie from '../models/Movie.js';
 import Show from '../models/Show.js';
 import { invalidateMovieCatalog } from './cacheInvalidationService.js';
+import { withDistributedLock } from './lockService.js';
+import { redisKeys, redisTtl } from './redisKeys.js';
 import { parseCinemaShowDateTime } from './showtimeService.js';
 
 export const TMDB_REGION = 'VN';
 export const TMDB_LANGUAGE = 'vi-VN';
 export const SCHEDULE_DAYS = 7;
 export const DEFAULT_SHOW_PRICE = 100;
+export const DEFAULT_RUNTIME_MINUTES = 120;
+export const SCHEDULE_BUFFER_MINUTES = 45;
+export const CLEANUP_MINUTES = 30;
 
 export const HALLS = Object.freeze([
     'Hall 1',
@@ -43,8 +49,7 @@ const asDate = (value) => {
 };
 
 const normalizeRegion = (value) => {
-    const region = String(value || TMDB_REGION).trim().toUpperCase();
-    return /^[A-Z]{2}$/.test(region) ? region : TMDB_REGION;
+    return TMDB_REGION;
 };
 
 const normalizeDays = (value) => {
@@ -60,6 +65,11 @@ const normalizeLimit = (value) => {
 const normalizePrice = (value) => {
     const price = Number(value ?? process.env.TMDB_NOW_PLAYING_SHOW_PRICE);
     return Number.isFinite(price) && price > 0 ? price : DEFAULT_SHOW_PRICE;
+};
+
+const normalizeRuntime = (value) => {
+    const runtime = Number(value);
+    return Number.isFinite(runtime) && runtime > 0 ? runtime : DEFAULT_RUNTIME_MINUTES;
 };
 
 const tmdbHeaders = () => ({
@@ -90,14 +100,17 @@ const toMovieUpdate = (movie, movieId) => {
     else setOnInsert.genres = [];
     if (Array.isArray(movie.casts)) set.casts = movie.casts;
     else setOnInsert.casts = [];
-    if (Number.isFinite(Number(movie.runtime))) set.runtime = Number(movie.runtime);
-    else setOnInsert.runtime = 0;
+    if (Number(movie.runtime) > 0) set.runtime = Number(movie.runtime);
+    else setOnInsert.runtime = DEFAULT_RUNTIME_MINUTES;
     return { set, setOnInsert };
 };
 
 export const fetchNowPlayingMovies = async ({ fetcher = axios.get } = {}) => {
     if (fetcher === axios.get && !process.env.TMDB_API_KEY) {
-        throw new Error('TMDB_API_KEY is not configured');
+        throw Object.assign(new Error('TMDB_API_KEY is not configured'), {
+            code: 'INVALID_CONFIGURATION',
+            statusCode: 503,
+        });
     }
 
     const { data } = await fetcher(
@@ -137,6 +150,7 @@ export const getScheduleDateKeys = ({ now = new Date(), days = SCHEDULE_DAYS } =
 
 export const buildGeneratedShows = ({
     movieIds = [],
+    movies = [],
     now = new Date(),
     days = SCHEDULE_DAYS,
     region = TMDB_REGION,
@@ -146,26 +160,45 @@ export const buildGeneratedShows = ({
     const price = normalizePrice(showPrice);
     const generatedShows = [];
     const dateKeys = getScheduleDateKeys({ now, days });
+    const normalizedMovies = (movies.length ? movies : movieIds.map((id) => ({ id })))
+        .map((movie) => ({
+            id: toMovieId(movie),
+            runtime: normalizeRuntime(movie?.runtime),
+        }))
+        .filter((movie) => movie.id);
+    const earliestAllowed = asDate(now).getTime() + (SCHEDULE_BUFFER_MINUTES * 60 * 1000);
 
-    for (const movieId of movieIds) {
-        const normalizedMovieId = String(movieId).trim();
-        if (!/^\d+$/.test(normalizedMovieId)) continue;
-        for (const { dateKey, weekday } of dateKeys) {
-            const times = weekday === 0 || weekday === 6 ? WEEKEND_TIMES : WEEKDAY_TIMES;
+    for (const { dateKey, weekday } of dateKeys) {
+        const times = weekday === 0 || weekday === 6 ? WEEKEND_TIMES : WEEKDAY_TIMES;
+        const availableAt = new Map(HALLS.map((hall) => [hall, 0]));
+        for (const movie of normalizedMovies) {
+            let selected = null;
             for (const time of times) {
+                const showDateTime = parseCinemaShowDateTime(dateKey, time);
+                if (showDateTime.getTime() <= earliestAllowed) continue;
                 for (const hall of HALLS) {
-                    generatedShows.push({
-                        movie: normalizedMovieId,
-                        showDateTime: parseCinemaShowDateTime(dateKey, time),
-                        showPrice: price,
-                        hall,
-                        source: 'tmdb-now-playing',
-                        region: normalizedRegion,
-                        bookingOpen: true,
-                        scheduleKey: `tmdb-${normalizedRegion.toLowerCase()}:${normalizedMovieId}:${dateKey}:${time}:${hall}`,
-                    });
+                    if (showDateTime.getTime() < (availableAt.get(hall) || 0)) continue;
+                    selected = { time, hall, showDateTime };
+                    break;
                 }
+                if (selected) break;
             }
+            if (!selected) continue;
+            availableAt.set(
+                selected.hall,
+                selected.showDateTime.getTime() + ((movie.runtime + CLEANUP_MINUTES) * 60 * 1000),
+            );
+            generatedShows.push({
+                movie: movie.id,
+                showDateTime: selected.showDateTime,
+                showPrice: price,
+                hall: selected.hall,
+                source: 'tmdb-now-playing',
+                region: normalizedRegion,
+                bookingOpen: true,
+                scheduleStatus: 'scheduled',
+                scheduleKey: `tmdb-${normalizedRegion.toLowerCase()}:${movie.id}:${dateKey}:${selected.time}:${selected.hall}`,
+            });
         }
     }
 
@@ -178,7 +211,7 @@ const upsertMovies = async ({ movies, movieModel }) => {
             .map((movie) => [toMovieId(movie), movie])
             .filter(([movieId]) => movieId),
     ).values()];
-    if (!uniqueMovies.length) return { movieIds: [], created: 0, reused: 0 };
+    if (!uniqueMovies.length) return { movieIds: [], movies: [], created: 0, reused: 0 };
 
     const operations = uniqueMovies.map((movie) => {
         const movieId = toMovieId(movie);
@@ -195,9 +228,21 @@ const upsertMovies = async ({ movies, movieModel }) => {
         };
     });
     const result = await movieModel.bulkWrite(operations, { ordered: false });
+    if (typeof movieModel.updateMany === 'function') {
+        // TMDB list responses omit runtime. Repair only missing legacy values and
+        // preserve any runtime already enriched from the movie-details endpoint.
+        await movieModel.updateMany(
+            {
+                _id: { $in: uniqueMovies.map(toMovieId) },
+                $or: [{ runtime: { $exists: false } }, { runtime: { $lte: 0 } }],
+            },
+            { $set: { runtime: DEFAULT_RUNTIME_MINUTES } },
+        );
+    }
     const created = Number(result?.upsertedCount ?? result?.nUpserted ?? 0);
     return {
         movieIds: uniqueMovies.map(toMovieId),
+        movies: uniqueMovies,
         created,
         reused: Math.max(0, uniqueMovies.length - created),
     };
@@ -212,28 +257,31 @@ const closeStaleShows = async ({ showModel, activeMovieIds, now, region }) => {
             showDateTime: { $gte: now },
             movie: { $nin: activeMovieIds },
         },
-        { $set: { bookingOpen: false } },
+        { $set: { bookingOpen: false, scheduleStatus: 'closed' } },
     );
     return Number(result?.modifiedCount ?? result?.nModified ?? 0);
 };
 
-const upsertShows = async ({ showModel, generatedShows }) => {
+const upsertShows = async ({ showModel, generatedShows, syncBatchId }) => {
     if (!generatedShows.length) return { created: 0, reused: 0 };
 
     const result = await showModel.bulkWrite(
-        generatedShows.map((show) => ({
-            updateOne: {
-                filter: { scheduleKey: show.scheduleKey },
-                update: {
-                    $setOnInsert: {
-                        ...show,
-                        occupiedSeats: {},
+        generatedShows.map((show) => {
+            const { bookingOpen, scheduleStatus, ...insertFields } = show;
+            return {
+                updateOne: {
+                    filter: { scheduleKey: show.scheduleKey },
+                    update: {
+                        $setOnInsert: {
+                            ...insertFields,
+                            occupiedSeats: {},
+                        },
+                        $set: { bookingOpen: true, scheduleStatus: 'scheduled', syncBatchId },
                     },
-                    $set: { bookingOpen: true },
+                    upsert: true,
                 },
-                upsert: true,
-            },
-        })),
+            };
+        }),
         { ordered: false },
     );
     const created = Math.min(
@@ -252,41 +300,80 @@ export const syncNowPlayingShows = async ({
     movieModel = Movie,
     showModel = Show,
     invalidate = invalidateMovieCatalog,
+    lock = withDistributedLock,
     logger = console,
+    requestedBy = 'manual-script',
 } = {}) => {
     const nowDate = asDate(now);
     const normalizedRegion = normalizeRegion(region);
-    const movies = await fetchNowPlayingMovies({ fetcher });
-    if (typeof showModel.init === 'function') await showModel.init();
-    const movieStats = await upsertMovies({ movies, movieModel });
-    const showsClosed = await closeStaleShows({
-        showModel,
-        activeMovieIds: movieStats.movieIds,
-        now: nowDate,
-        region: normalizedRegion,
-    });
-    const generatedShows = buildGeneratedShows({
-        movieIds: movieStats.movieIds,
-        now: nowDate,
-        days,
-        region: normalizedRegion,
-        showPrice,
-    });
-    const showStats = await upsertShows({ showModel, generatedShows });
-    await invalidate();
+    return lock(
+        redisKeys.nowPlayingSyncLock(),
+        { ttlMs: redisTtl.nowPlayingSyncLockMs, waitMs: 0, retryMs: 100 },
+        async () => {
+            let movies;
+            try {
+                movies = await fetchNowPlayingMovies({ fetcher });
+            } catch (error) {
+                if (error?.code === 'INVALID_CONFIGURATION') throw error;
+                const safe = Object.assign(new Error('TMDB unavailable'), {
+                    code: 'TMDB_UNAVAILABLE',
+                    statusCode: 503,
+                    cause: error,
+                });
+                logger.error?.(JSON.stringify({ event: 'tmdb-now-playing-failed', errorCode: safe.code }));
+                throw safe;
+            }
+            const validMovies = movies.filter((movie) => toMovieId(movie));
+            if (!validMovies.length) {
+                const summary = {
+                    success: false,
+                    skipped: true,
+                    code: 'TMDB_EMPTY_RESPONSE',
+                    event: 'sync-vn-now-playing-shows-skipped',
+                    region: normalizedRegion,
+                    movies: 0,
+                    requestedBy,
+                };
+                logger.warn?.(JSON.stringify(summary));
+                return summary;
+            }
+            if (typeof showModel.init === 'function') await showModel.init();
+            const movieStats = await upsertMovies({ movies: validMovies, movieModel });
+            if (!movieStats.movieIds.length) {
+                return { success: false, skipped: true, code: 'TMDB_NO_VALID_MOVIES', region: normalizedRegion };
+            }
+            const showsClosed = await closeStaleShows({
+                showModel,
+                activeMovieIds: movieStats.movieIds,
+                now: nowDate,
+                region: normalizedRegion,
+            });
+            const generatedShows = buildGeneratedShows({
+                movies: movieStats.movies,
+                now: nowDate,
+                days,
+                region: normalizedRegion,
+                showPrice,
+            });
+            const syncBatchId = `tmdb-vn-${nowDate.toISOString()}-${randomUUID()}`;
+            const showStats = await upsertShows({ showModel, generatedShows, syncBatchId });
+            await invalidate();
 
-    const summary = {
-        event: 'sync-vn-now-playing-shows',
-        region: normalizedRegion,
-        movies: movieStats.movieIds.length,
-        moviesCreated: movieStats.created,
-        moviesReused: movieStats.reused,
-        showsCreated: showStats.created,
-        showsReused: showStats.reused,
-        showsClosed,
-    };
-    logger.info?.(JSON.stringify(summary));
-    return { success: true, ...summary };
+            const summary = {
+                event: 'sync-vn-now-playing-shows',
+                region: normalizedRegion,
+                movies: movieStats.movieIds.length,
+                moviesCreated: movieStats.created,
+                moviesReused: movieStats.reused,
+                showsCreated: showStats.created,
+                showsReused: showStats.reused,
+                showsClosed,
+                requestedBy,
+            };
+            logger.info?.(JSON.stringify(summary));
+            return { success: true, ...summary };
+        },
+    );
 };
 
 export const getBookableNowShowingMovies = async ({
@@ -318,7 +405,9 @@ export const getBookableNowShowingMovies = async ({
     for (const show of shows) {
         const movie = show?.movie;
         const movieId = movie?._id == null ? '' : String(movie._id);
-        if (!movieId || seenIds.has(movieId)) continue;
+        const hasPoster = Boolean(movie?.poster_path || movie?.backdrop_path || movie?.poster);
+        const hasRuntime = Number(movie?.runtime) > 0;
+        if (!movieId || seenIds.has(movieId) || !movie?.title || !hasPoster || !hasRuntime) continue;
         seenIds.add(movieId);
         movies.push(movie);
     }

@@ -1,11 +1,21 @@
 import mongoose from 'mongoose';
 import ensureCriticalIndexes from './indexes.js';
 
-// Vercel serverless: reuse connection across warm invocations
-let cached = global._mongooseConnection;
+// Vercel serverless: reuse connection across warm invocations.
+const runtimeGlobal = globalThis;
+let cached = runtimeGlobal._mongooseConnection;
 if (!cached) {
-    cached = global._mongooseConnection = { conn: null, promise: null };
+    cached = runtimeGlobal._mongooseConnection = { conn: null, promise: null };
 }
+
+const safeDatabaseError = (error, fallback = 'DATABASE_UNAVAILABLE') => {
+    const safe = new Error(fallback);
+    safe.name = 'DatabaseUnavailableError';
+    safe.code = fallback;
+    safe.statusCode = 503;
+    safe.cause = error;
+    return safe;
+};
 
 const connectDB = async ({ ensureIndexes = true, timing } = {}) => {
     const connectStartedAt = performance.now();
@@ -23,7 +33,7 @@ const connectDB = async ({ ensureIndexes = true, timing } = {}) => {
     if (!connection) {
         const uri = process.env.MONGODB_URI;
         if (!uri) {
-            throw new Error('MONGODB_URI environment variable is not set');
+            throw safeDatabaseError(new Error('MONGODB_URI is missing'), 'INVALID_CONFIGURATION');
         }
 
         console.log('[DB] Connecting to MongoDB...');
@@ -39,8 +49,11 @@ const connectDB = async ({ ensureIndexes = true, timing } = {}) => {
         }).catch((err) => {
             // Reset cache so next invocation retries
             cached.promise = null;
-            console.error('[DB] MongoDB Connection Failed:', err.message);
-            throw err;
+            console.error(JSON.stringify({
+                event: 'database-connection-failed',
+                errorCode: err?.code || err?.name || 'DATABASE_UNAVAILABLE',
+            }));
+            throw safeDatabaseError(err);
         });
 
         connection = await cached.promise;
@@ -54,7 +67,13 @@ const connectDB = async ({ ensureIndexes = true, timing } = {}) => {
     }
     if (ensureIndexes) {
         const indexStartedAt = performance.now();
-        await ensureCriticalIndexes();
+        try {
+            await ensureCriticalIndexes();
+        } catch (error) {
+            const safe = safeDatabaseError(error, 'DATABASE_INDEX_UNAVAILABLE');
+            safe.statusCode = 503;
+            throw safe;
+        }
         if (timing) timing.indexVerificationMs = performance.now() - indexStartedAt;
     } else if (timing) {
         timing.indexVerificationMs = 0;

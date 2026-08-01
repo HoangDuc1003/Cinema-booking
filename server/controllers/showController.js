@@ -19,6 +19,7 @@ import {
     getBookableNowShowingMovies,
     SCHEDULE_DAYS,
     TMDB_REGION,
+    syncNowPlayingShows,
 } from '../services/nowPlayingShowSyncService.js';
 
 const tmdbHeaders = () => ({ Authorization: `Bearer ${process.env.TMDB_API_KEY}` });
@@ -167,7 +168,12 @@ export const createGetHomeNowShowingHandler = ({
             source: value?.meta?.source || 'empty',
                 cache: 'bypass',
             }));
-            return res.status(503).json({ success: false, message: 'Home now-showing movies are temporarily unavailable.' });
+            return res.status(503).json({
+                success: false,
+                code: 'NOW_SHOWING_UNAVAILABLE',
+                requestId,
+                message: 'Home now-showing movies are temporarily unavailable.',
+            });
         }
 
         const etag = makeEtag(value);
@@ -219,11 +225,43 @@ export const createGetHomeNowShowingHandler = ({
             dbConnectionState: timing.dbConnectionState,
             errorCode: error?.code || error?.name || 'UNKNOWN',
         }));
-        return res.status(502).json({ success: false, message: 'Unable to load home now-showing movies.' });
+        const code = error?.code === 'DATABASE_UNAVAILABLE' || error?.code === 'DATABASE_INDEX_UNAVAILABLE'
+            ? 'DATABASE_UNAVAILABLE'
+            : 'INTERNAL_ERROR';
+        return res.status(code === 'DATABASE_UNAVAILABLE' ? 503 : 500).json({
+            success: false,
+            code,
+            requestId,
+            message: code === 'DATABASE_UNAVAILABLE'
+                ? 'Database temporarily unavailable. Please retry.'
+                : 'Unable to load home now-showing movies.',
+        });
     }
 };
 
 export const getTmdbHomeNowShowing = createGetHomeNowShowingHandler();
+
+export const syncNowPlayingShowsAdmin = async (req, res) => {
+    try {
+        const result = await syncNowPlayingShows({ requestedBy: req.auth?.()?.userId || 'admin' });
+        if (!result.success && result.skipped) {
+            return res.status(503).json({
+                success: false,
+                code: result.code || 'TMDB_UNAVAILABLE',
+                message: 'TMDB returned no usable now-playing movies. Existing schedules were preserved.',
+                summary: result,
+            });
+        }
+        return res.json({ success: true, summary: result });
+    } catch (error) {
+        const status = error?.statusCode === 409 ? 409 : 503;
+        return res.status(status).json({
+            success: false,
+            code: error?.code || 'TMDB_UNAVAILABLE',
+            message: status === 409 ? 'A now-playing sync is already running.' : 'Now-playing sync failed. Existing schedules were preserved.',
+        });
+    }
+};
 
 export const getTmdbImage = async (req, res) => {
     try {
@@ -273,7 +311,7 @@ export const getTmdbNowPlaying = async (req, res) => {
             redisTtl.movies,
             () => withMovieFallback(
                 'getTmdbNowPlaying',
-                () => fetchTmdbJson('/movie/now_playing', { language: 'en-US', page }),
+                () => fetchTmdbJson('/movie/now_playing', { region: TMDB_REGION, language: 'vi-VN', page }),
             ),
         );
     } catch (error) {

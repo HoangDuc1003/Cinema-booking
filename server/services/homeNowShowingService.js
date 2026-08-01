@@ -18,9 +18,9 @@ export const parseHomeNowShowingLimit = (value) => {
     return clamp(Number.isFinite(parsed) ? parsed : DEFAULT_LIMIT, 1, MAX_LIMIT);
 };
 
-export const normalizeHomeNowShowingRegion = (value) => {
-    const region = String(value || 'US').trim().toUpperCase();
-    return /^[A-Z]{2}$/.test(region) ? region : 'US';
+export const normalizeHomeNowShowingRegion = () => {
+    // Now Showing is intentionally VN-only; callers cannot switch this feed to another market.
+    return TMDB_REGION;
 };
 
 export const normalizeHomeNowShowingMovie = (movie) => {

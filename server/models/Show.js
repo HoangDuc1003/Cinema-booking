@@ -16,16 +16,24 @@ const showSchema = new mongoose.Schema(
         region: { type: String, default: 'VN' },
         bookingOpen: { type: Boolean, default: true, index: true },
         scheduleKey: { type: String, default: null },
+        scheduleStatus: {
+            type: String,
+            enum: ['scheduled', 'closed'],
+            default: 'scheduled',
+            index: true,
+        },
+        syncBatchId: { type: String, default: null },
     }, {
         minimize: false,
         timestamps: true,
     },
 )
 
-// Existing deployments may already contain duplicate show rows. Keep this index
-// non-unique; seat inventory uniqueness is enforced by SeatReservation instead.
-showSchema.index({ movie: 1, showDateTime: 1, hall: 1 });
+// Keep the legacy schedule identity compatible with existing Atlas deployments.
+// The generated sync additionally uses scheduleKey for cross-run idempotency.
+showSchema.index({ movie: 1, showDateTime: 1, hall: 1 }, { unique: true });
 showSchema.index({ showDateTime: 1 });
+showSchema.index({ source: 1, region: 1, bookingOpen: 1, showDateTime: 1 });
 showSchema.index(
     { scheduleKey: 1 },
     {

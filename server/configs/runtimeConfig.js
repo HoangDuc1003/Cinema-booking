@@ -65,3 +65,33 @@ export const getPaymentConfigStatus = (env = process.env) => {
         clientUrl: { configured: clientUrlConfigured },
     };
 };
+
+const hasKeyPrefix = (value, prefix) => String(value || '').trim().startsWith(prefix);
+
+export const getClerkConfigStatus = (env = process.env) => ({
+    publishableKey: {
+        configured: Boolean(env.CLERK_PUBLISHABLE_KEY?.trim()),
+        live: hasKeyPrefix(env.CLERK_PUBLISHABLE_KEY, 'pk_live_'),
+    },
+    secretKey: {
+        configured: Boolean(env.CLERK_SECRET_KEY?.trim()),
+        live: hasKeyPrefix(env.CLERK_SECRET_KEY, 'sk_live_'),
+    },
+});
+
+export const validateClerkConfig = (env = process.env) => {
+    const status = getClerkConfigStatus(env);
+    if (!status.publishableKey.configured || !status.secretKey.configured) {
+        throw new RuntimeConfigError(
+            'CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY must be configured.',
+            'CLERK_KEYS_MISSING',
+        );
+    }
+    if (env.NODE_ENV === 'production' && (!status.publishableKey.live || !status.secretKey.live)) {
+        throw new RuntimeConfigError(
+            'Production must use Clerk live keys.',
+            'CLERK_LIVE_KEYS_REQUIRED',
+        );
+    }
+    return status;
+};
