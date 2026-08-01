@@ -1,7 +1,11 @@
 import { createHash } from 'node:crypto';
-import Movie from '../models/Movie.js';
-import { getPublicCacheTimeoutMs } from '../configs/redis.js';
-import { getPublicHomePayload } from './catalogRefreshService.js';
+import { rememberJson } from './cacheService.js';
+import { redisKeys, redisTtl } from './redisKeys.js';
+import {
+    getBookableNowShowingMovies,
+    SCHEDULE_DAYS,
+    TMDB_REGION,
+} from './nowPlayingShowSyncService.js';
 
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 20;
@@ -41,7 +45,7 @@ export const createHomeNowShowingEtag = (value) => {
         batchId: catalog.batchId || '',
         version: catalog.version ?? '',
         slot: catalog.slot ?? '',
-        region: value?.meta?.region || 'US',
+        region: value?.meta?.region || TMDB_REGION,
         limit: value?.meta?.limit || 0,
         movies: (value?.results || []).map((movie) => String(movie?._id || movie?.id || '')),
     });
@@ -49,76 +53,48 @@ export const createHomeNowShowingEtag = (value) => {
     return `"home-now-showing-${digest}"`;
 };
 
-const loadMongoFallback = async (limit) => {
-    const movies = await Movie.find({ poster_path: { $nin: [null, ''] } })
-        .sort({ release_date: -1, vote_average: -1, updatedAt: -1 })
-        .limit(limit)
-        .lean();
-    return movies.map(normalizeHomeNowShowingMovie).filter(Boolean);
-};
-
 export const getPublicHomeNowShowing = async ({
     limit: rawLimit = DEFAULT_LIMIT,
-    region: rawRegion = 'US',
+    region: rawRegion = TMDB_REGION,
     now = new Date(),
 } = {}) => {
     const limit = parseHomeNowShowingLimit(rawLimit);
     const region = normalizeHomeNowShowingRegion(rawRegion);
     const startedAt = performance.now();
-    const timing = {};
-    try {
-        const payload = await getPublicHomePayload(limit, region, now, {
-            cacheTimeoutMs: getPublicCacheTimeoutMs(),
-            timing,
-            waitForCacheWrites: false,
-        });
-        let results = (payload.nowShowing || []).slice(0, limit).map(normalizeHomeNowShowingMovie).filter(Boolean);
-        let source = 'weekly-catalog';
-        if (!results.length) {
-            results = await loadMongoFallback(limit);
-            source = 'mongodb';
-        }
-        return {
-            value: {
-                results,
-                meta: {
-                    region,
-                    limit,
-                    source,
-                    partial: results.length < limit,
-                    catalog: payload.meta || null,
-                    generatedAt: now.toISOString(),
-                },
+    const cacheKey = redisKeys.bookableNowShowing(region, SCHEDULE_DAYS);
+    const result = await rememberJson(
+        cacheKey,
+        redisTtl.movies,
+        () => getBookableNowShowingMovies({
+            region,
+            days: SCHEDULE_DAYS,
+            limit: MAX_LIMIT,
+            now,
+        }),
+    );
+    const results = (Array.isArray(result.value) ? result.value : [])
+        .slice(0, limit)
+        .map(normalizeHomeNowShowingMovie)
+        .filter(Boolean);
+
+    return {
+        value: {
+            results,
+            meta: {
+                region,
+                limit,
+                source: 'bookable-shows',
+                partial: results.length < limit,
+                catalog: null,
+                generatedAt: now.toISOString(),
             },
-            cache: source === 'weekly-catalog' ? 'catalog' : 'bypass',
-            timing: {
-                ...timing,
-                catalogMs: roundMs(performance.now() - startedAt),
-                totalMs: roundMs(performance.now() - startedAt),
-            },
-        };
-    } catch (error) {
-        const results = await loadMongoFallback(limit).catch(() => []);
-        return {
-            value: {
-                results,
-                meta: {
-                    region,
-                    limit,
-                    source: results.length ? 'mongodb' : 'empty',
-                    partial: true,
-                    failures: [error.code || 'CATALOG_UNAVAILABLE'],
-                    generatedAt: now.toISOString(),
-                },
-            },
-            cache: 'bypass',
-            timing: {
-                ...timing,
-                catalogMs: roundMs(performance.now() - startedAt),
-                totalMs: roundMs(performance.now() - startedAt),
-            },
-        };
-    }
+        },
+        cache: result.cache,
+        timing: {
+            catalogMs: roundMs(performance.now() - startedAt),
+            totalMs: roundMs(performance.now() - startedAt),
+        },
+    };
 };
 
 export default getPublicHomeNowShowing;

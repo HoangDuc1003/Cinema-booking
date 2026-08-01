@@ -15,6 +15,11 @@ import {
 import { fetchTmdbImage } from '../services/tmdbImageService.js';
 import { calculateCurrentSlot, getPublicHomePayload } from '../services/catalogRefreshService.js';
 import { groupPersistedShowtimes, parseCinemaShowDateTime } from '../services/showtimeService.js';
+import {
+    getBookableNowShowingMovies,
+    SCHEDULE_DAYS,
+    TMDB_REGION,
+} from '../services/nowPlayingShowSyncService.js';
 
 const tmdbHeaders = () => ({ Authorization: `Bearer ${process.env.TMDB_API_KEY}` });
 const setCacheHeader = (res, cache) => res.set('X-Cache', cache);
@@ -598,7 +603,7 @@ export const addShow = async (req, res) => {
 export const importTrendingMovies = async (req, res) => {
     try {
         const result = await importTrendingMoviesLogic();
-        return res.json({ success: true, message: `Successfully imported ${result.count} movies with auto-generated shows!` });
+        return res.json({ success: true, message: `Successfully imported ${result.count} movies.` });
     } catch (error) {
         console.error('[importTrendingMovies]', error.message);
         return res.status(500).json({ success: false, message: 'Unable to import movies.' });
@@ -607,26 +612,15 @@ export const importTrendingMovies = async (req, res) => {
 
 export const getShows = async (req, res) => {
     try {
-        const result = await rememberJson(redisKeys.movies(), redisTtl.movies, async () => {
-            const shows = await Show.find({
-                showDateTime: { $gte: new Date() },
-                hall: { $ne: 'Virtual Hall' },
-            })
-                .populate('movie')
-                .sort({ showDateTime: 1 })
-                .lean();
-            const uniqueMovies = [];
-            const seenIds = new Set();
-
-            for (const show of shows) {
-                const movieId = show.movie?._id && String(show.movie._id);
-                if (movieId && !seenIds.has(movieId)) {
-                    uniqueMovies.push(show.movie);
-                    seenIds.add(movieId);
-                }
-            }
-            return uniqueMovies;
-        });
+        const result = await rememberJson(
+            redisKeys.bookableNowShowing(TMDB_REGION, SCHEDULE_DAYS),
+            redisTtl.movies,
+            () => getBookableNowShowingMovies({
+                region: TMDB_REGION,
+                days: SCHEDULE_DAYS,
+                limit: 20,
+            }),
+        );
 
         setCacheHeader(res, result.cache).json({ success: true, shows: result.value });
     } catch (error) {
