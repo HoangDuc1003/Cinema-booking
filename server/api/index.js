@@ -43,7 +43,14 @@ app.use((req, res, next) => {
 });
 
 try {
-    validateClerkConfig();
+    const clerkValidation = validateClerkConfig();
+    if (clerkValidation.warning) {
+        console.warn(JSON.stringify({
+            event: 'runtime-config-warning',
+            config: 'clerk',
+            warningCode: clerkValidation.warning,
+        }));
+    }
 } catch (error) {
     console.error(JSON.stringify({ event: 'runtime-config-invalid', config: 'clerk', errorCode: error.code }));
 }
@@ -80,7 +87,6 @@ app.get('/api/health/ready', async (req, res) => {
     }
     const configurationReady = clerkConfig.publishableKey.configured
         && clerkConfig.secretKey.configured
-        && (process.env.NODE_ENV !== 'production' || (clerkConfig.publishableKey.live && clerkConfig.secretKey.live))
         && Boolean(process.env.TMDB_API_KEY)
         && clientUrl.configured;
     const ready = database.connected && configurationReady && (!redis.configured || redis.connected);

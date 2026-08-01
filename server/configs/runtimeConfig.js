@@ -88,10 +88,7 @@ export const validateClerkConfig = (env = process.env) => {
         );
     }
     if (env.NODE_ENV === 'production' && (!status.publishableKey.live || !status.secretKey.live)) {
-        throw new RuntimeConfigError(
-            'Production must use Clerk live keys.',
-            'CLERK_LIVE_KEYS_REQUIRED',
-        );
+        return { ...status, warning: 'CLERK_LIVE_KEYS_RECOMMENDED' };
     }
     return status;
 };

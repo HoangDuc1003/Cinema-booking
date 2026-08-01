@@ -40,7 +40,7 @@ test('payment health exposes presence only', () => {
     );
 });
 
-test('production Clerk configuration requires live key prefixes without exposing values', () => {
+test('production Clerk configuration warns for test keys without exposing values', () => {
     assert.deepEqual(
         getClerkConfigStatus({ CLERK_PUBLISHABLE_KEY: 'pk_live_public', CLERK_SECRET_KEY: 'sk_live_secret' }),
         {
@@ -48,8 +48,10 @@ test('production Clerk configuration requires live key prefixes without exposing
             secretKey: { configured: true, live: true },
         },
     );
-    assert.throws(
-        () => validateClerkConfig({ NODE_ENV: 'production', CLERK_PUBLISHABLE_KEY: 'pk_test_public', CLERK_SECRET_KEY: 'sk_test_secret' }),
-        (error) => error.code === 'CLERK_LIVE_KEYS_REQUIRED' && error.statusCode === 503,
-    );
+    const validation = validateClerkConfig({
+        NODE_ENV: 'production',
+        CLERK_PUBLISHABLE_KEY: 'pk_test_public',
+        CLERK_SECRET_KEY: 'sk_test_secret',
+    });
+    assert.equal(validation.warning, 'CLERK_LIVE_KEYS_RECOMMENDED');
 });

@@ -4,8 +4,10 @@
 
 Set these in Vercel/serverless and never commit their values:
 
-- Server: `MONGODB_URI`, `REDIS_URL`, `TMDB_API_KEY`, `CLERK_PUBLISHABLE_KEY=pk_live_...`, `CLERK_SECRET_KEY=sk_live_...`, `CLIENT_URL`, Stripe, Cloudinary, and Inngest signing/event keys.
-- Client: `VITE_CLERK_PUBLISHABLE_KEY=pk_live_...`, `VITE_BASE_URL=https://nitrocine-server.vercel.app`, and `VITE_ENABLE_MOCK_DATA=false`.
+- Server: `MONGODB_URI`, `REDIS_URL`, `TMDB_API_KEY`, Clerk keys, `CLIENT_URL`, Stripe, Cloudinary, and Inngest signing/event keys.
+- Client: `VITE_CLERK_PUBLISHABLE_KEY`, `VITE_BASE_URL=https://nitrocine-server.vercel.app`, and `VITE_ENABLE_MOCK_DATA=false`.
+
+The Vercel demo may use Clerk `pk_test_...`/`sk_test_...`; the app logs a warning but continues to boot. Replace both with `pk_live_...`/`sk_live_...` before real users register, sign in, or book tickets.
 
 The liveness endpoint is `GET /api/health`. Readiness is `GET /api/health/ready`; it does not call TMDB and checks database, Redis, Clerk, TMDB configuration, and `CLIENT_URL`.
 

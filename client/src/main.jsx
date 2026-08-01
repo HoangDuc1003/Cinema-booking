@@ -8,9 +8,11 @@ const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 
 const clerkConfigError = !PUBLISHABLE_KEY
   ? 'Missing VITE_CLERK_PUBLISHABLE_KEY.'
-  : (import.meta.env.PROD && !PUBLISHABLE_KEY.startsWith('pk_live_')
-    ? 'Production requires a Clerk live publishable key (pk_live_...).'
-    : '')
+  : ''
+
+if (import.meta.env.PROD && PUBLISHABLE_KEY && !PUBLISHABLE_KEY.startsWith('pk_live_')) {
+  console.warn('Clerk is using a test/non-live publishable key. This is allowed for the Vercel demo; use pk_live_ before serving real users.')
+}
 
 const rootContent = clerkConfigError ? (
   <main style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 24, background: '#09090b', color: '#fff', textAlign: 'center' }}>
