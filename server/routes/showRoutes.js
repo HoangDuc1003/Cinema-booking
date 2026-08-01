@@ -17,6 +17,7 @@ import {
     getTmdbVideos,
     importTrendingMovies,
     searchTmdbMovies,
+    syncNowPlayingShowsAdmin,
 } from '../controllers/showController.js';
 import { protectAdmin } from '../middleware/auth.js';
 const showRouter = express.Router();
@@ -24,6 +25,7 @@ const showRouter = express.Router();
 showRouter.get('/now-playing',protectAdmin,getNowPlayingMovies)
 showRouter.get('/import-trending', protectAdmin, importTrendingMovies)
 showRouter.post('/add',protectAdmin ,addShow)
+showRouter.post('/sync-now-playing', protectAdmin, syncNowPlayingShowsAdmin)
 showRouter.get('/hero', getHomeHero)
 showRouter.get('/all',getShows)
 showRouter.get('/cinemas',getCinemas)

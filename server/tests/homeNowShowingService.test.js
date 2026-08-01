@@ -11,7 +11,8 @@ test('home now-showing query inputs are bounded and normalized', () => {
     assert.equal(parseHomeNowShowingLimit(0), 1);
     assert.equal(parseHomeNowShowingLimit(200), 20);
     assert.equal(normalizeHomeNowShowingRegion('vn'), 'VN');
-    assert.equal(normalizeHomeNowShowingRegion('invalid'), 'US');
+    assert.equal(normalizeHomeNowShowingRegion('invalid'), 'VN');
+    assert.equal(normalizeHomeNowShowingRegion('us'), 'VN');
 });
 
 test('home now-showing normalization preserves stored catalog data without a TMDB list dependency', () => {

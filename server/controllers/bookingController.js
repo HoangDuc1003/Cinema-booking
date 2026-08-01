@@ -28,14 +28,16 @@ export const isPersistedShowId = (showId) => mongoose.isValidObjectId(String(sho
 
 const resolveShow = (showId) => Show.findOne({
     _id: showId,
-    showDateTime: { $gte: new Date() },
+    bookingOpen: true,
+    showDateTime: { $gt: new Date(), $lt: new Date(Date.now() + (7 * 24 * 60 * 60 * 1000)) },
     hall: { $ne: 'Virtual Hall' },
 });
 
 const findShowForSeatMap = async (showId) => {
     return Show.findOne({
         _id: showId,
-        showDateTime: { $gte: new Date() },
+        bookingOpen: true,
+        showDateTime: { $gt: new Date(), $lt: new Date(Date.now() + (7 * 24 * 60 * 60 * 1000)) },
         hall: { $ne: 'Virtual Hall' },
     }).lean();
 };
@@ -188,6 +190,10 @@ export const createBooking = async (req, res) => {
                     await session.withTransaction(async () => {
                         const currentShow = await Show.findById(show._id).session(session);
                         if (!currentShow) throw Object.assign(new Error('Show not found.'), { statusCode: 404 });
+                        if (!currentShow.bookingOpen || currentShow.showDateTime <= new Date()
+                            || currentShow.showDateTime >= new Date(Date.now() + (7 * 24 * 60 * 60 * 1000))) {
+                            throw Object.assign(new Error('This show is no longer available for booking.'), { statusCode: 409, code: 'SHOW_NOT_BOOKABLE' });
+                        }
 
                         const legacyOccupied = new Set(Object.keys(currentShow.occupiedSeats || {}));
                         if (seats.some((seat) => legacyOccupied.has(seat))) {

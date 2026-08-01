@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getClientOrigin, getConfiguredClientUrl, getPaymentConfigStatus } from '../configs/runtimeConfig.js';
+import {
+    getClientOrigin,
+    getClerkConfigStatus,
+    getConfiguredClientUrl,
+    getPaymentConfigStatus,
+    validateClerkConfig,
+} from '../configs/runtimeConfig.js';
 
 test('production requires CLIENT_URL', () => {
     assert.throws(
@@ -31,5 +37,19 @@ test('payment health exposes presence only', () => {
     assert.deepEqual(
         getPaymentConfigStatus({ STRIPE_SECRET_KEY: 'secret', CLIENT_URL: 'https://example.com' }),
         { stripe: { configured: true }, clientUrl: { configured: true } },
+    );
+});
+
+test('production Clerk configuration requires live key prefixes without exposing values', () => {
+    assert.deepEqual(
+        getClerkConfigStatus({ CLERK_PUBLISHABLE_KEY: 'pk_live_public', CLERK_SECRET_KEY: 'sk_live_secret' }),
+        {
+            publishableKey: { configured: true, live: true },
+            secretKey: { configured: true, live: true },
+        },
+    );
+    assert.throws(
+        () => validateClerkConfig({ NODE_ENV: 'production', CLERK_PUBLISHABLE_KEY: 'pk_test_public', CLERK_SECRET_KEY: 'sk_test_secret' }),
+        (error) => error.code === 'CLERK_LIVE_KEYS_REQUIRED' && error.statusCode === 503,
     );
 });

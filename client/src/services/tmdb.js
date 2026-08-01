@@ -24,7 +24,9 @@ const SHOWTIME_API_TIMEOUT_MS = Number(runtimeEnv.VITE_SHOWTIME_API_TIMEOUT_MS) 
 const TRAILER_CACHE_TTL_MS = 30_000;
 const trailerResponseCache = new Map();
 const HERO_SHARED_ABORT_GRACE_MS = 75;
+const HOME_SHARED_ABORT_GRACE_MS = 75;
 let sharedHeroRequest = null;
+const sharedHomeRequests = new Map();
 let lastHeroResponse = null;
 let lastHeroEtag = '';
 
@@ -321,7 +323,10 @@ const loadHomeNowShowingFromServer = async ({ query, signal }) => {
         } catch (error) {
             if (error?.name === 'AbortError') throw error;
             lastError = error;
-            if (attempt === 1) break;
+            const retryable = error instanceof HttpError
+                ? [408, 429, 500, 502, 503, 504].includes(error.status)
+                : error?.name === 'FetchTimeoutError' || error?.name === 'TypeError';
+            if (attempt === 1 || !retryable) break;
             const retryDelay = Math.min(350, 150 + Math.floor(Math.random() * 151));
             const remainingAfterDelay = HOME_NOW_SHOWING_REQUEST_BUDGET_MS - (Date.now() - startedAt);
             if (remainingAfterDelay <= retryDelay) break;
@@ -330,6 +335,70 @@ const loadHomeNowShowingFromServer = async ({ query, signal }) => {
     }
 
     throw lastError || new FetchTimeoutError(HOME_NOW_SHOWING_REQUEST_BUDGET_MS);
+};
+
+const getSharedHomeRequest = (query) => {
+    const key = query.toString();
+    const existing = sharedHomeRequests.get(key);
+    if (existing) {
+        globalThis.clearTimeout(existing.abortTimer);
+        existing.abortTimer = null;
+        return existing;
+    }
+
+    const request = {
+        controller: new AbortController(),
+        consumers: new Set(),
+        abortTimer: null,
+        settled: false,
+        promise: null,
+    };
+    request.promise = loadHomeNowShowingFromServer({ query, signal: request.controller.signal })
+        .finally(() => {
+            request.settled = true;
+            if (request.consumers.size) return;
+            request.abortTimer = globalThis.setTimeout(() => {
+                if (!request.consumers.size && sharedHomeRequests.get(key) === request) sharedHomeRequests.delete(key);
+            }, HOME_SHARED_ABORT_GRACE_MS);
+        });
+    sharedHomeRequests.set(key, request);
+    return request;
+};
+
+const releaseHomeConsumer = (key, request, consumer) => {
+    request.consumers.delete(consumer);
+    if (request.consumers.size || sharedHomeRequests.get(key) !== request) return;
+    globalThis.clearTimeout(request.abortTimer);
+    request.abortTimer = globalThis.setTimeout(() => {
+        if (!request.consumers.size && sharedHomeRequests.get(key) === request) {
+            sharedHomeRequests.delete(key);
+            if (!request.settled) request.controller.abort(new DOMException('Home request abandoned', 'AbortError'));
+        }
+    }, HOME_SHARED_ABORT_GRACE_MS);
+};
+
+const fetchSharedHomeResponse = (query, signal) => {
+    const key = query.toString();
+    const request = getSharedHomeRequest(query);
+    const consumer = {};
+    request.consumers.add(consumer);
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const cleanup = () => {
+            signal?.removeEventListener?.('abort', handleAbort);
+            releaseHomeConsumer(key, request, consumer);
+        };
+        const finish = (callback, value) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            callback(value);
+        };
+        const handleAbort = () => finish(reject, signal?.reason || new DOMException('Aborted', 'AbortError'));
+        if (signal?.aborted) return handleAbort();
+        signal?.addEventListener?.('abort', handleAbort, { once: true });
+        request.promise.then((value) => finish(resolve, value), (error) => finish(reject, error));
+    });
 };
 
 const developmentMockResult = (limit) => ({
@@ -347,7 +416,7 @@ export const fetchHomeNowShowing = async ({ limit = 10, region, signal } = {}) =
     if (safeRegion) query.set('region', safeRegion);
 
     try {
-        const data = await loadHomeNowShowingFromServer({ query, signal });
+        const data = await fetchSharedHomeResponse(query, signal);
         const rawMovies = Array.isArray(data?.results) ? data.results : [];
         const movies = onlyMoviesWithImages(rawMovies.map(normalizeMovieCard));
         if (!isValidHomeNowShowingMovies(movies)) {

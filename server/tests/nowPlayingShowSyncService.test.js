@@ -11,12 +11,15 @@ test('Show stores generated lifecycle fields and a partial unique schedule index
     assert.equal(Show.schema.path('source').options.default, 'manual');
     assert.equal(Show.schema.path('bookingOpen').options.default, true);
     assert.equal(Show.schema.path('region').options.default, 'VN');
+    assert.equal(Show.schema.path('scheduleStatus').options.default, 'scheduled');
 
     const scheduleIndex = Show.schema.indexes().find(([fields]) => fields.scheduleKey === 1);
     assert.deepEqual(scheduleIndex?.[1]?.partialFilterExpression, {
         scheduleKey: { $type: 'string' },
     });
     assert.equal(scheduleIndex?.[1]?.unique, true);
+    const legacyIdentityIndex = Show.schema.indexes().find(([fields]) => fields.movie === 1 && fields.showDateTime === 1);
+    assert.equal(legacyIdentityIndex?.[1]?.unique, true);
 });
 
 test('generated VN schedules use local dates, weekday/weekend times, and stable keys', () => {
@@ -27,12 +30,13 @@ test('generated VN schedules use local dates, weekday/weekend times, and stable 
         showPrice: 120,
     });
 
-    assert.equal(shows.length, 148);
-    assert.equal(shows[0].showDateTime.toISOString(), '2026-08-01T01:30:00.000Z');
-    assert.equal(shows[0].scheduleKey, 'tmdb-vn:101:2026-08-01:08:30:Hall 1');
+    assert.equal(shows.length, 7);
+    assert.equal(shows[0].showDateTime.toISOString(), '2026-08-01T04:30:00.000Z');
+    assert.equal(shows[0].scheduleKey, 'tmdb-vn:101:2026-08-01:11:30:Hall 1');
     assert.equal(shows[0].source, 'tmdb-now-playing');
     assert.equal(shows[0].region, 'VN');
     assert.equal(shows[0].bookingOpen, true);
+    assert.ok(shows.every((show) => show.showDateTime > new Date('2026-08-01T01:45:00.000Z')));
 });
 
 test('sync fetches only TMDB now-playing VN movies, closes stale shows, and idempotently upserts shows', async () => {
@@ -76,7 +80,7 @@ test('sync fetches only TMDB now-playing VN movies, closes stale shows, and idem
     assert.equal(result.movies, 2);
     assert.equal(result.moviesCreated, 2);
     assert.equal(result.showsCreated, 1);
-    assert.equal(result.showsReused, 295);
+    assert.equal(result.showsReused, 13);
     assert.equal(result.showsClosed, 3);
     assert.equal(calls.movieOps.length, 2);
     assert.deepEqual(calls.close.filter.movie.$nin, ['101', '102']);
@@ -100,9 +104,9 @@ test('bookable now showing reads only open generated shows and de-duplicates mov
                 populate: () => chain,
                 sort: () => chain,
                 lean: async () => [
-                    { movie: { _id: '101', title: 'One' } },
-                    { movie: { _id: '101', title: 'One' } },
-                    { movie: { _id: '102', title: 'Two' } },
+                    { movie: { _id: '101', title: 'One', poster_path: '/one.jpg', runtime: 120 } },
+                    { movie: { _id: '101', title: 'One', poster_path: '/one.jpg', runtime: 120 } },
+                    { movie: { _id: '102', title: 'Two', poster_path: '/two.jpg', runtime: 120 } },
                 ],
             };
             return chain;
@@ -134,5 +138,19 @@ test('TMDB sync does not fall back to another catalog when now-playing fails', a
         }),
         /TMDB unavailable/,
     );
+    assert.equal(writes, 0);
+});
+
+test('an empty TMDB response preserves existing schedules and skips cache invalidation', async () => {
+    let writes = 0;
+    const result = await syncNowPlayingShows({
+        fetcher: async () => ({ data: { results: [] } }),
+        movieModel: { bulkWrite: async () => { writes += 1; } },
+        showModel: { init: async () => { writes += 1; }, updateMany: async () => { writes += 1; }, bulkWrite: async () => { writes += 1; } },
+        invalidate: async () => { writes += 1; },
+        logger: { warn: () => {} },
+    });
+    assert.equal(result.code, 'TMDB_EMPTY_RESPONSE');
+    assert.equal(result.skipped, true);
     assert.equal(writes, 0);
 });

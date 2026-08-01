@@ -6,16 +6,24 @@ import { ClerkProvider } from '@clerk/react'
 import { AppProvider } from "./context/AppContext.jsx";
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 
-if (!PUBLISHABLE_KEY) {
-  throw new Error("Missing Publishable Key")
-}
+const clerkConfigError = !PUBLISHABLE_KEY
+  ? 'Missing VITE_CLERK_PUBLISHABLE_KEY.'
+  : (import.meta.env.PROD && !PUBLISHABLE_KEY.startsWith('pk_live_')
+    ? 'Production requires a Clerk live publishable key (pk_live_...).'
+    : '')
 
-createRoot(document.getElementById('root')).render(
+const rootContent = clerkConfigError ? (
+  <main style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 24, background: '#09090b', color: '#fff', textAlign: 'center' }}>
+    <p>{clerkConfigError} Update the Vercel environment variable and redeploy.</p>
+  </main>
+) : (
   <BrowserRouter>
     <ClerkProvider publishableKey={PUBLISHABLE_KEY}>
       <AppProvider>
-          <App />
+        <App />
       </AppProvider>
     </ClerkProvider>
   </BrowserRouter>
 )
+
+createRoot(document.getElementById('root')).render(rootContent)
