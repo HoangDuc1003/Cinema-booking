@@ -57,10 +57,12 @@ test('Hero audio cleanup settles a pending ramp and keeps global gestures off th
   assert.match(content, /data-hero-sound-control/);
 });
 
-test('missing native Hero trailers explain unavailability instead of offering a retry', async () => {
+test('missing native Hero trailers keep a lower-trailer action instead of showing an error state', async () => {
   const content = await readSource('components/hero/HeroContent.jsx');
 
   assert.match(content, /const trailerUnavailable = failureReason === HERO_FAILURE_REASONS\.MISSING_VIDEO/);
-  assert.match(content, /Trailer for this movie is currently unavailable\./);
-  assert.match(content, /!trailerUnavailable/);
+  assert.match(content, /trailerUnavailable \|\| trailerFailed/);
+  assert.match(content, /View trailer below/);
+  assert.match(content, /const showTrailerButton = !trailerActive/);
+  assert.doesNotMatch(content, /Use Play trailer to try again/);
 });

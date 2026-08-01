@@ -37,7 +37,7 @@ const HERO_POSTER_SWAP_DELAY_MS = 400;
 const HERO_POSTER_TRANSITION_MS = 1_200;
 const HERO_AUTO_CAROUSEL_MS = 5_000;
 const HERO_ENDED_POSTER_HOLD_MS = 1_000;
-const HERO_FAILED_POSTER_HOLD_MS = 900;
+const HERO_FAILED_POSTER_HOLD_MS = HERO_AUTO_CAROUSEL_MS;
 const HERO_AUDIO_RAMP_MS = 450;
 const HERO_AUDIO_CONSENT_KEY = 'nitrocine:hero-audio-consent';
 const HERO_AUDIO_VOLUME_KEY = 'nitrocine:hero-volume';
@@ -112,7 +112,7 @@ const reportHeroDevelopmentEvent = (event, detail = {}) => {
   console.warn('[hero-native]', { event, ...detail });
 };
 
-const HeroSection = ({ autoPreview = false }) => {
+const HeroSection = ({ autoPreview = false, onTrailerRequest = null }) => {
   const navigate = useNavigate();
   const [initialPayload] = useState(() => getInitialHeroPayload());
   const [initialAudio] = useState(readStoredAudio);
@@ -371,14 +371,17 @@ const HeroSection = ({ autoPreview = false }) => {
 
   const findNextPlayableIndex = useCallback((fromIndex) => {
     const available = moviesRef.current;
+    let nextPosterIndex = -1;
     for (let offset = 1; offset <= available.length; offset += 1) {
       const index = (fromIndex + offset) % available.length;
       const key = getHeroMovieKey(available[index], index);
-      if (!failedMovieKeysRef.current.has(key) && resolveMovieSource(available[index])) {
+      if (failedMovieKeysRef.current.has(key)) continue;
+      if (nextPosterIndex < 0) nextPosterIndex = index;
+      if (resolveMovieSource(available[index])) {
         return index;
       }
     }
-    return -1;
+    return nextPosterIndex;
   }, [resolveMovieSource]);
 
   const scheduleFailureHandoff = useCallback((fromIndex) => {
@@ -799,6 +802,25 @@ const HeroSection = ({ autoPreview = false }) => {
     startPlaybackForIndex,
   ]);
 
+  const trailerAvailable = Boolean(resolveMovieSource(currentMovie));
+  const scrollToTrailerSection = useCallback(() => {
+    onTrailerRequest?.(currentMovie);
+    const target = document.getElementById('trailers');
+    const scroll = () => target?.scrollIntoView({
+      behavior: reducedMotion ? 'auto' : 'smooth',
+      block: 'start',
+    });
+    scroll();
+    window.requestAnimationFrame(() => window.requestAnimationFrame(scroll));
+  }, [currentMovie, onTrailerRequest, reducedMotion]);
+  const handleTrailerAction = useCallback(() => {
+    if (!trailerAvailable || trailerFailed) {
+      scrollToTrailerSection();
+      return;
+    }
+    handlePlayTrailer();
+  }, [handlePlayTrailer, scrollToTrailerSection, trailerAvailable, trailerFailed]);
+
   if (!currentMovie) {
     if (!catalogSettled) {
       return (
@@ -859,7 +881,6 @@ const HeroSection = ({ autoPreview = false }) => {
       currentMovie.backdrop_path,
     ], 'w780');
   const posterCandidates = isMobileScreen ? mobileImageCandidates : desktopImageCandidates;
-  const trailerAvailable = Boolean(resolveMovieSource(currentMovie));
   const playerActive = Boolean(
     videoSource
     && heroVisible
@@ -940,7 +961,7 @@ const HeroSection = ({ autoPreview = false }) => {
         failureReason={failureReason}
         onBook={navigateToMovie}
         onDetails={navigateToMovie}
-        onToggleTrailer={handlePlayTrailer}
+        onToggleTrailer={handleTrailerAction}
         showVolumeControl={videoMounted && (
           playbackStatus === HERO_PLAYBACK_STATUS.STABLE || audioStatus === 'blocked'
         )}

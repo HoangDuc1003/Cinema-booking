@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import Movie from '../models/Movie.js';
 import Show from '../models/Show.js';
 import { invalidateMovieCatalog } from './cacheInvalidationService.js';
+import { getPublicHeroRotation } from './heroRotationService.js';
 import { withDistributedLock } from './lockService.js';
 import { redisKeys, redisTtl } from './redisKeys.js';
 import { parseCinemaShowDateTime } from './showtimeService.js';
@@ -302,6 +303,7 @@ export const syncNowPlayingShows = async ({
     invalidate = invalidateMovieCatalog,
     lock = withDistributedLock,
     logger = console,
+    getHeroMovies = null,
     requestedBy = 'manual-script',
 } = {}) => {
     const nowDate = asDate(now);
@@ -342,14 +344,33 @@ export const syncNowPlayingShows = async ({
             if (!movieStats.movieIds.length) {
                 return { success: false, skipped: true, code: 'TMDB_NO_VALID_MOVIES', region: normalizedRegion };
             }
+            let heroMovies = [];
+            const loadHeroMovies = getHeroMovies || (movieModel === Movie ? getPublicHeroRotation : null);
+            if (loadHeroMovies) {
+                try {
+                    const heroPayload = await loadHeroMovies({ now: nowDate });
+                    heroMovies = Array.isArray(heroPayload) ? heroPayload : (heroPayload?.movies || []);
+                } catch (error) {
+                    logger.warn?.(JSON.stringify({
+                        event: 'hero-schedule-source-unavailable',
+                        errorCode: error?.code || error?.name || 'HERO_SOURCE_UNAVAILABLE',
+                    }));
+                }
+            }
+            const scheduleMovies = [...new Map(
+                [...heroMovies, ...movieStats.movies]
+                    .map((movie) => [toMovieId(movie), movie])
+                    .filter(([movieId]) => movieId),
+            ).values()];
+            const scheduleMovieIds = scheduleMovies.map(toMovieId);
             const showsClosed = await closeStaleShows({
                 showModel,
-                activeMovieIds: movieStats.movieIds,
+                activeMovieIds: scheduleMovieIds,
                 now: nowDate,
                 region: normalizedRegion,
             });
             const generatedShows = buildGeneratedShows({
-                movies: movieStats.movies,
+                movies: scheduleMovies,
                 now: nowDate,
                 days,
                 region: normalizedRegion,
@@ -365,6 +386,8 @@ export const syncNowPlayingShows = async ({
                 movies: movieStats.movieIds.length,
                 moviesCreated: movieStats.created,
                 moviesReused: movieStats.reused,
+                heroMovies: heroMovies.filter((movie) => toMovieId(movie)).length,
+                scheduledMovies: scheduleMovieIds.length,
                 showsCreated: showStats.created,
                 showsReused: showStats.reused,
                 showsClosed,

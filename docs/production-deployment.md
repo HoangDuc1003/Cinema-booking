@@ -13,7 +13,7 @@ The liveness endpoint is `GET /api/health`. Readiness is `GET /api/health/ready`
 
 ## Now Playing operations
 
-Now Showing is sourced only from TMDB `/movie/now_playing` with region `VN` and language `vi-VN`. The daily Inngest job runs at 00:05 Vietnam time. After a new deployment, run the protected manual operation from the server project:
+Now Showing is sourced from TMDB `/movie/now_playing` with region `VN` and language `vi-VN`; TMDB supplies movie metadata, not cinema-specific showtimes. NitroCine therefore simulates one bookable show per movie per day for the next seven Vietnam calendar days, including active Hero movies, with stable idempotent schedule keys and hall-conflict protection. The daily Inngest job runs at 00:05 Vietnam time. After a new deployment, run the protected manual operation from the server project:
 
 ```text
 npm run sync:now-playing

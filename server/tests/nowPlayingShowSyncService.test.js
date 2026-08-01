@@ -127,6 +127,41 @@ test('bookable now showing reads only open generated shows and de-duplicates mov
     assert.deepEqual(movies.map((movie) => movie._id), ['101', '102']);
 });
 
+test('sync prioritizes active Hero movies in the seven-day simulated schedule', async () => {
+    const calls = { close: null, showOps: [] };
+    const movieModel = {
+        bulkWrite: async () => ({ upsertedCount: 1 }),
+    };
+    const showModel = {
+        updateMany: async (filter) => {
+            calls.close = filter;
+            return { modifiedCount: 0 };
+        },
+        bulkWrite: async (operations) => {
+            calls.showOps = operations;
+            return { upsertedCount: operations.length };
+        },
+    };
+    const result = await syncNowPlayingShows({
+        now: new Date('2026-08-01T01:00:00.000Z'),
+        fetcher: async () => ({
+            data: { results: [{ id: 101, title: 'Now Playing', poster_path: '/one.jpg' }] },
+        }),
+        getHeroMovies: async () => ({
+            movies: [{ id: 999, title: 'Hero Movie', poster_path: '/hero.jpg', runtime: 100 }],
+        }),
+        movieModel,
+        showModel,
+        invalidate: async () => {},
+        logger: { info: () => {}, warn: () => {} },
+    });
+
+    assert.equal(result.heroMovies, 1);
+    assert.equal(result.scheduledMovies, 2);
+    assert.ok(calls.close.movie.$nin.includes('999'));
+    assert.ok(calls.showOps.some((operation) => operation.updateOne.filter.scheduleKey.includes(':999:')));
+});
+
 test('TMDB sync does not fall back to another catalog when now-playing fails', async () => {
     let writes = 0;
     await assert.rejects(

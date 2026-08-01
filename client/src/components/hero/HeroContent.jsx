@@ -41,20 +41,18 @@ const HeroContent = ({
   const stateClass = disclosureState ? `is-${disclosureState}` : '';
   const overviewCollapsed = isCompactEffective && !isOverviewRevealedEffective;
   const trailerUnavailable = failureReason === HERO_FAILURE_REASONS.MISSING_VIDEO
-    || (trailerAvailable === false && !trailerLoading);
+    || trailerAvailable === false;
 
   const contentKey = movieKey || movie.id || movie._id || title;
   const flyDirection = (index || 0) % 2 === 0 ? 'hero-fly-left' : 'hero-fly-right';
 
   const trailerLabel = trailerLoading
     ? 'Loading\u2026'
-    : trailerFailed
-      ? 'Retry trailer'
+    : trailerUnavailable || trailerFailed
+      ? 'View trailer below'
       : 'Play trailer';
 
-  const showTrailerButton = !trailerActive
-    && !trailerUnavailable
-    && (trailerAvailable !== false || trailerLoading || trailerFailed);
+  const showTrailerButton = !trailerActive;
 
   const handleBlur = (event) => {
     if (onBlurCapture) {
@@ -127,16 +125,6 @@ const HeroContent = ({
           {movie.overview}
         </p>
 
-        {trailerUnavailable ? (
-          <p className="hero-trailer-status hero-fade-up d3" role="status">
-            Trailer for this movie is currently unavailable.
-          </p>
-        ) : trailerFailed && (
-          <p className="hero-trailer-status hero-fade-up d3" role="status">
-            {`Trailer could not start automatically (${failureReason}). Use Play trailer to try again.`}
-          </p>
-        )}
-
         <div className={`hero-actions hero-fade-up d4 ${showVolumeControl ? 'has-volume-control' : ''}`}>
           <button
             type="button"
@@ -158,6 +146,7 @@ const HeroContent = ({
               }}
               disabled={trailerLoading}
               aria-busy={trailerLoading}
+              aria-label={`${trailerLabel} for ${title}`}
               className="hero-action hero-action--secondary"
             >
               {trailerLoading

@@ -6,7 +6,8 @@ const read = (path) => readFile(new URL(path, import.meta.url), 'utf8');
 
 test('Home renders Hero directly without a timeout or hidden readiness gate', async () => {
     const source = await read('../src/pages/Home.jsx');
-    assert.match(source, /<HeroSection autoPreview\s*\/>/);
+    assert.match(source, /<HeroSection autoPreview onTrailerRequest=\{setRequestedTrailerMovie\} \/>/);
+    assert.match(source, /anchorId="trailers"/);
     assert.doesNotMatch(source, /setTimeout|timedOut|onDataLoaded|className=\{.*hidden/);
 });
 

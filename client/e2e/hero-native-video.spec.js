@@ -31,6 +31,7 @@ const mockHome = async (page, {
   soundDefaultEnabled = false,
   defaultVolume = 0.35,
   movies = heroMovies,
+  movieVideos = {},
 } = {}) => {
   const requests = [];
   page.on('request', (request) => requests.push(request.url()));
@@ -54,6 +55,9 @@ const mockHome = async (page, {
       };
     } else if (url.includes('/tmdb/trailers')) {
       body = { success: true, data: [] };
+    } else if (url.includes('/tmdb/movie/') && url.includes('/videos')) {
+      const movieId = url.match(/\/tmdb\/movie\/([^/]+)\/videos/)?.[1] || '';
+      body = { success: true, data: { results: movieVideos[movieId] || [] } };
     } else if (url.endsWith('/api/show/all')) {
       body = { success: true, shows: [] };
     } else {
@@ -74,6 +78,36 @@ const mockHome = async (page, {
 
   return requests;
 };
+
+test('a poster-only Hero keeps its trailer action and opens the lower trailer section', async ({ page }) => {
+  const posterOnlyMovies = heroMovies.map(({ heroVideoStatus, heroVideoUrl, heroVideoMimeType, heroVideoVersion, heroVideoPoster, ...movie }) => movie);
+  await mockHome(page, {
+    movies: posterOnlyMovies,
+    movieVideos: {
+      9100: [{
+        site: 'YouTube',
+        key: 'dQw4w9WgXcQ',
+        type: 'Trailer',
+        name: 'Official Trailer',
+      }],
+    },
+  });
+  await page.goto('/?heroMock=0');
+
+  const hero = page.locator('.hero-section');
+  await expect(hero.locator('video')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /View trailer below for Native Hero 1/i })).toBeVisible();
+  await expect(hero).not.toContainText('Trailer for this movie is currently unavailable');
+
+  await page.getByRole('button', { name: /View trailer below for Native Hero 1/i }).click();
+  await expect(page.locator('#home-trailer-section')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => {
+    const target = document.getElementById('trailers');
+    return target ? Math.abs(target.getBoundingClientRect().top) < 180 : false;
+  })).toBe(true);
+  await expect(page.locator('#home-trailer-section iframe')).toHaveCount(1);
+  await expect(page.locator('#home-trailer-section')).toContainText('Native Hero 1');
+});
 
 const waitForAdvancingPlayback = async (video) => {
   await expect.poll(
@@ -330,7 +364,7 @@ test('an ended trailer skips a following movie whose native source is rejected',
   });
 
   await expect(hero.locator('.hero-title')).toContainText('Native Hero 2', { timeout: 6_000 });
-  await expect(hero.locator('.hero-title')).toContainText('Native Hero 3', { timeout: 8_000 });
+  await expect(hero.locator('.hero-title')).toContainText('Native Hero 3', { timeout: 14_000 });
   await expect(hero.locator('video')).toHaveCount(1);
   await waitForAdvancingPlayback(hero.locator('video'));
 });

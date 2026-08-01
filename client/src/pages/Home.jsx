@@ -25,7 +25,7 @@ const SectionSkeleton = ({ trailer = false }) => (
   </div>
 );
 
-const DeferredSection = ({ children, fallback }) => {
+const DeferredSection = ({ children, fallback, anchorId }) => {
   const rootRef = useRef(null);
   const [visible, setVisible] = useState(
     () => typeof IntersectionObserver === 'undefined',
@@ -44,22 +44,26 @@ const DeferredSection = ({ children, fallback }) => {
   }, [visible]);
 
   return (
-    <div ref={rootRef}>
+    <div ref={rootRef} id={anchorId}>
       {visible ? <Suspense fallback={fallback}>{children}</Suspense> : fallback}
     </div>
   );
 };
 
-const Home = () => (
-  <>
-    <HeroSection autoPreview />
-    <DeferredSection fallback={<SectionSkeleton />}>
-      <FeatureSection />
-    </DeferredSection>
-    <DeferredSection fallback={<SectionSkeleton trailer />}>
-      <TrailerSection />
-    </DeferredSection>
-  </>
-);
+const Home = () => {
+  const [requestedTrailerMovie, setRequestedTrailerMovie] = useState(null);
+
+  return (
+    <>
+      <HeroSection autoPreview onTrailerRequest={setRequestedTrailerMovie} />
+      <DeferredSection fallback={<SectionSkeleton />}>
+        <FeatureSection />
+      </DeferredSection>
+      <DeferredSection anchorId="trailers" fallback={<SectionSkeleton trailer />}>
+        <TrailerSection sectionId="home-trailer-section" featuredMovie={requestedTrailerMovie} />
+      </DeferredSection>
+    </>
+  );
+};
 
 export default Home;
