@@ -15,6 +15,7 @@ export const DEFAULT_SHOW_PRICE = 100;
 export const DEFAULT_RUNTIME_MINUTES = 120;
 export const SCHEDULE_BUFFER_MINUTES = 45;
 export const CLEANUP_MINUTES = 30;
+export const DEMO_SHOWTIMES_SOURCE = 'manual';
 
 export const HALLS = Object.freeze([
     'Hall 1',
@@ -130,7 +131,7 @@ export const fetchNowPlayingMovies = async ({ fetcher = axios.get } = {}) => {
     return Array.isArray(data?.results) ? data.results : [];
 };
 
-export const getScheduleDateKeys = ({ now = new Date(), days = SCHEDULE_DAYS } = {}) => {
+export const getScheduleDateKeys = ({ now = new Date(), days = SCHEDULE_DAYS, startOffset = 0 } = {}) => {
     const start = asDate(now);
     const localStart = new Date(start.getTime() + VIETNAM_OFFSET_MS);
     const year = localStart.getUTCFullYear();
@@ -138,8 +139,9 @@ export const getScheduleDateKeys = ({ now = new Date(), days = SCHEDULE_DAYS } =
     const day = localStart.getUTCDate();
     const count = normalizeDays(days);
 
+    const safeOffset = Number.isFinite(Number(startOffset)) ? Number(startOffset) : 0;
     return Array.from({ length: count }, (_, offset) => {
-        const localDate = new Date(Date.UTC(year, month, day + offset));
+        const localDate = new Date(Date.UTC(year, month, day + safeOffset + offset));
         const dateKey = [
             localDate.getUTCFullYear(),
             String(localDate.getUTCMonth() + 1).padStart(2, '0'),
@@ -160,7 +162,13 @@ export const buildGeneratedShows = ({
     const normalizedRegion = normalizeRegion(region);
     const price = normalizePrice(showPrice);
     const generatedShows = [];
-    const dateKeys = getScheduleDateKeys({ now, days });
+    const normalizedDays = normalizeDays(days);
+    const firstDate = getScheduleDateKeys({ now, days: 1 })[0];
+    const firstDayTimes = firstDate.weekday === 0 || firstDate.weekday === 6 ? WEEKEND_TIMES : WEEKDAY_TIMES;
+    const lastShowOfFirstDay = parseCinemaShowDateTime(firstDate.dateKey, firstDayTimes.at(-1));
+    const startOffset = asDate(now).getTime() + (SCHEDULE_BUFFER_MINUTES * 60 * 1000)
+        > lastShowOfFirstDay.getTime() ? 1 : 0;
+    const dateKeys = getScheduleDateKeys({ now, days: normalizedDays, startOffset });
     const normalizedMovies = (movies.length ? movies : movieIds.map((id) => ({ id })))
         .map((movie) => ({
             id: toMovieId(movie),
@@ -290,6 +298,99 @@ const upsertShows = async ({ showModel, generatedShows, syncBatchId }) => {
         Number(result?.upsertedCount ?? result?.nUpserted ?? 0),
     );
     return { created, reused: generatedShows.length - created };
+};
+
+const toDemoMovie = (movie, movieId) => ({
+    ...movie,
+    id: movie?.id ?? movie?._id ?? movieId,
+    _id: movie?._id ?? movie?.id ?? movieId,
+    runtime: normalizeRuntime(movie?.runtime),
+});
+
+const fetchMovieForDemoSchedule = async (movieId, fetcher = axios.get) => {
+    if (fetcher === axios.get && !process.env.TMDB_API_KEY) {
+        throw Object.assign(new Error('TMDB_API_KEY is not configured'), {
+            code: 'INVALID_CONFIGURATION',
+            statusCode: 503,
+        });
+    }
+
+    const { data } = await fetcher(
+        `https://api.themoviedb.org/3/movie/${encodeURIComponent(movieId)}`,
+        {
+            headers: tmdbHeaders(),
+            timeout: Number(process.env.TMDB_TIMEOUT_MS) || 5000,
+        },
+    );
+    return toDemoMovie(data, movieId);
+};
+
+export const isDemoScheduleKey = (value) => String(value || '').startsWith('demo-vn:');
+
+export const isDemoShowtimesEnabled = () => (
+    String(process.env.DEMO_SHOWTIMES_ENABLED || '').trim()
+        ? String(process.env.DEMO_SHOWTIMES_ENABLED).trim().toLowerCase() === 'true'
+        : /^pk_test_/i.test(String(process.env.CLERK_PUBLISHABLE_KEY || '').trim())
+);
+
+export const ensureDemoShowtimes = async ({
+    movieId,
+    now = new Date(),
+    days = SCHEDULE_DAYS,
+    showPrice,
+    fetcher = axios.get,
+    movieModel = Movie,
+    showModel = Show,
+    invalidate = invalidateMovieCatalog,
+    lock = withDistributedLock,
+} = {}) => {
+    const normalizedMovieId = String(movieId || '').trim();
+    if (!/^\d+$/.test(normalizedMovieId)) {
+        throw Object.assign(new Error('A valid movie ID is required.'), { statusCode: 400 });
+    }
+
+    return lock(
+        redisKeys.demoShowtimesLock(normalizedMovieId),
+        { ttlMs: redisTtl.nowPlayingSyncLockMs, waitMs: 0, retryMs: 100 },
+        async () => {
+            let movie = await movieModel.findById(normalizedMovieId).lean();
+            if (!movie) {
+                movie = await fetchMovieForDemoSchedule(normalizedMovieId, fetcher);
+                const update = toMovieUpdate(movie, normalizedMovieId);
+                await movieModel.updateOne(
+                    { _id: normalizedMovieId },
+                    { $set: update.set, $setOnInsert: update.setOnInsert },
+                    { upsert: true },
+                );
+            }
+
+            const generatedShows = buildGeneratedShows({
+                movies: [toDemoMovie(movie, normalizedMovieId)],
+                now,
+                days,
+                region: TMDB_REGION,
+                showPrice,
+            }).map((show) => ({
+                ...show,
+                source: DEMO_SHOWTIMES_SOURCE,
+                scheduleKey: show.scheduleKey.replace(/^tmdb-vn:/, 'demo-vn:'),
+            }));
+
+            const showStats = await upsertShows({
+                showModel,
+                generatedShows,
+                syncBatchId: `demo-vn-${normalizedMovieId}`,
+            });
+            await invalidate(normalizedMovieId);
+            return {
+                movieId: normalizedMovieId,
+                showsCreated: showStats.created,
+                showsReused: showStats.reused,
+                days: normalizeDays(days),
+                simulated: true,
+            };
+        },
+    );
 };
 
 export const syncNowPlayingShows = async ({

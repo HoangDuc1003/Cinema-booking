@@ -3,7 +3,9 @@ import test from 'node:test';
 import Show from '../models/Show.js';
 import {
     buildGeneratedShows,
+    ensureDemoShowtimes,
     getBookableNowShowingMovies,
+    isDemoShowtimesEnabled,
     syncNowPlayingShows,
 } from '../services/nowPlayingShowSyncService.js';
 
@@ -127,6 +129,17 @@ test('bookable now showing reads only open generated shows and de-duplicates mov
     assert.deepEqual(movies.map((movie) => movie._id), ['101', '102']);
 });
 
+test('generated schedules still provide seven future dates after today has ended', () => {
+    const shows = buildGeneratedShows({
+        movieIds: ['101'],
+        now: new Date('2026-08-01T16:30:00.000Z'),
+        days: 7,
+    });
+    const dates = [...new Set(shows.map((show) => show.showDateTime.toISOString().slice(0, 10)))];
+    assert.equal(dates.length, 7);
+    assert.equal(dates[0], '2026-08-02');
+});
+
 test('sync prioritizes active Hero movies in the seven-day simulated schedule', async () => {
     const calls = { close: null, showOps: [] };
     const movieModel = {
@@ -160,6 +173,59 @@ test('sync prioritizes active Hero movies in the seven-day simulated schedule', 
     assert.equal(result.scheduledMovies, 2);
     assert.ok(calls.close.movie.$nin.includes('999'));
     assert.ok(calls.showOps.some((operation) => operation.updateOne.filter.scheduleKey.includes(':999:')));
+});
+
+test('demo showtimes persist seven bookable dates with real Mongo-compatible show IDs', async () => {
+    const calls = { operations: [], invalidated: null };
+    const movieModel = {
+        findById: () => ({ lean: async () => ({
+            _id: '101',
+            id: '101',
+            title: 'Demo Feature',
+            runtime: 120,
+        }) }),
+    };
+    const showModel = {
+        bulkWrite: async (operations) => {
+            calls.operations = operations;
+            return { upsertedCount: operations.length };
+        },
+    };
+    const result = await ensureDemoShowtimes({
+        movieId: '101',
+        now: new Date('2026-08-01T01:00:00.000Z'),
+        movieModel,
+        showModel,
+        lock: async (_key, _options, task) => task({ coordinatedByRedis: false }),
+        invalidate: async (movieId) => { calls.invalidated = movieId; },
+    });
+
+    assert.equal(result.simulated, true);
+    assert.equal(result.days, 7);
+    assert.equal(result.showsCreated, 7);
+    assert.equal(calls.operations.length, 7);
+    assert.equal(calls.invalidated, '101');
+    assert.ok(calls.operations.every((operation) => (
+        operation.updateOne.update.$setOnInsert.source === 'manual'
+        && operation.updateOne.filter.scheduleKey.startsWith('demo-vn:')
+        && operation.updateOne.update.$setOnInsert.occupiedSeats
+    )));
+});
+
+test('demo showtimes are opt-in through the server environment', () => {
+    const previous = process.env.DEMO_SHOWTIMES_ENABLED;
+    const previousClerkKey = process.env.CLERK_PUBLISHABLE_KEY;
+    delete process.env.DEMO_SHOWTIMES_ENABLED;
+    process.env.CLERK_PUBLISHABLE_KEY = 'pk_live_example';
+    assert.equal(isDemoShowtimesEnabled(), false);
+    process.env.CLERK_PUBLISHABLE_KEY = 'pk_test_example';
+    assert.equal(isDemoShowtimesEnabled(), true);
+    process.env.DEMO_SHOWTIMES_ENABLED = 'true';
+    assert.equal(isDemoShowtimesEnabled(), true);
+    if (previous === undefined) delete process.env.DEMO_SHOWTIMES_ENABLED;
+    else process.env.DEMO_SHOWTIMES_ENABLED = previous;
+    if (previousClerkKey === undefined) delete process.env.CLERK_PUBLISHABLE_KEY;
+    else process.env.CLERK_PUBLISHABLE_KEY = previousClerkKey;
 });
 
 test('TMDB sync does not fall back to another catalog when now-playing fails', async () => {

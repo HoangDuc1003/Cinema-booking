@@ -3,7 +3,7 @@ import axios from 'axios';
 import Movie from '../models/Movie.js';
 import Show from '../models/Show.js';
 import { importTrendingMoviesLogic } from '../services/movieService.js';
-import { getJson, rememberJson, setJson } from '../services/cacheService.js';
+import { deleteKeys, getJson, rememberJson, setJson } from '../services/cacheService.js';
 import { invalidateMovieCatalog } from '../services/cacheInvalidationService.js';
 import { redisKeys, redisTtl } from '../services/redisKeys.js';
 import { getPublicHomeHero } from '../services/heroService.js';
@@ -17,6 +17,9 @@ import { calculateCurrentSlot, getPublicHomePayload } from '../services/catalogR
 import { groupPersistedShowtimes, parseCinemaShowDateTime } from '../services/showtimeService.js';
 import {
     getBookableNowShowingMovies,
+    ensureDemoShowtimes,
+    isDemoScheduleKey,
+    isDemoShowtimesEnabled,
     SCHEDULE_DAYS,
     TMDB_REGION,
     syncNowPlayingShows,
@@ -690,7 +693,7 @@ export const getShow = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Invalid movie ID.' });
         }
 
-        const result = await rememberJson(redisKeys.showtimes(movieId), redisTtl.showtimes, async () => {
+        const loadShowtimes = async () => {
             const [shows, cachedMovie] = await Promise.all([
                 Show.find({
                     movie: movieId,
@@ -699,11 +702,31 @@ export const getShow = async (req, res) => {
                 }).sort({ showDateTime: 1 }).lean(),
                 getJson(redisKeys.movie(movieId)),
             ]);
+            const grouped = groupPersistedShowtimes(shows);
+            const demoEligible = isDemoShowtimesEnabled()
+                && (!shows.length || shows.every((show) => isDemoScheduleKey(show.scheduleKey)))
+                && Object.keys(grouped).length < SCHEDULE_DAYS;
+            if (demoEligible) {
+                await ensureDemoShowtimes({ movieId });
+                return loadShowtimes();
+            }
             const databaseMovie = cachedMovie ? null : await Movie.findById(movieId).lean();
             const movie = cachedMovie || databaseMovie || await fetchMovieFromTmdb(movieId);
             await setJson(redisKeys.movie(movieId), movie, redisTtl.movie);
-            return { movie, dateTime: groupPersistedShowtimes(shows) };
-        });
+            return {
+                movie,
+                dateTime: grouped,
+                simulated: shows.some((show) => isDemoScheduleKey(show.scheduleKey)),
+            };
+        };
+        let result = await rememberJson(redisKeys.showtimes(movieId), redisTtl.showtimes, loadShowtimes);
+        const resultDateCount = Object.keys(result.value?.dateTime || {}).length;
+        const refreshDemoCache = isDemoShowtimesEnabled()
+            && (!resultDateCount || (result.value?.simulated === true && resultDateCount < SCHEDULE_DAYS));
+        if (refreshDemoCache) {
+            await deleteKeys(redisKeys.showtimes(movieId));
+            result = await rememberJson(redisKeys.showtimes(movieId), redisTtl.showtimes, loadShowtimes);
+        }
 
         setCacheHeader(res, result.cache).json({ success: true, ...result.value });
     } catch (error) {

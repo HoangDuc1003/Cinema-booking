@@ -620,6 +620,7 @@ export const fetchMovieShowtimes = async (id, { signal } = {}) => {
     return {
         movie: payload.movie,
         dateTime: payload.dateTime,
+        simulated: payload.simulated === true,
     };
 };
 

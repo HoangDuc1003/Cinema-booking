@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react'
 import BlurCircle from './BlurCircle'
-import { ChevronLeftIcon, ChevronRightIcon, RefreshCw } from 'lucide-react'
+import { ChevronLeftIcon, ChevronRightIcon, FlaskConical, RefreshCw } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useNavigate } from 'react-router-dom'
 
 const DateSelect = ({
     id,
     availableDates,
+    isSimulated = false,
     status = 'loading',
     error = '',
     onRetry,
@@ -54,7 +55,17 @@ const DateSelect = ({
                 <BlurCircle top='100px' right='0' />
 
                 <div>
-                    <div className="flex items-center gap-3 mb-5">
+                    <div className="flex flex-wrap items-center gap-3 mb-5">
+                        {isSimulated && (
+                            <span
+                                role="status"
+                                aria-label="Demo schedule"
+                                className="inline-flex items-center gap-1.5 rounded-full border border-primary/35 bg-primary/15 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-primary sm:text-xs"
+                            >
+                                <FlaskConical className="h-3.5 w-3.5" aria-hidden="true" />
+                                Demo schedule
+                            </span>
+                        )}
                         <p className='relative text-3xl md:text-4xl lg:text-5xl font-bold text-white'>
                             Choose Date
                         </p>

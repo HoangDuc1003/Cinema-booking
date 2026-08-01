@@ -39,7 +39,7 @@ const fulfillImages = (page) => page.route(/.*\.(?:png|jpg|jpeg)$/, (route) => r
   body: ONE_PIXEL_PNG,
 }));
 
-const installMovieDetailsRoutes = async (page, { dateTime, similarStatus = 200 } = {}) => {
+const installMovieDetailsRoutes = async (page, { dateTime, similarStatus = 200, simulated = false } = {}) => {
   await fulfillImages(page);
   await page.route(`**/api/show/tmdb/movie/${MOVIE_ID}/similar**`, (route) => route.fulfill({
     status: similarStatus,
@@ -56,7 +56,7 @@ const installMovieDetailsRoutes = async (page, { dateTime, similarStatus = 200 }
   await page.route(`**/api/show/${MOVIE_ID}`, (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
-    body: JSON.stringify({ success: true, movie, dateTime }),
+    body: JSON.stringify({ success: true, movie, dateTime, simulated }),
   }));
 };
 
@@ -122,4 +122,28 @@ test('Movie Details exposes empty and error states without generating showtimes'
   await expect(page.getByRole('heading', { name: 'Similar movies are unavailable' })).toBeVisible();
   await expect(page.locator('.movie-card')).toHaveCount(0);
   await expect(page.getByText(/Demo Showtimes|Demo Mode/)).toHaveCount(0);
+});
+
+test('demo showtimes show an English simulation label while keeping booking navigation enabled', async ({ page }) => {
+  const dateTime = Object.fromEntries(Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(`${SHOW_DATE}T00:00:00.000Z`);
+    date.setUTCDate(date.getUTCDate() + index);
+    const dateKey = date.toISOString().slice(0, 10);
+    return [dateKey, [{
+      showId: `66b0000000000000000000${String(index + 2).padStart(2, '0')}`,
+      time: `${dateKey}T03:00:00.000Z`,
+      price: 75,
+      hall: 'Hall A',
+      isVirtual: false,
+    }]];
+  }));
+  await installMovieDetailsRoutes(page, { dateTime, simulated: true });
+
+  await page.goto(`/movies/${MOVIE_ID}`);
+
+  await expect(page.getByRole('status', { name: 'Demo schedule' })).toBeVisible();
+  await expect(page.locator('#dateSelect button[aria-pressed]')).toHaveCount(7);
+  await expect(page.getByRole('button', { name: 'Book Now' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Book Now' }).click();
+  await expect(page).toHaveURL(new RegExp(`/movies/${MOVIE_ID}/${SHOW_DATE}$`));
 });

@@ -22,6 +22,7 @@ export const redisKeys = {
     movie: (movieId) => key('cache', 'movie', movieId),
     cinemas: () => key('cache', 'cinemas', 'all'),
     showtimes: (movieId) => key('cache', 'showtimes', movieId),
+    demoShowtimesLock: (movieId) => key('lock', 'demo-showtimes', movieId),
     showtimesPattern: () => key('cache', 'showtimes', '*'),
     bookableNowShowing: (region = 'VN', days = 7) => key('cache', 'shows', 'now-playing', region, days),
     bookableNowShowingPattern: () => key('cache', 'shows', 'now-playing', '*'),

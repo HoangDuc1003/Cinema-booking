@@ -15,6 +15,7 @@ const CinematicTrailerPlayer = ({
   className = '',
 }) => {
   const [audioState, setAudioState] = useState(() => ({ videoId, muted: true }));
+  const [volume, setVolume] = useState(35);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const prevVideoIdRef = useRef(videoId);
   const isMuted = audioState.videoId === videoId ? audioState.muted : true;
@@ -46,14 +47,37 @@ const CinematicTrailerPlayer = ({
     onError: handleError,
   });
 
+  useEffect(() => {
+    if (!player) return;
+    player.setVolume?.(volume);
+    if (isMuted) player.mute?.();
+  }, [isMuted, player, volume]);
+
   const toggleMute = () => {
     if (!player) return;
     if (isMuted) {
+      const nextVolume = volume || 35;
+      setVolume(nextVolume);
+      player.setVolume?.(nextVolume);
       player.unMute();
       setAudioState({ videoId, muted: false });
     } else {
       player.mute();
       setAudioState({ videoId, muted: true });
+    }
+  };
+
+  const handleVolumeChange = (event) => {
+    const nextVolume = Math.min(100, Math.max(0, Number(event.target.value) || 0));
+    setVolume(nextVolume);
+    if (!player) return;
+    player.setVolume?.(nextVolume);
+    if (nextVolume === 0) {
+      player.mute?.();
+      setAudioState({ videoId, muted: true });
+    } else if (isMuted) {
+      player.unMute?.();
+      setAudioState({ videoId, muted: false });
     }
   };
 
@@ -173,10 +197,13 @@ const CinematicTrailerPlayer = ({
       .cinematic-fade-overlay.active {
         opacity: 1;
       }
-      .cinematic-mute-btn {
+      .cinematic-volume-control {
         position: absolute;
-        bottom: 24px; right: 24px;
+        right: 24px;
+        bottom: 24px;
         z-index: 20;
+      }
+      .cinematic-mute-btn {
         width: 38px; height: 38px;
         border-radius: 50%;
         background: rgba(0,0,0,0.5);
@@ -189,6 +216,38 @@ const CinematicTrailerPlayer = ({
       }
       .cinematic-mute-btn:hover { background: rgba(255,255,255,0.15); }
       .cinematic-mute-btn.is-muted { color: #F84565; border-color: rgba(248,69,101,0.4); }
+      .cinematic-volume-popover {
+        position: absolute;
+        right: 0;
+        bottom: calc(100% + 10px);
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        width: 176px;
+        padding: 9px 10px;
+        border: 1px solid rgba(255,255,255,0.18);
+        border-radius: 12px;
+        background: rgba(8,10,16,0.92);
+        box-shadow: 0 14px 34px rgba(0,0,0,0.4);
+        backdrop-filter: blur(14px);
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        transform: translateY(6px) scale(0.96);
+        transform-origin: bottom right;
+        transition: opacity 180ms ease, visibility 180ms ease, transform 180ms ease;
+      }
+      .cinematic-volume-control:hover .cinematic-volume-popover,
+      .cinematic-volume-control:focus-within .cinematic-volume-popover {
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
+        transform: translateY(0) scale(1);
+      }
+      .cinematic-volume-popover svg { flex: 0 0 auto; width: 14px; height: 14px; color: rgba(255,255,255,0.72); }
+      .cinematic-volume-popover input[type="range"] { width: 100%; accent-color: #F84565; cursor: pointer; }
+      .cinematic-volume-popover input[type="range"]:focus-visible { outline: 2px solid rgba(255,255,255,0.92); outline-offset: 4px; }
+      .cinematic-volume-value { min-width: 31px; color: rgba(255,255,255,0.86); font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; }
       .cinematic-player-details {
         display: flex;
         align-items: center;
@@ -235,14 +294,31 @@ const CinematicTrailerPlayer = ({
           
           <div className="cinematic-player-frame" ref={containerRef} />
           
-          <button 
-            className={`cinematic-mute-btn ${isMuted ? 'is-muted' : ''}`} 
-            onClick={toggleMute} 
-            aria-label={isMuted ? 'Unmute' : 'Mute'}
-            aria-pressed={isMuted}
-          >
-            {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-          </button>
+          <div className="cinematic-volume-control">
+            <button
+              className={`cinematic-mute-btn ${isMuted ? 'is-muted' : ''}`}
+              onClick={toggleMute}
+              aria-label={isMuted ? 'Unmute trailer' : 'Mute trailer'}
+              aria-pressed={isMuted}
+            >
+              {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+            </button>
+            <div className="cinematic-volume-popover" role="group" aria-label="Trailer volume controls">
+              <VolumeX aria-hidden="true" />
+              <input
+                type="range"
+                min="0"
+                max="100"
+                step="5"
+                value={volume}
+                aria-label="Trailer volume"
+                aria-valuetext={`${volume} percent${isMuted ? ', muted' : ''}`}
+                onChange={handleVolumeChange}
+              />
+              <Volume2 aria-hidden="true" />
+              <span className="cinematic-volume-value">{volume}%</span>
+            </div>
+          </div>
         </div>
 
         <div className="cinematic-player-details">

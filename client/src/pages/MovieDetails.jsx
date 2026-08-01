@@ -20,6 +20,7 @@ const MovieDetails = () => {
   const { id } = useParams();
   const [show, setShow] = useState(null);
   const [availableDates, setAvailableDates] = useState({});
+  const [isSimulatedShowtime, setIsSimulatedShowtime] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [showtimeStatus, setShowtimeStatus] = useState('loading');
@@ -67,6 +68,7 @@ const MovieDetails = () => {
       setShowtimeStatus('loading');
       setShowtimeError('');
       setAvailableDates({});
+      setIsSimulatedShowtime(false);
 
       const [movieResult, showtimeResult] = await Promise.allSettled([
         fetchMovieDetails(id, { signal: controller.signal, fallbackMode: 'none' }),
@@ -77,6 +79,7 @@ const MovieDetails = () => {
       if (showtimeResult.status === 'fulfilled') {
         const realDates = showtimeResult.value.dateTime || {};
         setAvailableDates(realDates);
+        setIsSimulatedShowtime(showtimeResult.value.simulated === true);
         setShowtimeStatus(Object.keys(realDates).length ? 'ready' : 'empty');
       } else {
         setShowtimeStatus('error');
@@ -305,6 +308,7 @@ const MovieDetails = () => {
         <DateSelect
           id={show._id || show.id}
           availableDates={availableDates}
+          isSimulated={isSimulatedShowtime}
           status={showtimeStatus}
           error={showtimeError}
           onRetry={() => setShowtimeReloadToken((value) => value + 1)}
