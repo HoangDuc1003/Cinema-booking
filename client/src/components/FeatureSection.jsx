@@ -181,14 +181,7 @@ const FeatureSection = () => {
         <Loading />
       ) : feedState.movies.length ? (
         <>
-          {feedState.status === 'stale' && (
-            <div role="status" className="mb-4 flex items-center justify-between gap-4 rounded-xl border border-amber-300/20 bg-amber-300/10 px-4 py-3 text-sm text-amber-100">
-              <span>Showing the latest saved server releases while we reconnect.</span>
-              <button type="button" onClick={loadMovies} className="font-semibold underline underline-offset-4">
-                Retry
-              </button>
-            </div>
-          )}
+          {/* Cached data is displayed silently — no technical reconnect banner */}
           {/* MOBILE ONLY: Horizontal Carousel Rail */}
           <div className="block sm:hidden relative">
             <div

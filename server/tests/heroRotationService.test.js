@@ -74,18 +74,18 @@ test('Vietnam midnight refresh calculations cross month and year boundaries', ()
     const endOfYear = new Date('2026-12-31T00:00:00+07:00');
     assert.equal(
         calculateNextHeroRefreshAt(endOfJanuary).toISOString(),
-        '2026-02-01T17:00:00.000Z',
+        '2026-01-31T17:00:00.000Z',
     );
     assert.equal(
         calculateNextHeroRefreshAt(endOfYear).toISOString(),
-        '2027-01-01T17:00:00.000Z',
+        '2026-12-31T17:00:00.000Z',
     );
     assert.equal(getHeroLocalDateKey(endOfYear), '2026-12-31');
 
     const manualMiddayRefresh = new Date('2026-01-31T12:00:00+07:00');
     const nextAfterManual = calculateNextHeroRefreshAt(manualMiddayRefresh);
-    assert.equal(nextAfterManual.toISOString(), '2026-02-02T17:00:00.000Z');
-    assert.ok(nextAfterManual.getTime() - manualMiddayRefresh.getTime() >= 48 * 60 * 60 * 1000);
+    assert.equal(nextAfterManual.toISOString(), '2026-02-01T17:00:00.000Z');
+    assert.ok(nextAfterManual.getTime() - manualMiddayRefresh.getTime() >= 24 * 60 * 60 * 1000);
 });
 
 test('daily scheduler due-check waits until persisted nextRefreshAt', () => {
@@ -98,7 +98,7 @@ test('daily scheduler due-check waits until persisted nextRefreshAt', () => {
     assert.equal(isHeroRefreshDue({ now: new Date(), nextRefreshAt: null }), true);
     const window = getHeroRefreshWindow(new Date('2026-08-02T00:00:00+07:00'));
     assert.equal(window.timezone, 'Asia/Ho_Chi_Minh');
-    assert.equal(window.nextRefreshAt.getTime() - window.startsAt.getTime(), 48 * 60 * 60 * 1000);
+    assert.equal(window.nextRefreshAt.getTime() - window.startsAt.getTime(), 24 * 60 * 60 * 1000);
 });
 
 test('native asset validation rejects mock, generic, unbound, and incomplete sources', () => {

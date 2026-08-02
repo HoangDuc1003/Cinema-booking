@@ -61,8 +61,8 @@ test('missing native Hero trailers keep a lower-trailer action instead of showin
   const content = await readSource('components/hero/HeroContent.jsx');
 
   assert.match(content, /const trailerUnavailable = failureReason === HERO_FAILURE_REASONS\.MISSING_VIDEO/);
-  assert.match(content, /trailerUnavailable \|\| trailerFailed/);
-  assert.match(content, /View trailer below/);
+  assert.match(content, /Trailer/);
   assert.match(content, /const showTrailerButton = !trailerActive/);
+  assert.doesNotMatch(content, /View trailer below/);
   assert.doesNotMatch(content, /Use Play trailer to try again/);
 });

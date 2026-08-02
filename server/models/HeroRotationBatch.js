@@ -158,6 +158,11 @@ const heroRotationBatchSchema = new mongoose.Schema(
             type: mongoose.Schema.Types.Mixed,
             default: () => ({}),
         },
+        dailyEntropy: {
+            type: String,
+            trim: true,
+            default: '',
+        },
         failureReason: { type: String, trim: true, default: '' },
     },
     { timestamps: true },

@@ -51,9 +51,9 @@ const HeroContent = ({
 
   const trailerLabel = trailerLoading
     ? 'Loading\u2026'
-    : trailerUnavailable || trailerFailed
-      ? 'View trailer below'
-      : 'Play trailer';
+    : trailerFailed
+      ? 'Retry trailer'
+      : 'Trailer';
 
   const showTrailerButton = !trailerActive;
 

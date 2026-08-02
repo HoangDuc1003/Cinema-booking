@@ -548,6 +548,9 @@ const toPublicPayload = async (batch, { cache = 'miss' } = {}) => {
             },
         );
     }
+    const dateKey = getHeroLocalDateKey(
+        batch.generatedAt || batch.createdAt || new Date(),
+    );
     return {
         version: batch.version,
         batchId: String(batch._id),
@@ -555,6 +558,8 @@ const toPublicPayload = async (batch, { cache = 'miss' } = {}) => {
         generatedAt: batch.generatedAt || batch.createdAt,
         nextRefreshAt: batch.nextRefreshAt,
         timezone: batch.timezone || HERO_REFRESH_TIMEZONE,
+        dateKey,
+        dailyEntropy: batch.dailyEntropy || String(batch._id),
         settings: {
             mode: 'auto',
             effectiveMode: 'auto',
@@ -592,6 +597,7 @@ const loadPosterOnlyFallback = async (now = new Date()) => {
         movies = [...movies, ...extras];
     }
     const window = getHeroRefreshWindow(now);
+    const dateKey = getHeroLocalDateKey(now);
     return {
         version: 0,
         batchId: null,
@@ -599,6 +605,8 @@ const loadPosterOnlyFallback = async (now = new Date()) => {
         generatedAt: null,
         nextRefreshAt: window.nextRefreshAt,
         timezone: window.timezone,
+        dateKey,
+        dailyEntropy: randomUUID(),
         settings: {
             mode: settings.mode,
             effectiveMode: 'poster-only',
@@ -655,6 +663,8 @@ export const createHeroEtag = (payload) => {
     const identity = JSON.stringify({
         batchId: payload?.batchId || 'poster',
         version: payload?.version ?? 0,
+        dateKey: payload?.dateKey || '',
+        dailyEntropy: payload?.dailyEntropy || '',
         movies: (payload?.movies || []).map((movie) => ({
             id: movie.id || movie._id,
             videoVersion: movie.heroVideoVersion || '',
@@ -1073,6 +1083,7 @@ export const refreshHeroRotation = async ({
                     fencingToken: lock.fencingToken,
                     status: 'building',
                     failureReason: '',
+                    dailyEntropy: randomUUID(),
                     sourceMetadata: { source, requestedBy },
                 },
             },

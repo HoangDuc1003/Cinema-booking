@@ -79,8 +79,8 @@ export const validateHeroRuntimeConfig = (env = process.env) => {
     const refreshIntervalHours = readNumber(
         env,
         'HERO_REFRESH_INTERVAL_HOURS',
-        48,
-        { integer: true, min: 48, max: 48 },
+        24,
+        { integer: true, min: 24, max: 24 },
     );
     const requireNativeVideo = readBoolean(env, 'HERO_REQUIRE_NATIVE_VIDEO', true);
     if (!requireNativeVideo) {

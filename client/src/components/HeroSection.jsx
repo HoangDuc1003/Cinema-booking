@@ -31,6 +31,12 @@ import {
   useSaveData,
   useSlowNetwork,
 } from './hero/useHeroEnvironment';
+import {
+  getOrCreateAnonymousViewerId,
+  getOrComputeDailyOrder,
+  applyDailyOrder,
+  getVietnamDateKey,
+} from '../utils/heroDailyShuffle';
 import './hero/hero.css';
 
 const HERO_POSTER_SWAP_DELAY_MS = 400;
@@ -411,13 +417,29 @@ const HeroSection = ({ autoPreview = false, onTrailerRequest = null }) => {
       throw new Error('Hero returned a movie without usable artwork.');
     }
 
-    saveHeroMoviesCache(preparedMovies, {
+    // Per-user deterministic daily shuffle
+    const viewerKey = getOrCreateAnonymousViewerId();
+    const meta = data.meta || data;
+    const dailyOrderIds = getOrComputeDailyOrder({
+      movies: preparedMovies,
+      meta: {
+        dateKey: meta.dateKey || '',
+        rotationVersion: String(meta.version ?? ''),
+        dailyEntropy: meta.dailyEntropy || '',
+      },
+      viewerKey,
+    });
+    const shuffledMovies = dailyOrderIds.length > 0
+      ? applyDailyOrder(preparedMovies, dailyOrderIds)
+      : preparedMovies;
+
+    saveHeroMoviesCache(shuffledMovies, {
       source: 'server',
-      meta: data.meta,
+      meta: data.meta || data,
       settings: data.settings,
     });
     setSettings(data.settings || {});
-    setCatalogMeta(data.meta || {});
+    setCatalogMeta(data.meta || data);
     setTargetVolume((current) => (
       audioConsentRef.current === 'enabled'
         ? current
@@ -425,19 +447,19 @@ const HeroSection = ({ autoPreview = false, onTrailerRequest = null }) => {
     ));
     setCatalogSource('server');
 
-    if (isSameMovieOrder(moviesRef.current, preparedMovies)) {
-      moviesRef.current = preparedMovies;
-      setMovies(preparedMovies);
+    if (isSameMovieOrder(moviesRef.current, shuffledMovies)) {
+      moviesRef.current = shuffledMovies;
+      setMovies(shuffledMovies);
       return;
     }
 
     stopPlayback();
     currentIndexRef.current = 0;
-    moviesRef.current = preparedMovies;
+    moviesRef.current = shuffledMovies;
     failedMovieKeysRef.current.clear();
     autoAttemptedKeysRef.current.clear();
     setCurrentIndex(0);
-    setMovies(preparedMovies);
+    setMovies(shuffledMovies);
   }, [stopPlayback]);
 
   useEffect(() => {
@@ -516,10 +538,19 @@ const HeroSection = ({ autoPreview = false, onTrailerRequest = null }) => {
   }, []);
 
   useEffect(() => {
-    const handleVisibility = () => setDocumentVisible(!document.hidden);
+    const handleVisibility = () => {
+      setDocumentVisible(!document.hidden);
+      // Check if dateKey has changed (midnight rotation)
+      if (!document.hidden && catalogMeta?.dateKey) {
+        const currentDateKey = getVietnamDateKey();
+        if (currentDateKey !== catalogMeta.dateKey) {
+          setReloadToken((token) => token + 1);
+        }
+      }
+    };
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, []);
+  }, [catalogMeta?.dateKey]);
 
   useEffect(() => {
     if (!videoSource || manualPlaybackRef.current || !automaticMediaBlocked) return;

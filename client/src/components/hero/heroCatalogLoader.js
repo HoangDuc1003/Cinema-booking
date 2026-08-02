@@ -110,6 +110,8 @@ const normalizeCacheMeta = (meta = {}) => ({
   generatedAt: meta.generatedAt ?? '',
   nextRefreshAt: meta.nextRefreshAt ?? '',
   timezone: meta.timezone ?? 'Asia/Ho_Chi_Minh',
+  dateKey: meta.dateKey ?? '',
+  dailyEntropy: meta.dailyEntropy ?? '',
   fetchedAt: meta.fetchedAt ?? '',
 });
 
