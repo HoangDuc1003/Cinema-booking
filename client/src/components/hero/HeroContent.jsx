@@ -16,6 +16,7 @@ const HeroContent = ({
   trailerLoading,
   trailerFailed,
   trailerAvailable,
+  trailerMode,
   failureReason,
   onBook,
   onDetails,
@@ -49,11 +50,16 @@ const HeroContent = ({
   const contentKey = movieKey || movie.id || movie._id || title;
   const flyDirection = (index || 0) % 2 === 0 ? 'hero-fly-left' : 'hero-fly-right';
 
+  const isSectionMode = trailerMode === 'section';
+  const effectiveTrailerFailed = trailerFailed && !isSectionMode;
+
   const trailerLabel = trailerLoading
     ? 'Loading\u2026'
-    : trailerFailed
-      ? 'Retry trailer'
-      : 'Trailer';
+    : trailerUnavailable
+      ? 'Trailer unavailable'
+      : effectiveTrailerFailed
+        ? 'Retry trailer'
+        : 'Trailer';
 
   const showTrailerButton = !trailerActive;
 
@@ -147,7 +153,7 @@ const HeroContent = ({
                 onCtaClick?.();
                 onToggleTrailer();
               }}
-              disabled={trailerLoading}
+              disabled={trailerLoading || trailerUnavailable}
               aria-busy={trailerLoading}
               aria-label={`${trailerLabel} for ${title}`}
               className="hero-action hero-action--secondary"

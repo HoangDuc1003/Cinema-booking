@@ -1,14 +1,8 @@
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react"
-import axios from "axios";
 import { useUser, useAuth } from "@clerk/react";
 import { useLocation, useNavigate } from "react-router-dom";
 import toast from 'react-hot-toast'
-
-// Use base URL from env if available, otherwise fallback to empty string 
-const baseURL = import.meta.env.VITE_BASE_URL || "";
-const api = axios.create({
-    baseURL: baseURL
-});
+import { apiClient as api, getNormalizedApiBase } from '../lib/apiClient.js';
 
 // eslint-disable-next-line react-refresh/only-export-components
 export const AppContext = createContext()

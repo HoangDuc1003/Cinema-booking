@@ -131,6 +131,7 @@ export const createGetHomeHeroHandler = ({
             settings: payload.settings,
             movies: payload.movies,
             rotation: payload.rotation,
+            meta: payload.meta,
             cache: payload.cache,
         });
     } catch (error) {

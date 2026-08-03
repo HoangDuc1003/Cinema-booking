@@ -12,6 +12,7 @@ import {
   isHeroTrailerMockEnabled,
 } from './hero/heroMock';
 import { resolveConfiguredHeroVideoSource } from './hero/heroVideoSource';
+import { getHeroTrailerMode } from './hero/heroTrailerMode';
 import {
   HERO_FAILURE_REASONS,
   HERO_PHASES,
@@ -123,6 +124,8 @@ const HeroSection = ({ autoPreview = false, onTrailerRequest = null }) => {
   const navigate = useNavigate();
   const [initialPayload] = useState(() => getInitialHeroPayload());
   const [initialAudio] = useState(readStoredAudio);
+
+  const trailerMode = getHeroTrailerMode();
 
   const [movies, setMovies] = useState(initialPayload?.movies || []);
   const [settings, setSettings] = useState(initialPayload?.settings || {});
@@ -270,9 +273,10 @@ const HeroSection = ({ autoPreview = false, onTrailerRequest = null }) => {
   const startPlaybackForIndex = useCallback((index, {
     intent = PLAYBACK_INTENT.AUTO,
   } = {}) => {
+    if (trailerMode === 'section') return false;
     const movie = moviesRef.current[index];
-    if (!movie || !heroVisible || !documentVisible) return false;
     const manual = intent === PLAYBACK_INTENT.MANUAL;
+    if (!movie || (!manual && (!heroVisible || !documentVisible))) return false;
     if (automaticMediaBlocked && !manual) return false;
 
     const source = resolveMovieSource(movie);
@@ -322,6 +326,7 @@ const HeroSection = ({ autoPreview = false, onTrailerRequest = null }) => {
     nextGeneration,
     resolveMovieSource,
     settings,
+    trailerMode,
   ]);
 
   const switchMovie = useCallback((targetIndex, {
@@ -417,18 +422,32 @@ const HeroSection = ({ autoPreview = false, onTrailerRequest = null }) => {
       throw new Error('Hero returned a movie without usable artwork.');
     }
 
-    // Per-user deterministic daily shuffle
+    // Per-user deterministic daily shuffle (bypassed in manual mode)
     const viewerKey = getOrCreateAnonymousViewerId();
     const meta = data.meta || data;
-    const dailyOrderIds = getOrComputeDailyOrder({
-      movies: preparedMovies,
-      meta: {
-        dateKey: meta.dateKey || '',
-        rotationVersion: String(meta.version ?? ''),
-        dailyEntropy: meta.dailyEntropy || '',
-      },
-      viewerKey,
-    });
+    const settings = data.settings || {};
+    const isManualMode = settings.mode === 'manual'
+      || settings.configuredMode === 'manual'
+      || settings.effectiveMode === 'manual'
+      || meta.mode === 'manual'
+      || meta.configuredMode === 'manual'
+      || meta.effectiveMode === 'manual'
+      || meta.source === 'manual-selection';
+
+    const dailyOrderIds = !isManualMode
+      ? getOrComputeDailyOrder({
+          movies: preparedMovies,
+          meta: {
+            dateKey: meta.dateKey || '',
+            rotationVersion: String(meta.version ?? ''),
+            dailyEntropy: meta.dailyEntropy || '',
+            mode: meta.mode || settings.mode,
+            configuredMode: meta.configuredMode || settings.configuredMode,
+            effectiveMode: meta.effectiveMode || settings.effectiveMode,
+          },
+          viewerKey,
+        })
+      : [];
     const shuffledMovies = dailyOrderIds.length > 0
       ? applyDailyOrder(preparedMovies, dailyOrderIds)
       : preparedMovies;
@@ -848,11 +867,14 @@ const HeroSection = ({ autoPreview = false, onTrailerRequest = null }) => {
   }, [audioStatus, enableSound]);
 
   const handlePlayTrailer = useCallback(() => {
+    if (trailerMode === 'section') return;
     const key = getHeroMovieKey(currentMovie, currentIndex);
     failedMovieKeysRef.current.delete(key);
     setPlaybackStatus(HERO_PLAYBACK_STATUS.IDLE);
     setFailureReason(null);
-    if (!startPlaybackForIndex(currentIndex, { intent: PLAYBACK_INTENT.MANUAL })) {
+    if (!startPlaybackForIndex(currentIndex, {
+      intent: PLAYBACK_INTENT.MANUAL,
+    })) {
       scheduleFailureHandoff(currentIndex);
     }
   }, [
@@ -860,6 +882,7 @@ const HeroSection = ({ autoPreview = false, onTrailerRequest = null }) => {
     currentMovie,
     scheduleFailureHandoff,
     startPlaybackForIndex,
+    trailerMode,
   ]);
 
   const trailerAvailable = Boolean(resolveMovieSource(currentMovie));
@@ -873,13 +896,25 @@ const HeroSection = ({ autoPreview = false, onTrailerRequest = null }) => {
     scroll();
     window.requestAnimationFrame(() => window.requestAnimationFrame(scroll));
   }, [currentMovie, onTrailerRequest, reducedMotion]);
+
   const handleTrailerAction = useCallback(() => {
-    if (!trailerAvailable || trailerFailed) {
+    if (trailerMode === 'section') {
       scrollToTrailerSection();
       return;
     }
-    handlePlayTrailer();
-  }, [handlePlayTrailer, scrollToTrailerSection, trailerAvailable, trailerFailed]);
+
+    if (trailerMode === 'native') {
+      handlePlayTrailer();
+      return;
+    }
+
+    if (trailerAvailable) {
+      handlePlayTrailer();
+      return;
+    }
+
+    scrollToTrailerSection();
+  }, [handlePlayTrailer, scrollToTrailerSection, trailerAvailable, trailerMode]);
 
   if (!currentMovie) {
     if (!catalogSettled) {
@@ -1018,6 +1053,7 @@ const HeroSection = ({ autoPreview = false, onTrailerRequest = null }) => {
         trailerLoading={trailerLoading}
         trailerFailed={trailerFailed}
         trailerAvailable={trailerAvailable}
+        trailerMode={trailerMode}
         failureReason={failureReason}
         onBook={navigateToMovie}
         onDetails={navigateToMovie}

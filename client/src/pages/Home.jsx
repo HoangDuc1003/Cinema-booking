@@ -8,7 +8,7 @@ import React, {
 import HeroSection from '../components/HeroSection';
 
 const FeatureSection = lazy(() => import('../components/FeatureSection'));
-const TrailerSection = lazy(() => import('../components/TrailerSection'));
+const NativeTrailerSection = lazy(() => import('../components/NativeTrailerSection'));
 
 const SectionSkeleton = ({ trailer = false }) => (
   <div className="px-4 py-10 animate-pulse sm:px-6 md:px-16 lg:px-24 xl:px-40">
@@ -60,7 +60,7 @@ const Home = () => {
         <FeatureSection />
       </DeferredSection>
       <DeferredSection anchorId="trailers" fallback={<SectionSkeleton trailer />}>
-        <TrailerSection sectionId="home-trailer-section" featuredMovie={requestedTrailerMovie} />
+        <NativeTrailerSection sectionId="home-trailer-section" featuredMovie={requestedTrailerMovie} />
       </DeferredSection>
     </>
   );

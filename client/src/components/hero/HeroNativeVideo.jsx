@@ -358,6 +358,14 @@ const HeroNativeVideo = ({
     failedGenerationRef.current = null;
     automaticResumeCountRef.current = 0;
     clearTimers();
+    const video = videoRef.current;
+    if (video) {
+      try {
+        video.load();
+      } catch {
+        // The element load may fail safely if detached.
+      }
+    }
   }, [clearTimers, generation, src]);
 
   useEffect(() => () => {

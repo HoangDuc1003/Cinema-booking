@@ -561,7 +561,8 @@ const toPublicPayload = async (batch, { cache = 'miss' } = {}) => {
         dateKey,
         dailyEntropy: batch.dailyEntropy || String(batch._id),
         settings: {
-            mode: 'auto',
+            mode: settings.mode,
+            configuredMode: settings.mode,
             effectiveMode: 'auto',
             heroSoundDefaultEnabled: settings.heroSoundDefaultEnabled,
             heroDefaultVolume: settings.heroDefaultVolume,
@@ -575,7 +576,58 @@ const toPublicPayload = async (batch, { cache = 'miss' } = {}) => {
             batchSize: HERO_ACTIVE_SIZE,
             poolSize: HERO_POOL_SIZE,
         },
+        meta: {
+            configuredMode: settings.mode,
+            effectiveMode: 'auto',
+            source: 'auto-rotation',
+            version: batch.version,
+            buildSha: String(process.env.BUILD_SHA || process.env.VERCEL_GIT_COMMIT_SHA || 'dev-local'),
+            deploymentId: String(process.env.VERCEL_DEPLOYMENT_ID || 'local-dev'),
+            environment: process.env.NODE_ENV || 'development',
+        },
         cache,
+    };
+};
+
+const loadManualPayload = async (settings, now = new Date()) => {
+    const rawMovies = await loadOrderedMovies(settings.movieIds);
+    const window = getHeroRefreshWindow(now);
+    const dateKey = getHeroLocalDateKey(now);
+    return {
+        version: 1,
+        batchId: 'manual',
+        batchKey: `manual-${dateKey}`,
+        generatedAt: settings.updatedAt || now,
+        nextRefreshAt: window.nextRefreshAt,
+        timezone: window.timezone,
+        dateKey,
+        dailyEntropy: 'manual',
+        settings: {
+            mode: 'manual',
+            configuredMode: 'manual',
+            effectiveMode: 'manual',
+            heroSoundDefaultEnabled: settings.heroSoundDefaultEnabled,
+            heroDefaultVolume: settings.heroDefaultVolume,
+            updatedAt: settings.updatedAt,
+        },
+        movies: rawMovies.map((movie) => normalizeHeroMovie(movie)),
+        rotation: {
+            key: `manual-${dateKey}`,
+            startsAt: window.startsAt,
+            endsAt: window.nextRefreshAt,
+            batchSize: rawMovies.length,
+            poolSize: rawMovies.length,
+        },
+        meta: {
+            configuredMode: 'manual',
+            effectiveMode: 'manual',
+            source: 'manual-selection',
+            version: 1,
+            buildSha: String(process.env.BUILD_SHA || process.env.VERCEL_GIT_COMMIT_SHA || 'dev-local'),
+            deploymentId: String(process.env.VERCEL_DEPLOYMENT_ID || 'local-dev'),
+            environment: process.env.NODE_ENV || 'development',
+        },
+        cache: 'manual',
     };
 };
 
@@ -609,6 +661,7 @@ const loadPosterOnlyFallback = async (now = new Date()) => {
         dailyEntropy: randomUUID(),
         settings: {
             mode: settings.mode,
+            configuredMode: settings.mode,
             effectiveMode: 'poster-only',
             heroSoundDefaultEnabled: settings.heroSoundDefaultEnabled,
             heroDefaultVolume: settings.heroDefaultVolume,
@@ -622,11 +675,24 @@ const loadPosterOnlyFallback = async (now = new Date()) => {
             batchSize: HERO_ACTIVE_SIZE,
             poolSize: 0,
         },
+        meta: {
+            configuredMode: settings.mode,
+            effectiveMode: 'poster-only',
+            source: 'poster-fallback',
+            version: 0,
+            buildSha: String(process.env.BUILD_SHA || process.env.VERCEL_GIT_COMMIT_SHA || 'dev-local'),
+            deploymentId: String(process.env.VERCEL_DEPLOYMENT_ID || 'local-dev'),
+            environment: process.env.NODE_ENV || 'development',
+        },
         cache: 'fallback',
     };
 };
 
 export const getPublicHeroRotation = async ({ now = new Date() } = {}) => {
+    const settings = await getHeroSettings();
+    if (settings.mode === 'manual') {
+        return loadManualPayload(settings, now);
+    }
     const config = await SiteConfig.findOne({ key: 'heroRotation' })
         .select('heroRotation')
         .lean();

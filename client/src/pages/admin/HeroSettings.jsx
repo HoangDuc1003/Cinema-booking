@@ -214,19 +214,20 @@ const HeroSettings = () => {
 
       const hero = data.hero || {};
       const nextRotation = hero.rotation || null;
-      const activeMovies = nextRotation?.activeMovies || [];
       const combinedMovies = [
         ...(nextRotation?.pool || []),
         ...(hero.availableMovies || []),
+        ...(hero.selectedMovies || []),
       ];
       const uniqueMovies = [...new Map(
         combinedMovies.map((movie) => [String(movie._id || movie.id), movie]),
       ).values()];
       setRotation(nextRotation);
       setMode(hero.settings?.mode || 'auto');
-      setSelectedIds((
-        activeMovies.length ? activeMovies : hero.selectedMovies || []
-      ).map((movie) => String(movie._id || movie.id)));
+      const savedMovieIds = hero.settings?.movieIds?.length
+        ? hero.settings.movieIds
+        : (hero.selectedMovies || []).map((movie) => String(movie._id || movie.id));
+      setSelectedIds(savedMovieIds.map(String));
       setAvailableMovies(uniqueMovies);
       setSoundDefaultEnabled(Boolean(hero.settings?.heroSoundDefaultEnabled));
       setDefaultVolume(Number(hero.settings?.heroDefaultVolume ?? 0.35));
@@ -266,7 +267,7 @@ const HeroSettings = () => {
 
   const handleSave = async () => {
     if (mode === 'manual' && selectedIds.length !== MAX_HERO_MOVIES) {
-      toast.error(`Choose exactly ${MAX_HERO_MOVIES} movies for the emergency poster fallback.`);
+      toast.error(`Choose exactly ${MAX_HERO_MOVIES} movies for manual hero selection.`);
       return;
     }
 
@@ -296,9 +297,14 @@ const HeroSettings = () => {
       <div className="flex flex-col gap-6">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-4 bg-white/[0.04] border border-white/10 rounded-lg">
           <div>
-            <p className="text-sm uppercase tracking-widest text-gray-400">Home page hero</p>
+            <div className="flex items-center gap-3">
+              <p className="text-sm uppercase tracking-widest text-gray-400">Home page hero</p>
+              <span className={`px-2.5 py-0.5 text-xs font-semibold rounded-full border ${mode === 'manual' ? 'bg-green-500/20 text-green-400 border-green-500/40' : 'bg-blue-500/20 text-blue-400 border-blue-500/40'}`}>
+                Currently live on Home: {mode === 'manual' ? 'Manual Selection' : 'Auto-Rotation'}
+              </span>
+            </div>
             <p className="text-gray-300 mt-1">
-              An active 15-movie rotation is authoritative. Manual mode only defines the ordered emergency poster fallback.
+              Manual mode displays your exact 5 manually selected movies in order on the Home page. Auto mode rotates movies using the native hero pool.
             </p>
           </div>
 
@@ -388,7 +394,14 @@ const HeroSettings = () => {
 
         <div className="flex flex-col justify-between gap-4 rounded-lg border border-white/10 bg-white/[0.04] p-4 lg:flex-row lg:items-center">
           <div>
-            <p className="text-sm uppercase tracking-widest text-gray-400">Native Hero pool</p>
+            <div className="flex items-center gap-2">
+              <p className="text-sm uppercase tracking-widest text-gray-400">Native Hero pool (Auto mode)</p>
+              {mode === 'auto' ? (
+                <span className="px-2 py-0.5 text-xs font-semibold rounded bg-green-500/20 text-green-400 border border-green-500/40">Currently Live on Home</span>
+              ) : (
+                <span className="px-2 py-0.5 text-xs font-medium rounded bg-gray-500/20 text-gray-400 border border-white/10">Auto-Rotation Inactive</span>
+              )}
+            </div>
             <p className="mt-1 text-gray-300">
               Build 5 newest, 5 hot, and 5 discovery movies, then activate a seeded five-movie order.
             </p>
@@ -496,90 +509,88 @@ const HeroSettings = () => {
                 type="button"
                 onClick={handleCatalogRefresh}
                 disabled={refreshingCatalog}
-                className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary hover:bg-primary-dull disabled:opacity-60 transition"
+                className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary hover:bg-primary-dull disabled:opacity-60 transition text-sm cursor-pointer"
               >
-                {refreshingCatalog ? 'Refreshing...' : 'Refresh Catalog'}
+                <RotateCcwIcon className={`w-4 h-4 ${refreshingCatalog ? 'animate-spin' : ''}`} />
+                {refreshingCatalog ? 'Refreshing Catalog...' : 'Refresh Catalog'}
               </button>
-
               {refreshStatus && (
-                <span className={`text-sm font-medium ${
-                  refreshStatus === 'Succeeded' ? 'text-green-500' :
-                  refreshStatus === 'Failed' ? 'text-red-500' :
-                  'text-gray-400'
-                }`}>
-                  {refreshStatus}
-                </span>
+                <span className="text-xs text-gray-400">{refreshStatus}</span>
               )}
             </div>
           </div>
         </div>
 
         <div className="grid lg:grid-cols-[360px_1fr] gap-6">
-          <div className="bg-white/[0.04] border border-white/10 rounded-lg p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="font-semibold">Selected Hero</p>
-                <p className="text-sm text-gray-400">{selectedIds.length}/{MAX_HERO_MOVIES} movies</p>
+          <div className="bg-white/[0.04] border border-white/10 rounded-lg p-4 flex flex-col gap-4">
+            <div>
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-semibold">Selected Hero ({selectedMovies.length}/{MAX_HERO_MOVIES})</p>
+                {mode === 'manual' ? (
+                  <span className="px-2 py-0.5 text-xs font-semibold rounded bg-green-500/20 text-green-400 border border-green-500/40">Currently Live on Home</span>
+                ) : (
+                  <span className="px-2 py-0.5 text-xs font-medium rounded bg-gray-500/20 text-gray-400 border border-white/10">Manual Inactive</span>
+                )}
               </div>
-              <button
-                type="button"
-                onClick={() => setSelectedIds([])}
-                className="p-2 rounded-md border border-white/10 text-gray-300 hover:text-white hover:bg-white/10 transition"
-                aria-label="Clear selected hero movies"
-              >
-                <RotateCcwIcon className="w-4 h-4" />
-              </button>
+              <p className="text-xs text-gray-400 mt-1">
+                Select exactly 5 movies to display on the home hero banner when Manual mode is enabled. Reorder using arrow buttons.
+              </p>
             </div>
 
-            <div className="mt-4 flex flex-col gap-3">
+            <div className="flex flex-col gap-3">
               {selectedMovies.length === 0 ? (
-                <div className="min-h-36 flex items-center justify-center rounded-lg border border-dashed border-white/15 text-sm text-gray-500 text-center px-6">
-                  Pick movies from the library to build a manual hero.
+                <div className="p-4 rounded-lg border border-dashed border-white/15 text-center text-sm text-gray-500">
+                  No movies selected yet. Click movies from the library to add them.
                 </div>
-              ) : selectedMovies.map((movie, index) => (
-                <div key={movie._id || movie.id} className="grid grid-cols-[56px_1fr_auto] gap-3 items-center p-2 bg-black/25 border border-white/10 rounded-lg">
-                  <img
-                    src={getImageUrl(movie.poster_path || movie.backdrop_path)}
-                    alt={movie.title}
-                    loading="lazy"
-                    decoding="async"
-                    className="w-14 h-20 object-cover rounded-md bg-black/40"
-                  />
-                  <div className="min-w-0">
-                    <p className="font-medium truncate">{index + 1}. {movie.title}</p>
-                    <p className="text-xs text-gray-500">{movie.release_date?.slice(0, 4) || 'N/A'}</p>
-                    <HeroVideoUploader movie={movie} onUpdated={fetchHeroSettings} />
+              ) : (
+                selectedMovies.map((movie, index) => (
+                  <div
+                    key={movie._id || movie.id}
+                    className="flex items-center gap-3 p-2 rounded-lg bg-black/30 border border-white/10"
+                  >
+                    <img
+                      src={getImageUrl(movie.poster_path || movie.backdrop_path)}
+                      alt={movie.title}
+                      loading="lazy"
+                      decoding="async"
+                      className="w-14 h-20 object-cover rounded-md bg-black/40"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-sm truncate">{index + 1}. {movie.title}</p>
+                      <p className="text-xs text-gray-500">{movie.release_date?.slice(0, 4) || 'N/A'}</p>
+                      <HeroVideoUploader movie={movie} onUpdated={fetchHeroSettings} />
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => moveSelectedMovie(index, -1)}
+                        className="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-white/10 disabled:opacity-30"
+                        disabled={index === 0}
+                        aria-label="Move movie up"
+                      >
+                        <ArrowUpIcon className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveSelectedMovie(index, 1)}
+                        className="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-white/10 disabled:opacity-30"
+                        disabled={index === selectedMovies.length - 1}
+                        aria-label="Move movie down"
+                      >
+                        <ArrowDownIcon className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => toggleMovie(movie._id || movie.id)}
+                        className="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-white/10"
+                        aria-label="Remove movie"
+                      >
+                        <XIcon className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => moveSelectedMovie(index, -1)}
-                      className="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-white/10 disabled:opacity-30"
-                      disabled={index === 0}
-                      aria-label="Move movie up"
-                    >
-                      <ArrowUpIcon className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => moveSelectedMovie(index, 1)}
-                      className="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-white/10 disabled:opacity-30"
-                      disabled={index === selectedMovies.length - 1}
-                      aria-label="Move movie down"
-                    >
-                      <ArrowDownIcon className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => toggleMovie(movie._id || movie.id)}
-                      className="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-white/10"
-                      aria-label="Remove movie"
-                    >
-                      <XIcon className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
 

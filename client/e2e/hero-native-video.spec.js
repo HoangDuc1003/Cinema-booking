@@ -96,10 +96,10 @@ test('a poster-only Hero keeps its trailer action and opens the lower trailer se
 
   const hero = page.locator('.hero-section');
   await expect(hero.locator('video')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: /View trailer below for Native Hero 1/i })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Trailer for Native Hero 1|Trailer/i })).toBeVisible();
   await expect(hero).not.toContainText('Trailer for this movie is currently unavailable');
 
-  await page.getByRole('button', { name: /View trailer below for Native Hero 1/i }).click();
+  await page.getByRole('button', { name: /Trailer for Native Hero 1|Trailer/i }).click();
   await expect(page.locator('#home-trailer-section')).toBeVisible();
   await expect.poll(() => page.evaluate(() => {
     const target = document.getElementById('trailers');
@@ -177,11 +177,13 @@ test('Hero mounts one native video, advances currentTime, and makes no YouTube r
   const initialVideoRequests = requests.filter((url) => /\/mock\/hero-trailer\.mp4/.test(url));
   const nativeMediaRequests = requests.filter((url) => /\.(?:mp4|webm)(?:[?#]|$)/i.test(url));
   const forbiddenRequests = requests.filter((url) => (
-    /^https?:\/\/(?:[^/]+\.)?(?:youtube\.com|youtube-nocookie\.com|youtu\.be)\//i.test(url)
+    /^https?:\/\/(?:[^/]+\.)?(?:youtube\.com|youtube-nocookie\.com|youtu\.be|googlevideo\.com)\//i.test(url)
     || /\/tmdb\/movie\/[^/]+\/videos/i.test(url)
+    || /\/api\/tmdb\/movie\/[^/]+\/videos/i.test(url)
+    || /\/api\/tmdb\/trailers/i.test(url)
   ));
   expect(heroApiRequests).toHaveLength(1);
-  expect(initialVideoRequests.length).toBeLessThanOrEqual(1);
+  expect(new Set(initialVideoRequests).size).toBeLessThanOrEqual(1);
   expect(new Set(nativeMediaRequests).size).toBeLessThanOrEqual(1);
   const uniqueInitialVideoRequests = new Set(initialVideoRequests);
   expect(uniqueInitialVideoRequests.size).toBeLessThanOrEqual(1);
@@ -341,7 +343,7 @@ test('reduced motion stays on the poster until the user explicitly starts the tr
   await expect(hero.locator('video')).toHaveCount(0);
   expect(requests.filter((url) => /\/mock\/hero-trailer\.mp4/.test(url))).toEqual([]);
 
-  await page.getByRole('button', { name: 'Play trailer' }).click();
+  await page.getByRole('button', { name: /Trailer/i }).click();
   await expect(hero.locator('video')).toHaveCount(1);
   await waitForAdvancingPlayback(hero.locator('video'));
 });

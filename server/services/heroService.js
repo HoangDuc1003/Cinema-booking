@@ -10,6 +10,7 @@ import {
     normalizeHeroMovie,
     rerandomizeActiveHero,
     updateHeroSoundSettings,
+    validateNativeHeroMovie,
 } from './heroRotationService.js';
 
 const HERO_CONFIG_KEY = 'homeHero';
@@ -103,28 +104,31 @@ const getLegacyAvailableMovies = async () => {
 };
 
 export const getAdminHomeHero = async () => {
-    const [rotation, settings, availableMovies] = await Promise.all([
+    const [rotation, settings, availableMovies, publicPayload] = await Promise.all([
         getAdminHeroRotation(),
         getHomeHeroConfig(),
         getLegacyAvailableMovies(),
+        getPublicHomeHero(),
     ]);
-    const selectedMovies = rotation.activeMovies?.length
-        ? rotation.activeMovies
-        : await loadMoviesByIds(settings.movieIds).then((movies) => (
-            movies.map((movie) => normalizeHeroMovie(movie, { posterOnly: true }))
-        ));
+    const rawManualMovies = await loadMoviesByIds(settings.movieIds);
+    const manualMoviesNormalized = rawManualMovies.map((movie) => normalizeHeroMovie(movie));
+    const liveMovies = publicPayload?.movies || [];
+    const manualSelection = {
+        movieIds: settings.movieIds,
+        movies: manualMoviesNormalized,
+    };
     return {
         settings,
-        selectedMovies,
+        liveMovies,
+        manualSelection,
+        selectedMovies: manualMoviesNormalized,
         availableMovies,
         rotation,
     };
 };
 
 /**
- * Retained for backward compatibility with the existing Admin screen. Manual
- * IDs only affect the poster-only emergency fallback; an active rotation batch
- * remains authoritative for public playback.
+ * Updates Admin Hero settings (manual mode selection and sound configuration).
  */
 export const updateHomeHero = async ({
     mode,
@@ -133,17 +137,28 @@ export const updateHomeHero = async ({
     heroDefaultVolume,
 }) => {
     const nextMode = mode === 'manual' ? 'manual' : 'auto';
-    const ids = sanitizeMovieIds(movieIds);
+    const rawIds = (Array.isArray(movieIds) ? movieIds : []).map((id) => String(id || '').trim()).filter(Boolean);
+    const uniqueIds = new Set(rawIds);
+    const ids = Array.from(uniqueIds);
+
     if (nextMode === 'manual') {
-        if (ids.length !== HERO_LIMIT) {
-            throw createHttpError(400, 'Manual poster fallback requires exactly five unique movies.');
+        if (rawIds.length !== HERO_LIMIT || uniqueIds.size !== HERO_LIMIT) {
+            throw createHttpError(422, 'Manual hero selection requires exactly five unique movies with ready native video trailers.');
         }
-        const count = await Movie.countDocuments({ _id: { $in: ids } });
-        if (count !== ids.length) throw createHttpError(400, 'One or more selected movies no longer exist.');
+        const movies = await Movie.find({ _id: { $in: ids } }).select(MOVIE_SELECT).lean();
+        if (movies.length !== HERO_LIMIT) {
+            throw createHttpError(422, 'Manual hero selection requires exactly five unique movies with ready native video trailers.');
+        }
+        const allReady = movies.every(
+            (movie) => movie.heroVideoStatus === 'ready' && validateNativeHeroMovie(movie).valid,
+        );
+        if (!allReady) {
+            throw createHttpError(422, 'Manual hero selection requires exactly five unique movies with ready native video trailers.');
+        }
     }
     const update = {
         'homeHero.mode': nextMode,
-        'homeHero.movieIds': ids,
+        'homeHero.movieIds': ids.slice(0, HERO_LIMIT),
     };
     if (typeof heroSoundDefaultEnabled === 'boolean') {
         update['homeHero.heroSoundDefaultEnabled'] = heroSoundDefaultEnabled;
@@ -170,14 +185,24 @@ export const updateHomeHero = async ({
     };
     if (soundUpdateRequested) {
         soundSettings = await updateHeroSoundSettings(soundSettings);
-    } else {
-        await bumpHeroCacheGeneration();
-        await invalidateHeroCaches();
     }
+    await bumpHeroCacheGeneration();
+    await invalidateHeroCaches();
+    const livePayload = await getPublicHomeHero();
     return {
         mode: config.homeHero.mode,
         movieIds: sanitizeMovieIds(config.homeHero.movieIds),
         ...soundSettings,
+        ...livePayload,
+        meta: livePayload.meta || {
+            configuredMode: config.homeHero.mode,
+            effectiveMode: livePayload?.settings?.effectiveMode || config.homeHero.mode,
+            source: config.homeHero.mode === 'manual' ? 'manual-selection' : 'auto-rotation',
+            version: livePayload?.version || 1,
+            buildSha: String(process.env.BUILD_SHA || process.env.VERCEL_GIT_COMMIT_SHA || 'dev-local'),
+            deploymentId: String(process.env.VERCEL_DEPLOYMENT_ID || 'local-dev'),
+            environment: process.env.NODE_ENV || 'development',
+        },
     };
 };
 

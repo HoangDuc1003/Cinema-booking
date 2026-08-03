@@ -1,8 +1,10 @@
+import { API_BASE_URL, getNormalizedApiBase, buildApiUrl } from '../../lib/apiClient.js';
+
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
 const TMDB_IMAGE_HOSTS = new Set(['image.tmdb.org', 'media.themoviedb.org']);
 const TMDB_IMAGE_PATH = /^\/[A-Za-z0-9_-]+\.(?:avif|jpe?g|png|webp)$/i;
 
-const runtimeApiBase = (import.meta.env?.VITE_BASE_URL || '').replace(/\/$/, '');
+const runtimeApiBase = API_BASE_URL;
 
 export const extractTmdbImagePath = (value) => {
   const source = String(value || '').trim();
@@ -34,7 +36,8 @@ export const getTmdbImageProxyUrl = (value, size = 'original', apiBase = runtime
   if (!tmdbPath) return '';
 
   const query = new URLSearchParams({ path: tmdbPath, size });
-  return `${String(apiBase || '').replace(/\/$/, '')}/api/show/tmdb/image?${query}`;
+  const base = getNormalizedApiBase(apiBase);
+  return buildApiUrl(`${base}/api/show/tmdb/image?${query}`);
 };
 
 export const buildHeroImageCandidates = (values, size, apiBase = runtimeApiBase) => {

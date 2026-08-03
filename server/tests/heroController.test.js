@@ -39,10 +39,19 @@ const payload = {
     },
     movies: Array.from({ length: 5 }, (_, index) => ({ id: String(index + 1) })),
     rotation: { poolSize: 15, batchSize: 5 },
+    meta: {
+        configuredMode: 'auto',
+        effectiveMode: 'auto',
+        source: 'auto-rotation',
+        version: 4,
+        buildSha: 'dev-local',
+        deploymentId: 'local-dev',
+        environment: 'development',
+    },
     cache: 'hit',
 };
 
-test('Home Hero controller returns cache headers, stable metadata, and five server-ordered movies', async () => {
+test('Home Hero controller returns cache headers, stable metadata, meta identity, and five server-ordered movies', async () => {
     const handler = createGetHomeHeroHandler({
         loadHero: async () => payload,
         makeEtag: () => '"hero-controller-test"',
@@ -59,6 +68,10 @@ test('Home Hero controller returns cache headers, stable metadata, and five serv
     assert.equal(res.body.success, true);
     assert.deepEqual(res.body.movies, payload.movies);
     assert.equal(res.body.nextRefreshAt, payload.nextRefreshAt);
+    assert.deepEqual(res.body.meta, payload.meta);
+    assert.equal(res.body.meta.configuredMode, 'auto');
+    assert.equal(res.body.meta.effectiveMode, 'auto');
+    assert.equal(res.body.meta.source, 'auto-rotation');
 });
 
 test('Home Hero controller returns 304 without a response body for a matching ETag', async () => {
