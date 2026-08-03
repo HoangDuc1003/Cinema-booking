@@ -8,12 +8,16 @@ test('R1: Home route uses NativeTrailerSection and does not import legacy YouTub
     'utf8'
   );
 
+  assert.match(homeSource, /getHeroTrailerMode/);
   assert.match(homeSource, /NativeTrailerSection/);
   assert.doesNotMatch(homeSource, /import\('\.\.\/components\/TrailerSection'\)/);
+  assert.doesNotMatch(homeSource, /\bTrailerSection\b/);
+  assert.doesNotMatch(homeSource, /youtube|youtu\.be|youtube-nocookie|googlevideo|iframe/i);
+  assert.doesNotMatch(homeSource, /fetchMovieTrailers|\/videos\b/i);
   assert.match(homeSource, /<NativeTrailerSection sectionId="home-trailer-section"/);
 });
 
-test('R1: NativeTrailerSection has zero YouTube references and zero TMDB videos calls', async () => {
+test('R1: NativeTrailerSection has zero YouTube references, zero TMDB videos calls, and zero unverified URL fallbacks', async () => {
   const nativeSectionSource = await readFile(
     new URL('../src/components/NativeTrailerSection.jsx', import.meta.url),
     'utf8'
@@ -24,4 +28,5 @@ test('R1: NativeTrailerSection has zero YouTube references and zero TMDB videos 
   assert.doesNotMatch(nativeSectionSource, /<iframe/i);
   assert.match(nativeSectionSource, /<video/i);
   assert.match(nativeSectionSource, /resolveConfiguredHeroVideoSource/);
+  assert.doesNotMatch(nativeSectionSource, /background_video_url|videoUrl|trailerUrl/);
 });

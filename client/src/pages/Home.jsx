@@ -6,6 +6,7 @@ import React, {
   useState,
 } from 'react';
 import HeroSection from '../components/HeroSection';
+import { getHeroTrailerMode } from '../components/hero/heroTrailerMode';
 
 const FeatureSection = lazy(() => import('../components/FeatureSection'));
 const NativeTrailerSection = lazy(() => import('../components/NativeTrailerSection'));
@@ -52,6 +53,8 @@ const DeferredSection = ({ children, fallback, anchorId }) => {
 
 const Home = () => {
   const [requestedTrailerMovie, setRequestedTrailerMovie] = useState(null);
+  const trailerMode = getHeroTrailerMode();
+  const showTrailerSection = trailerMode === 'section' || trailerMode === 'hybrid';
 
   return (
     <>
@@ -59,9 +62,11 @@ const Home = () => {
       <DeferredSection fallback={<SectionSkeleton />}>
         <FeatureSection />
       </DeferredSection>
-      <DeferredSection anchorId="trailers" fallback={<SectionSkeleton trailer />}>
-        <NativeTrailerSection sectionId="home-trailer-section" featuredMovie={requestedTrailerMovie} />
-      </DeferredSection>
+      {showTrailerSection && (
+        <DeferredSection anchorId="trailers" fallback={<SectionSkeleton trailer />}>
+          <NativeTrailerSection sectionId="home-trailer-section" featuredMovie={requestedTrailerMovie} />
+        </DeferredSection>
+      )}
     </>
   );
 };

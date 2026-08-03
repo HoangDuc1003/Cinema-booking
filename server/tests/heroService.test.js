@@ -408,3 +408,92 @@ test('R3/R4: getAdminHomeHero returns liveMovies and manualSelection in response
         Movie.find = originals.movieFind;
     }
 });
+
+test('updateHomeHero throws HTTP 422 with MANUAL_HERO_INVALID and invalidMovies details on validation failure', async () => {
+    const originals = {
+        configFindOneAndUpdate: SiteConfig.findOneAndUpdate,
+        movieFind: Movie.find,
+    };
+    const validMovies = ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'].map(nativeMovie);
+    const flawedMovies = validMovies.map((m, idx) => {
+        if (idx === 0) return { ...m, heroVideoStatus: 'missing' };
+        if (idx === 1 || idx === 2) return { ...m, heroVideoUrl: 'https://res.cloudinary.com/test/video/upload/hero_trailers/dup/official.mp4' };
+        return m;
+    });
+
+    Movie.find = () => chain(flawedMovies);
+    SiteConfig.findOneAndUpdate = () => {
+        assert.fail('SiteConfig.findOneAndUpdate should not be called when validation fails');
+    };
+
+    try {
+        const { updateHomeHero } = await import('../services/heroService.js');
+        await assert.rejects(
+            updateHomeHero({ mode: 'manual', movieIds: ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'] }),
+            (error) => {
+                assert.equal(error.status, 422);
+                assert.equal(error.statusCode, 422);
+                assert.equal(error.code, 'MANUAL_HERO_INVALID');
+                assert.equal(error.message, 'All five Manual Hero movies require verified native trailers.');
+                assert.ok(Array.isArray(error.invalidMovies));
+                assert.ok(error.invalidMovies.length > 0);
+                const m1Failure = error.invalidMovies.find((item) => item.movieId === 'm-1');
+                assert.ok(m1Failure);
+                assert.ok(m1Failure.reasons.includes('status-not-ready'));
+                return true;
+            },
+        );
+    } finally {
+        SiteConfig.findOneAndUpdate = originals.configFindOneAndUpdate;
+        Movie.find = originals.movieFind;
+    }
+});
+
+test('getAdminHomeHero includes safe meta with buildSha, deploymentId, and environment', async () => {
+    const originals = {
+        configFindOneAndUpdate: SiteConfig.findOneAndUpdate,
+        configFindOne: SiteConfig.findOne,
+        batchFindOne: HeroRotationBatch.findOne,
+        batchFind: HeroRotationBatch.find,
+        catalogFindOne: CatalogBatch.findOne,
+        movieFind: Movie.find,
+        showFind: Show.find,
+    };
+    const savedIds = ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'];
+    const movies = savedIds.map(nativeMovie);
+    SiteConfig.findOneAndUpdate = () => chain({
+        homeHero: {
+            mode: 'manual',
+            movieIds: savedIds,
+            heroSoundDefaultEnabled: false,
+            heroDefaultVolume: 0.35,
+        },
+        updatedAt: new Date('2026-07-01T00:00:00Z'),
+    });
+    SiteConfig.findOne = () => chain(null);
+    HeroRotationBatch.findOne = () => chain(null);
+    HeroRotationBatch.find = () => chain([]);
+    CatalogBatch.findOne = () => chain(null);
+    Show.find = () => chain([]);
+    Movie.find = () => chain(movies);
+
+    try {
+        const { getAdminHomeHero } = await import('../services/heroService.js');
+        const adminHero = await getAdminHomeHero();
+        assert.ok(adminHero.meta);
+        assert.equal(typeof adminHero.meta.buildSha, 'string');
+        assert.equal(typeof adminHero.meta.deploymentId, 'string');
+        assert.equal(typeof adminHero.meta.environment, 'string');
+        assert.equal(adminHero.meta.configuredMode, 'manual');
+        assert.equal(adminHero.meta.effectiveMode, 'manual');
+    } finally {
+        SiteConfig.findOneAndUpdate = originals.configFindOneAndUpdate;
+        SiteConfig.findOne = originals.configFindOne;
+        HeroRotationBatch.findOne = originals.batchFindOne;
+        HeroRotationBatch.find = originals.batchFind;
+        CatalogBatch.findOne = originals.catalogFindOne;
+        Show.find = originals.showFind;
+        Movie.find = originals.movieFind;
+    }
+});
+

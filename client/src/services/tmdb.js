@@ -11,11 +11,10 @@ import {
     saveHomeNowShowingCache,
 } from './homeNowShowingCache.js';
 
-import { getNormalizedApiBase, buildApiUrl } from '../lib/apiClient.js';
+import { buildApiUrl, fetchApi, API_BASE_URL } from '../lib/apiClient.js';
 
 const runtimeEnv = import.meta.env || {};
 const MOCK_DATA_ENABLED = runtimeEnv.DEV === true && runtimeEnv.VITE_ENABLE_MOCK_DATA === 'true';
-const API_BASE = getNormalizedApiBase(runtimeEnv.VITE_BASE_URL);
 const IMAGE_BASE = 'https://image.tmdb.org/t/p';
 const API_TIMEOUT_MS = Number(runtimeEnv.VITE_API_TIMEOUT_MS) || 4500;
 const HOME_NOW_SHOWING_API_TIMEOUT_MS = Number(runtimeEnv.VITE_HOME_NOW_SHOWING_API_TIMEOUT_MS) || 12_000;
@@ -81,7 +80,7 @@ const fetchWithTimeout = async (url, options = {}, timeoutMs = API_TIMEOUT_MS) =
 };
 
 const fetchBackendJson = async (path, options = {}, timeoutMs = API_TIMEOUT_MS) => {
-    const response = await fetchWithTimeout(`${API_BASE}/api/show/tmdb${path}`, options, timeoutMs);
+    const response = await fetchWithTimeout(buildApiUrl(`/api/show/tmdb${path}`), options, timeoutMs);
     let payload;
     try {
         payload = await response.json();
@@ -132,7 +131,7 @@ const loadHomeHeroFromServer = async (signal) => {
     const headers = {};
     if (lastHeroEtag && lastHeroResponse) headers['If-None-Match'] = lastHeroEtag;
     const response = await fetchWithTimeout(
-        `${API_BASE}/api/show/hero`,
+        buildApiUrl('/api/show/hero'),
         { signal, headers },
         HERO_API_TIMEOUT_MS,
     );
@@ -610,7 +609,7 @@ export const fetchMovieShowtimes = async (id, { signal } = {}) => {
     const movieId = String(id || '').trim();
     if (!/^\d+$/.test(movieId)) throw new TypeError('A valid movie ID is required.');
     const response = await fetchWithTimeout(
-        `${API_BASE}/api/show/${encodeURIComponent(movieId)}`,
+        buildApiUrl(`/api/show/${encodeURIComponent(movieId)}`),
         { signal },
         SHOWTIME_API_TIMEOUT_MS,
     );

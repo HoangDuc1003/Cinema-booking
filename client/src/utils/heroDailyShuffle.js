@@ -231,7 +231,12 @@ export function getOrComputeDailyOrder({ movies, meta = {}, viewerKey }) {
   if (!movies || movies.length === 0) return [];
   
   const mode = meta.mode || meta.configuredMode || meta.effectiveMode || meta.settingsMode;
-  if (mode === 'manual' || meta.source === 'manual-selection') {
+  if (
+    mode === 'manual'
+    || meta.configuredMode === 'manual'
+    || meta.effectiveMode === 'manual'
+    || meta.source === 'manual-selection'
+  ) {
     return movies.map((m) => String(m._id || m.id));
   }
 

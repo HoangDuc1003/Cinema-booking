@@ -444,6 +444,7 @@ const HeroSection = ({ autoPreview = false, onTrailerRequest = null }) => {
             mode: meta.mode || settings.mode,
             configuredMode: meta.configuredMode || settings.configuredMode,
             effectiveMode: meta.effectiveMode || settings.effectiveMode,
+            source: meta.source || settings.source,
           },
           viewerKey,
         })
@@ -872,12 +873,18 @@ const HeroSection = ({ autoPreview = false, onTrailerRequest = null }) => {
     failedMovieKeysRef.current.delete(key);
     setPlaybackStatus(HERO_PLAYBACK_STATUS.IDLE);
     setFailureReason(null);
+    clearHandoff();
+    cancelAudioRamp();
+    clearTransitionTimers();
     if (!startPlaybackForIndex(currentIndex, {
       intent: PLAYBACK_INTENT.MANUAL,
     })) {
       scheduleFailureHandoff(currentIndex);
     }
   }, [
+    cancelAudioRamp,
+    clearHandoff,
+    clearTransitionTimers,
     currentIndex,
     currentMovie,
     scheduleFailureHandoff,

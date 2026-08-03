@@ -7,8 +7,8 @@ import { fetchWithTimeout as requestWithTimeout } from '../services/fetchWithTim
  */
 export const getNormalizedApiBase = (url) => {
   let base = (url || '').trim().replace(/\/+$/, '');
-  if (base.endsWith('/api')) {
-    base = base.slice(0, -4);
+  while (base.endsWith('/api')) {
+    base = base.slice(0, -4).replace(/\/+$/, '');
   }
   return base;
 };
@@ -36,7 +36,7 @@ export const buildApiUrl = (path = '') => {
   let cleanPath = strPath.startsWith('/') ? strPath : `/${strPath}`;
 
   // Deduplicate /api/api
-  if (cleanPath.startsWith('/api/api/')) {
+  while (cleanPath.startsWith('/api/api/')) {
     cleanPath = cleanPath.replace(/^\/api\/api\//, '/api/');
   }
 
@@ -60,8 +60,8 @@ export const apiClient = axios.create({
 apiClient.interceptors.request.use((config) => {
   if (config.url) {
     let url = String(config.url).trim();
-    if (url.startsWith('/api/api/')) {
-      config.url = url.replace(/^\/api\/api\//, '/api/');
+    if (url.includes('/api/api/')) {
+      config.url = url.replace(/\/api\/api\//g, '/api/');
     }
   }
   return config;

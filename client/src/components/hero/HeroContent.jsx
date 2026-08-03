@@ -51,11 +51,13 @@ const HeroContent = ({
   const flyDirection = (index || 0) % 2 === 0 ? 'hero-fly-left' : 'hero-fly-right';
 
   const isSectionMode = trailerMode === 'section';
+  const isNativeMode = trailerMode === 'native';
   const effectiveTrailerFailed = trailerFailed && !isSectionMode;
+  const effectiveTrailerUnavailable = trailerUnavailable && isNativeMode;
 
   const trailerLabel = trailerLoading
     ? 'Loading\u2026'
-    : trailerUnavailable
+    : effectiveTrailerUnavailable
       ? 'Trailer unavailable'
       : effectiveTrailerFailed
         ? 'Retry trailer'
@@ -153,7 +155,7 @@ const HeroContent = ({
                 onCtaClick?.();
                 onToggleTrailer();
               }}
-              disabled={trailerLoading || trailerUnavailable}
+              disabled={trailerLoading || effectiveTrailerUnavailable}
               aria-busy={trailerLoading}
               aria-label={`${trailerLabel} for ${title}`}
               className="hero-action hero-action--secondary"

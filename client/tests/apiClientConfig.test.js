@@ -18,6 +18,7 @@ test('apiClient.js normalizes base URLs correctly', () => {
   assert.equal(getNormalizedApiBase('  http://localhost:3000/ '), 'http://localhost:3000');
   assert.equal(getNormalizedApiBase('http://localhost:3000/api'), 'http://localhost:3000');
   assert.equal(getNormalizedApiBase('http://localhost:3000/api/'), 'http://localhost:3000');
+  assert.equal(getNormalizedApiBase('http://localhost:3000/api/api/'), 'http://localhost:3000');
   assert.equal(getNormalizedApiBase(''), '');
   assert.equal(getNormalizedApiBase(null), '');
 });

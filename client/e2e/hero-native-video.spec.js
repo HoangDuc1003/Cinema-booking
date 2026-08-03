@@ -48,6 +48,7 @@ const mockHome = async (page, {
         nextRefreshAt: NEXT_REFRESH_AT,
         timezone: 'Asia/Ho_Chi_Minh',
         settings: {
+          mode: 'manual',
           heroSoundDefaultEnabled: soundDefaultEnabled,
           heroDefaultVolume: defaultVolume,
         },
@@ -80,6 +81,9 @@ const mockHome = async (page, {
 };
 
 test('a poster-only Hero keeps its trailer action and opens the lower trailer section', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__E2E_TRAILER_MODE = 'section';
+  });
   const posterOnlyMovies = heroMovies.map(({ heroVideoStatus, heroVideoUrl, heroVideoMimeType, heroVideoVersion, heroVideoPoster, ...movie }) => movie);
   await mockHome(page, {
     movies: posterOnlyMovies,
@@ -105,7 +109,7 @@ test('a poster-only Hero keeps its trailer action and opens the lower trailer se
     const target = document.getElementById('trailers');
     return target ? Math.abs(target.getBoundingClientRect().top) < 180 : false;
   })).toBe(true);
-  await expect(page.locator('#home-trailer-section iframe')).toHaveCount(1);
+  await expect(page.locator('#home-trailer-section')).toContainText('Native video trailer preview unavailable');
   await expect(page.locator('#home-trailer-section')).toContainText('Native Hero 1');
 });
 

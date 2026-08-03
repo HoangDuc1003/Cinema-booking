@@ -14,9 +14,9 @@ test('getHeroTrailerMode helper logic handles all environment flag values', () =
   assert.equal(getHeroTrailerMode('hybrid'), 'hybrid');
   assert.equal(getHeroTrailerMode(' NATIVE '), 'native');
   assert.equal(getHeroTrailerMode('SECTION'), 'section');
-  assert.equal(getHeroTrailerMode(undefined), 'hybrid');
-  assert.equal(getHeroTrailerMode(''), 'hybrid');
-  assert.equal(getHeroTrailerMode('unknown'), 'hybrid');
+  assert.equal(getHeroTrailerMode(undefined), 'native');
+  assert.equal(getHeroTrailerMode(''), 'native');
+  assert.equal(getHeroTrailerMode('unknown'), 'native');
 });
 
 test('R3 & R4: HeroSection handleTrailerAction retries native playback via videoGeneration instead of scrolling', async () => {

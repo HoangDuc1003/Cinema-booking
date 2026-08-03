@@ -4,7 +4,7 @@ import { fetchHomeNowShowing, fetchHomeHero } from '../services/tmdb';
 import Loading from './Loading';
 import BlurCircle from './BlurCircle';
 import { useMediaQuery, useSaveData } from './hero/useHeroEnvironment';
-import { resolveConfiguredHeroVideoSource, isSafeNativeHeroVideoUrl } from './hero/heroVideoSource';
+import { resolveConfiguredHeroVideoSource } from './hero/heroVideoSource';
 import { isHeroTrailerMockEnabled } from './hero/heroMock';
 
 const CARD_SLIDE_INTERVAL = 4000;
@@ -17,23 +17,7 @@ const resolveNativeTrailerSource = (movie) => {
     isProduction: import.meta.env.PROD,
     allowRelative: true,
   });
-  if (configured?.src) return configured;
-
-  const rawUrl = movie.heroVideoUrl || movie.background_video_url || movie.videoUrl || movie.trailerUrl || '';
-  if (typeof rawUrl === 'string' && rawUrl.trim()) {
-    const src = rawUrl.trim();
-    if (isSafeNativeHeroVideoUrl(src, { allowRelative: true })) {
-      if (/\.(mp4|webm)(\?.*)?$/i.test(src) || src.startsWith('/mock/')) {
-        return {
-          kind: 'native',
-          src,
-          mimeType: src.endsWith('.webm') ? 'video/webm' : 'video/mp4',
-          poster: movie.heroVideoPoster || movie.poster_path || movie.backdrop_path || '',
-        };
-      }
-    }
-  }
-  return null;
+  return configured?.src ? configured : null;
 };
 
 const mergeMovieList = (...lists) => {

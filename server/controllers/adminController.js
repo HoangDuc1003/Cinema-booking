@@ -88,14 +88,25 @@ export const getHeroSettings = async (req,res) =>{
     }
 }
 
-export const updateHeroSettings = async (req,res) =>{
+export const updateHeroSettings = async (req, res) => {
     try {
-        const settings = await updateHomeHero(req.body || {});
-        res.json({success:true,message:"Hero updated successfully.",settings});
+        const result = await updateHomeHero(req.body || {});
+        return res.json({
+            success: true,
+            message: "Hero updated successfully.",
+            settings: result.settings,
+            liveHero: result.liveHero,
+            meta: result.meta,
+        });
     } catch (error) {
-        return res.status(error.status || 500).json({ success: false, message: error.message });
+        return res.status(error.status || error.statusCode || 500).json({
+            success: false,
+            code: error.code || 'HERO_UPDATE_FAILED',
+            message: error.message,
+            invalidMovies: error.invalidMovies || undefined,
+        });
     }
-}
+};
 
 export const randomizeHeroAction = async (req, res) => {
     try {

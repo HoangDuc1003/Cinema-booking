@@ -7,6 +7,7 @@ import {
     getAdminHeroRotation,
     getPublicHeroRotation,
     invalidateHeroCaches,
+    loadManualPayload,
     normalizeHeroMovie,
     rerandomizeActiveHero,
     updateHeroSoundSettings,
@@ -16,6 +17,12 @@ import {
 const HERO_CONFIG_KEY = 'homeHero';
 const HERO_LIMIT = 5;
 const MOVIE_SELECT = '_id title overview poster_path backdrop_path release_date vote_average vote_count popularity adult runtime genres heroVideoId heroVideoMovieId heroVideoUrl heroVideoMimeType heroVideoPosterUrl heroVideoStatus heroVideoVersion heroVideoDuration heroVideoWidth heroVideoHeight heroVideoBytes heroVideoCodec heroVideoVerifiedAt heroVideoSource heroVideoAttribution updatedAt';
+
+export const getSafeBackendIdentity = () => ({
+    buildSha: String(process.env.BUILD_SHA || process.env.VERCEL_GIT_COMMIT_SHA || 'dev-local'),
+    deploymentId: String(process.env.VERCEL_DEPLOYMENT_ID || 'local-dev'),
+    environment: process.env.NODE_ENV || 'development',
+});
 
 const createHttpError = (status, message) => {
     const error = new Error(message);
@@ -63,8 +70,11 @@ export const getHomeHeroConfig = async () => {
         { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true },
     ).lean();
     const volume = Number(config?.homeHero?.heroDefaultVolume);
+    const mode = config?.homeHero?.mode === 'manual' ? 'manual' : 'auto';
     return {
-        mode: config?.homeHero?.mode === 'manual' ? 'manual' : 'auto',
+        mode,
+        configuredMode: mode,
+        effectiveMode: mode,
         movieIds: sanitizeMovieIds(config?.homeHero?.movieIds),
         heroSoundDefaultEnabled: Boolean(config?.homeHero?.heroSoundDefaultEnabled),
         heroDefaultVolume: Number.isFinite(volume) ? Math.min(Math.max(volume, 0), 1) : defaultVolume,
@@ -76,9 +86,14 @@ export const getHomeHeroConfig = async () => {
  * Public Hero selection is always server-authoritative. `heroOffset` is ignored
  * deliberately so a client cannot reshuffle the active five-movie batch.
  */
-export const getPublicHomeHero = async (options = {}) => getPublicHeroRotation({
-    now: options.now ? new Date(options.now) : new Date(),
-});
+export const getPublicHomeHero = async (options = {}) => {
+    const settings = await getHomeHeroConfig();
+    const now = options.now ? new Date(options.now) : new Date();
+    if (settings.configuredMode === 'manual') {
+        return loadManualPayload(settings, now);
+    }
+    return getPublicHeroRotation({ now });
+};
 
 const getLegacyAvailableMovies = async () => {
     const [activeShows, recentMovies] = await Promise.all([
@@ -117,6 +132,14 @@ export const getAdminHomeHero = async () => {
         movieIds: settings.movieIds,
         movies: manualMoviesNormalized,
     };
+    const safeMeta = {
+        configuredMode: settings.configuredMode,
+        effectiveMode: publicPayload?.settings?.effectiveMode || settings.effectiveMode,
+        source: settings.configuredMode === 'manual' ? 'manual-selection' : 'auto-rotation',
+        version: publicPayload?.version || 1,
+        cacheGeneration: publicPayload?.meta?.cacheGeneration || 0,
+        ...getSafeBackendIdentity(),
+    };
     return {
         settings,
         liveMovies,
@@ -124,6 +147,7 @@ export const getAdminHomeHero = async () => {
         selectedMovies: manualMoviesNormalized,
         availableMovies,
         rotation,
+        meta: safeMeta,
     };
 };
 
@@ -142,20 +166,86 @@ export const updateHomeHero = async ({
     const ids = Array.from(uniqueIds);
 
     if (nextMode === 'manual') {
+        const invalidMovies = [];
         if (rawIds.length !== HERO_LIMIT || uniqueIds.size !== HERO_LIMIT) {
-            throw createHttpError(422, 'Manual hero selection requires exactly five unique movies with ready native video trailers.');
+            if (rawIds.length !== HERO_LIMIT) {
+                invalidMovies.push({
+                    movieId: 'selection',
+                    title: 'Selection Count',
+                    reasons: [`expected-${HERO_LIMIT}-movies-received-${rawIds.length}`],
+                });
+            } else {
+                const seen = new Set();
+                rawIds.forEach((id) => {
+                    if (seen.has(id)) {
+                        invalidMovies.push({
+                            movieId: id,
+                            title: 'Duplicate Selection',
+                            reasons: ['duplicate-movie-id'],
+                        });
+                    } else {
+                        seen.add(id);
+                    }
+                });
+            }
         }
-        const movies = await Movie.find({ _id: { $in: ids } }).select(MOVIE_SELECT).lean();
-        if (movies.length !== HERO_LIMIT) {
-            throw createHttpError(422, 'Manual hero selection requires exactly five unique movies with ready native video trailers.');
-        }
-        const allReady = movies.every(
-            (movie) => movie.heroVideoStatus === 'ready' && validateNativeHeroMovie(movie).valid,
-        );
-        if (!allReady) {
-            throw createHttpError(422, 'Manual hero selection requires exactly five unique movies with ready native video trailers.');
+
+        const loadedMovies = await Movie.find({ _id: { $in: ids } }).select(MOVIE_SELECT).lean();
+        const byId = new Map(loadedMovies.map((movie) => [String(movie._id), movie]));
+
+        ids.forEach((id) => {
+            const movie = byId.get(id);
+            if (!movie) {
+                invalidMovies.push({
+                    movieId: id,
+                    title: 'Unknown',
+                    reasons: ['movie-not-found'],
+                });
+            } else {
+                const validation = validateNativeHeroMovie(movie);
+                if (!validation.valid) {
+                    invalidMovies.push({
+                        movieId: id,
+                        title: movie.title || 'Untitled',
+                        reasons: validation.reasons,
+                    });
+                }
+            }
+        });
+
+        const urls = ids.map((id) => String(byId.get(id)?.heroVideoUrl || '')).filter(Boolean);
+        const urlCounts = new Map();
+        urls.forEach((url) => {
+            urlCounts.set(url, (urlCounts.get(url) || 0) + 1);
+        });
+        ids.forEach((id) => {
+            const movie = byId.get(id);
+            if (movie && movie.heroVideoUrl && urlCounts.get(movie.heroVideoUrl) > 1) {
+                const existing = invalidMovies.find((item) => item.movieId === id);
+                if (existing) {
+                    if (!existing.reasons.includes('duplicate-video-url')) {
+                        existing.reasons.push('duplicate-video-url');
+                    }
+                } else {
+                    invalidMovies.push({
+                        movieId: id,
+                        title: movie.title || 'Untitled',
+                        reasons: ['duplicate-video-url'],
+                    });
+                }
+            }
+        });
+
+        if (invalidMovies.length > 0) {
+            const error = new Error('All five Manual Hero movies require verified native trailers.');
+            error.status = 422;
+            error.statusCode = 422;
+            error.code = 'MANUAL_HERO_INVALID';
+            error.invalidMovies = invalidMovies;
+            throw error;
         }
     }
+
     const update = {
         'homeHero.mode': nextMode,
         'homeHero.movieIds': ids.slice(0, HERO_LIMIT),
@@ -189,20 +279,28 @@ export const updateHomeHero = async ({
     await bumpHeroCacheGeneration();
     await invalidateHeroCaches();
     const livePayload = await getPublicHomeHero();
+    const safeMeta = livePayload.meta || {
+        configuredMode: config.homeHero.mode,
+        effectiveMode: livePayload?.settings?.effectiveMode || config.homeHero.mode,
+        source: config.homeHero.mode === 'manual' ? 'manual-selection' : 'auto-rotation',
+        version: livePayload?.version || 1,
+        cacheGeneration: livePayload?.meta?.cacheGeneration || 0,
+        ...getSafeBackendIdentity(),
+    };
     return {
+        settings: {
+            mode: config.homeHero.mode,
+            configuredMode: config.homeHero.mode,
+            effectiveMode: livePayload?.settings?.effectiveMode || config.homeHero.mode,
+            movieIds: sanitizeMovieIds(config.homeHero.movieIds),
+            ...soundSettings,
+        },
+        liveHero: livePayload,
+        meta: safeMeta,
         mode: config.homeHero.mode,
         movieIds: sanitizeMovieIds(config.homeHero.movieIds),
         ...soundSettings,
         ...livePayload,
-        meta: livePayload.meta || {
-            configuredMode: config.homeHero.mode,
-            effectiveMode: livePayload?.settings?.effectiveMode || config.homeHero.mode,
-            source: config.homeHero.mode === 'manual' ? 'manual-selection' : 'auto-rotation',
-            version: livePayload?.version || 1,
-            buildSha: String(process.env.BUILD_SHA || process.env.VERCEL_GIT_COMMIT_SHA || 'dev-local'),
-            deploymentId: String(process.env.VERCEL_DEPLOYMENT_ID || 'local-dev'),
-            environment: process.env.NODE_ENV || 'development',
-        },
     };
 };
 
@@ -219,3 +317,4 @@ export default {
     randomizeHomeHero,
     updateHeroSoundSettings,
 };
+

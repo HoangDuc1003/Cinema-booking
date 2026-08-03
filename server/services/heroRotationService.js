@@ -527,7 +527,7 @@ const getHeroSettings = async () => {
     };
 };
 
-const toPublicPayload = async (batch, { cache = 'miss' } = {}) => {
+const toPublicPayload = async (batch, { cache = 'miss', cacheGeneration = 0 } = {}) => {
     const settings = await getHeroSettings();
     const rawMovies = await loadOrderedMovies(batch.activeHeroMovieIds);
     const validations = rawMovies.map((movie) => validateNativeHeroMovie(movie));
@@ -581,6 +581,7 @@ const toPublicPayload = async (batch, { cache = 'miss' } = {}) => {
             effectiveMode: 'auto',
             source: 'auto-rotation',
             version: batch.version,
+            cacheGeneration,
             buildSha: String(process.env.BUILD_SHA || process.env.VERCEL_GIT_COMMIT_SHA || 'dev-local'),
             deploymentId: String(process.env.VERCEL_DEPLOYMENT_ID || 'local-dev'),
             environment: process.env.NODE_ENV || 'development',
@@ -589,10 +590,17 @@ const toPublicPayload = async (batch, { cache = 'miss' } = {}) => {
     };
 };
 
-const loadManualPayload = async (settings, now = new Date()) => {
+export const loadManualPayload = async (settings, now = new Date()) => {
     const rawMovies = await loadOrderedMovies(settings.movieIds);
     const window = getHeroRefreshWindow(now);
     const dateKey = getHeroLocalDateKey(now);
+    const config = await SiteConfig.findOne({ key: 'heroRotation' })
+        .select('heroRotation')
+        .lean();
+    const cacheGeneration = Math.max(
+        0,
+        Number(config?.heroRotation?.cacheGeneration || 0),
+    );
     return {
         version: 1,
         batchId: 'manual',
@@ -610,7 +618,7 @@ const loadManualPayload = async (settings, now = new Date()) => {
             heroDefaultVolume: settings.heroDefaultVolume,
             updatedAt: settings.updatedAt,
         },
-        movies: rawMovies.map((movie) => normalizeHeroMovie(movie)),
+        movies: rawMovies.map((movie) => normalizeHeroMovie(movie, { posterOnly: false })),
         rotation: {
             key: `manual-${dateKey}`,
             startsAt: window.startsAt,
@@ -623,6 +631,7 @@ const loadManualPayload = async (settings, now = new Date()) => {
             effectiveMode: 'manual',
             source: 'manual-selection',
             version: 1,
+            cacheGeneration,
             buildSha: String(process.env.BUILD_SHA || process.env.VERCEL_GIT_COMMIT_SHA || 'dev-local'),
             deploymentId: String(process.env.VERCEL_DEPLOYMENT_ID || 'local-dev'),
             environment: process.env.NODE_ENV || 'development',
@@ -714,7 +723,7 @@ export const getPublicHeroRotation = async ({ now = new Date() } = {}) => {
     const cached = await heroRotationRuntime.getJson(cacheKey);
     if (cached) return { ...cached, cache: 'hit' };
     try {
-        const payload = await toPublicPayload(batch);
+        const payload = await toPublicPayload(batch, { cache: 'miss', cacheGeneration });
         await heroRotationRuntime.setJson(cacheKey, payload, redisTtl.heroActive);
         await heroRotationRuntime.setJson(redisKeys.heroLastGood(), payload, redisTtl.heroLastGood);
         return payload;
@@ -727,8 +736,12 @@ export const getPublicHeroRotation = async ({ now = new Date() } = {}) => {
 
 export const createHeroEtag = (payload) => {
     const identity = JSON.stringify({
+        configuredMode: payload?.settings?.configuredMode || payload?.settings?.mode || 'auto',
+        effectiveMode: payload?.settings?.effectiveMode || payload?.meta?.effectiveMode || 'auto',
+        source: payload?.meta?.source || 'auto-rotation',
         batchId: payload?.batchId || 'poster',
         version: payload?.version ?? 0,
+        cacheGeneration: payload?.meta?.cacheGeneration ?? 0,
         dateKey: payload?.dateKey || '',
         dailyEntropy: payload?.dailyEntropy || '',
         movies: (payload?.movies || []).map((movie) => ({

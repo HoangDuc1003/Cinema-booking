@@ -13,8 +13,9 @@ test('getHeroTrailerMode handles all environment flag cases', () => {
   assert.equal(getHeroTrailerMode('section'), 'section');
   assert.equal(getHeroTrailerMode('hybrid'), 'hybrid');
   assert.equal(getHeroTrailerMode('   native   '), 'native');
-  assert.equal(getHeroTrailerMode(undefined), 'hybrid');
-  assert.equal(getHeroTrailerMode('unknown'), 'hybrid');
+  assert.equal(getHeroTrailerMode(undefined), 'native');
+  assert.equal(getHeroTrailerMode(''), 'native');
+  assert.equal(getHeroTrailerMode('unknown'), 'native');
 });
 
 test('native trailer retry resets error state and replays via videoGeneration without scroll', async () => {

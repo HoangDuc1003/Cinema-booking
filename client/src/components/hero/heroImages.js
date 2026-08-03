@@ -36,8 +36,11 @@ export const getTmdbImageProxyUrl = (value, size = 'original', apiBase = runtime
   if (!tmdbPath) return '';
 
   const query = new URLSearchParams({ path: tmdbPath, size });
-  const base = getNormalizedApiBase(apiBase);
-  return buildApiUrl(`${base}/api/show/tmdb/image?${query}`);
+  if (apiBase && apiBase !== runtimeApiBase) {
+    const base = getNormalizedApiBase(apiBase);
+    return buildApiUrl(`${base}/api/show/tmdb/image?${query}`);
+  }
+  return buildApiUrl(`/api/show/tmdb/image?${query}`);
 };
 
 export const buildHeroImageCandidates = (values, size, apiBase = runtimeApiBase) => {

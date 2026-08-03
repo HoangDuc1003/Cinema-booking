@@ -404,3 +404,69 @@ test('activation preflight rejects a pool whose bound asset changed after select
             && error.details.invalid.some((item) => item.movieId === 'hot-2'),
     );
 });
+
+test('createHeroEtag incorporates configuredMode, effectiveMode, source, and manual order', () => {
+    const autoPayload = {
+        batchId: 'batch-1',
+        version: 1,
+        dateKey: '2026-08-03',
+        movies: [{ id: 'm-1', heroVideoVersion: '1' }, { id: 'm-2', heroVideoVersion: '1' }],
+        settings: { configuredMode: 'auto', effectiveMode: 'auto', heroSoundDefaultEnabled: false },
+        meta: { configuredMode: 'auto', effectiveMode: 'auto', source: 'auto-rotation', cacheGeneration: 1 },
+    };
+    const manualPayload = {
+        ...autoPayload,
+        settings: { configuredMode: 'manual', effectiveMode: 'manual', heroSoundDefaultEnabled: false },
+        meta: { configuredMode: 'manual', effectiveMode: 'manual', source: 'manual-selection', cacheGeneration: 1 },
+    };
+    const manualReordered = {
+        ...manualPayload,
+        movies: [{ id: 'm-2', heroVideoVersion: '1' }, { id: 'm-1', heroVideoVersion: '1' }],
+    };
+
+    assert.notEqual(createHeroEtag(manualPayload), createHeroEtag(autoPayload));
+    assert.notEqual(createHeroEtag(manualReordered), createHeroEtag(manualPayload));
+});
+
+test('loadManualPayload returns complete authoritative manual metadata and safe identity', async () => {
+    const { loadManualPayload } = await import('../services/heroRotationService.js');
+    const SiteConfig = (await import('../models/SiteConfig.js')).default;
+    const Movie = (await import('../models/Movie.js')).default;
+    const chain = (value) => ({
+        select: () => chain(value),
+        lean: async () => value,
+    });
+    const originals = {
+        configFindOne: SiteConfig.findOne,
+        movieFind: Movie.find,
+    };
+    const ids = ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'];
+    const movies = ids.map((id) => poolMovie(id));
+
+    SiteConfig.findOne = () => chain({ heroRotation: { cacheGeneration: 42 } });
+    Movie.find = () => chain(movies);
+
+    try {
+        const payload = await loadManualPayload({
+            mode: 'manual',
+            movieIds: ids,
+            heroSoundDefaultEnabled: false,
+            heroDefaultVolume: 0.35,
+            updatedAt: new Date(),
+        });
+        assert.equal(payload.settings.configuredMode, 'manual');
+        assert.equal(payload.settings.effectiveMode, 'manual');
+        assert.equal(payload.meta.configuredMode, 'manual');
+        assert.equal(payload.meta.effectiveMode, 'manual');
+        assert.equal(payload.meta.source, 'manual-selection');
+        assert.equal(payload.meta.cacheGeneration, 42);
+        assert.equal(typeof payload.meta.buildSha, 'string');
+        assert.equal(typeof payload.meta.deploymentId, 'string');
+        assert.equal(typeof payload.meta.environment, 'string');
+        assert.deepEqual(payload.movies.map((m) => m.id), ids);
+    } finally {
+        SiteConfig.findOne = originals.configFindOne;
+        Movie.find = originals.movieFind;
+    }
+});
+
