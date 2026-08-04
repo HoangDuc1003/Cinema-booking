@@ -28,7 +28,7 @@ const mockHomeApis = async (page) => {
     const url = route.request().url();
     let body;
     if (url.includes('/api/show/hero')) {
-      body = { success: true, settings: { mode: 'auto' }, movies: movies.slice(0, 5) };
+      body = { success: true, settings: { mode: 'manual' }, movies: movies.slice(0, 5) };
     } else if (url.includes('/home-now-showing')) {
       body = { success: true, data: { results: movies } };
     } else if (url.includes('/trailers')) {

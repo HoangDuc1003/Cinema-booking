@@ -2,22 +2,10 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ArrowRightIcon, ChevronLeftIcon, ChevronRightIcon, StarIcon, Calendar, Clock, Ticket } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
 import BlurCircle from './BlurCircle';
-import { fetchHomeNowShowing } from '../services/tmdb';
-import { readHomeNowShowingCache } from '../services/homeNowShowingCache.js';
-import Loading from './Loading';
+import { useHomeData } from '../context/HomeDataContext';
 import MovieGrid from './MovieGrid';
+import Loading from './Loading';
 import timeFormat from '../lib/timeFormat';
-
-const getInitialFeedState = () => {
-  const cached = readHomeNowShowingCache();
-  return {
-    status: cached ? 'loading' : 'idle',
-    movies: cached?.movies || [],
-    source: cached ? 'stale-server-cache' : null,
-    error: null,
-  };
-};
-
 const getImageUrl = (path) => {
   if (!path) return '';
   if (path.startsWith('http')) return path.replace('/t/p/original/', '/t/p/w500/');
@@ -92,48 +80,9 @@ const MobileCarouselCard = ({ movie }) => {
 
 const FeatureSection = () => {
   const navigate = useNavigate();
-  const [feedState, setFeedState] = useState(getInitialFeedState);
+  const { nowShowing, nowShowingStatus, nowShowingSource, retry } = useHomeData();
   const [scrollProgress, setScrollProgress] = useState(0);
   const railRef = useRef(null);
-  const requestControllerRef = useRef(null);
-
-  const loadMovies = useCallback(async () => {
-    requestControllerRef.current?.abort();
-    const controller = new AbortController();
-    requestControllerRef.current = controller;
-    setFeedState((current) => ({ ...current, status: 'loading', error: null }));
-
-    try {
-      const result = await fetchHomeNowShowing({ limit: 10, signal: controller.signal });
-      if (controller.signal.aborted) return;
-      setFeedState({
-        status: result.source === 'stale-server-cache' ? 'stale' : 'success',
-        movies: result.movies.slice(0, 10),
-        source: result.source,
-        error: result.error || null,
-      });
-    } catch (error) {
-      if (controller.signal.aborted || error?.name === 'AbortError') return;
-      setFeedState({
-        status: 'error',
-        movies: [],
-        source: null,
-        error,
-      });
-    }
-  }, []);
-
-  useEffect(() => {
-    let alive = true;
-    queueMicrotask(() => {
-      if (alive) loadMovies();
-    });
-    return () => {
-      alive = false;
-      requestControllerRef.current?.abort();
-      requestControllerRef.current = null;
-    };
-  }, [loadMovies]);
 
   const handleScroll = useCallback(() => {
     const el = railRef.current;
@@ -156,8 +105,8 @@ const FeatureSection = () => {
     <section
       className="home-now-showing px-4 sm:px-6 md:px-16 lg:px-24 xl:px-40 overflow-hidden"
       aria-labelledby="home-now-showing-title"
-      data-catalog-state={feedState.status}
-      data-catalog-source={feedState.source || 'unavailable'}
+      data-catalog-state={nowShowingStatus}
+      data-catalog-source={nowShowingSource || 'unavailable'}
     >
       {/* Header */}
       <div className="relative flex items-center justify-between pt-10 sm:pt-5 pb-6 sm:pb-10">
@@ -177,9 +126,9 @@ const FeatureSection = () => {
         </button>
       </div>
 
-      {feedState.status === 'loading' && !feedState.movies.length ? (
+      {nowShowingStatus === 'loading' && !nowShowing.length ? (
         <Loading />
-      ) : feedState.movies.length ? (
+      ) : nowShowing.length ? (
         <>
           {/* Cached data is displayed silently — no technical reconnect banner */}
           {/* MOBILE ONLY: Horizontal Carousel Rail */}
@@ -190,7 +139,7 @@ const FeatureSection = () => {
               className="flex items-center gap-3 overflow-x-auto scroll-smooth py-2 px-1 no-scrollbar"
               style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
             >
-              {feedState.movies.map((movie) => (
+              {nowShowing.map((movie) => (
                 <MobileCarouselCard key={movie._id || movie.id} movie={movie} />
               ))}
             </div>
@@ -208,17 +157,17 @@ const FeatureSection = () => {
           {/* DESKTOP ONLY: Original 5-column MovieGrid */}
           <div className="hidden sm:block">
             <MovieGrid
-              movies={feedState.movies}
+              movies={nowShowing}
               columns="grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
               animated={true}
               staggerDelay={80}
             />
           </div>
         </>
-      ) : feedState.status === 'error' ? (
+      ) : nowShowingStatus === 'error' ? (
         <div role="alert" className="rounded-2xl border border-red-300/20 bg-red-300/10 px-6 py-10 text-center text-sm text-red-100">
           <p>Current releases are temporarily unavailable.</p>
-          <button type="button" onClick={loadMovies} className="mt-4 rounded-full border border-red-200/30 px-5 py-2 font-semibold hover:bg-red-200/10">
+          <button type="button" onClick={retry} className="mt-4 rounded-full border border-red-200/30 px-5 py-2 font-semibold hover:bg-red-200/10">
             Retry
           </button>
         </div>

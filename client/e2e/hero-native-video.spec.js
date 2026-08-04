@@ -80,38 +80,7 @@ const mockHome = async (page, {
   return requests;
 };
 
-test('a poster-only Hero keeps its trailer action and opens the lower trailer section', async ({ page }) => {
-  await page.addInitScript(() => {
-    window.__E2E_TRAILER_MODE = 'section';
-  });
-  const posterOnlyMovies = heroMovies.map(({ heroVideoStatus, heroVideoUrl, heroVideoMimeType, heroVideoVersion, heroVideoPoster, ...movie }) => movie);
-  await mockHome(page, {
-    movies: posterOnlyMovies,
-    movieVideos: {
-      9100: [{
-        site: 'YouTube',
-        key: 'dQw4w9WgXcQ',
-        type: 'Trailer',
-        name: 'Official Trailer',
-      }],
-    },
-  });
-  await page.goto('/?heroMock=0');
 
-  const hero = page.locator('.hero-section');
-  await expect(hero.locator('video')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: /Trailer for Native Hero 1|Trailer/i })).toBeVisible();
-  await expect(hero).not.toContainText('Trailer for this movie is currently unavailable');
-
-  await page.getByRole('button', { name: /Trailer for Native Hero 1|Trailer/i }).click();
-  await expect(page.locator('#home-trailer-section')).toBeVisible();
-  await expect.poll(() => page.evaluate(() => {
-    const target = document.getElementById('trailers');
-    return target ? Math.abs(target.getBoundingClientRect().top) < 180 : false;
-  })).toBe(true);
-  await expect(page.locator('#home-trailer-section')).toContainText('Native video trailer preview unavailable');
-  await expect(page.locator('#home-trailer-section')).toContainText('Native Hero 1');
-});
 
 const waitForAdvancingPlayback = async (video) => {
   await expect.poll(

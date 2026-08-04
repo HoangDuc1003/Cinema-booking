@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { UploadCloudIcon, Trash2Icon, FileVideoIcon, Loader2Icon } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useAppContext } from '../../context/AppContext';
+import apiClient from '../../lib/apiClient';
 
 const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 const MAX_VIDEO_DURATION_SECONDS = 180;
@@ -39,7 +39,6 @@ const inspectVideoFile = (file) => new Promise((resolve, reject) => {
 });
 
 const HeroVideoUploader = ({ movie, onUpdated }) => {
-  const { axios } = useAppContext();
   const fileInputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
   const videoMetadata = movie.heroVideoMetadata || {};
@@ -76,7 +75,7 @@ const HeroVideoUploader = ({ movie, onUpdated }) => {
         throw new Error('Video must be decodable, at most 180 seconds, and at least 640×360.');
       }
 
-      const { data: sigData } = await axios.get(`/api/admin/hero/upload-signature?movieId=${movie._id || movie.id}`);
+      const { data: sigData } = await apiClient.get(`/api/admin/hero/upload-signature?movieId=${movie._id || movie.id}`);
       if (!sigData.success) throw new Error(sigData.message || 'Failed to get upload signature');
 
       const {
@@ -116,7 +115,7 @@ const HeroVideoUploader = ({ movie, onUpdated }) => {
         xhr.open('POST', cloudinaryUrl, true);
         xhr.send(formData);
       }).then(async (cloudinaryRes) => {
-        const { data: commitData } = await axios.post(`/api/admin/hero/${movie._id || movie.id}/commit`, {
+        const { data: commitData } = await apiClient.post(`/api/admin/hero/${movie._id || movie.id}/commit`, {
           publicId: cloudinaryRes.public_id,
         });
         if (!commitData.success) throw new Error(commitData.message);
@@ -139,7 +138,7 @@ const HeroVideoUploader = ({ movie, onUpdated }) => {
     if (!window.confirm('Are you sure you want to remove the native video?')) return;
     try {
       setUploading(true);
-      const { data } = await axios.delete(`/api/admin/hero/${movie._id || movie.id}/video`);
+      const { data } = await apiClient.delete(`/api/admin/hero/${movie._id || movie.id}/video`);
       if (data.success) {
         toast.success('Video removed.');
         onUpdated?.();

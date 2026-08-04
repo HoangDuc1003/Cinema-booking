@@ -4,6 +4,7 @@ import { HERO_FAILURE_REASONS } from './heroMachine';
 
 const HeroContent = ({
   movieKey,
+  generation,
   index,
   movie,
   year,
@@ -47,7 +48,7 @@ const HeroContent = ({
   const trailerUnavailable = failureReason === HERO_FAILURE_REASONS.MISSING_VIDEO
     || trailerAvailable === false;
 
-  const contentKey = movieKey || movie.id || movie._id || title;
+  const contentKey = `${movieKey || movie.id || movie._id || title}-${generation || 0}`;
   const flyDirection = (index || 0) % 2 === 0 ? 'hero-fly-left' : 'hero-fly-right';
 
   const isSectionMode = trailerMode === 'section';

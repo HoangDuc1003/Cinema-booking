@@ -26,6 +26,7 @@ export const redisKeys = {
     showtimesPattern: () => key('cache', 'showtimes', '*'),
     bookableNowShowing: (region = 'VN', days = 7) => key('cache', 'shows', 'now-playing', region, days),
     bookableNowShowingPattern: () => key('cache', 'shows', 'now-playing', '*'),
+    nowShowingLastGood: () => key('cache', 'shows', 'now-playing', 'last-good'),
     tmdbPopular: (page) => key('cache', 'tmdb', 'popular', page),
     tmdbUpcoming: (page) => key('cache', 'tmdb', 'upcoming', page),
     tmdbNowPlaying: (page) => key('cache', 'tmdb', 'now-playing', page),
@@ -63,6 +64,7 @@ export const redisTtl = Object.freeze({
     movie: parsePositiveInteger(process.env.CACHE_MOVIE_TTL_SECONDS, 1800),
     cinemas: parsePositiveInteger(process.env.CACHE_CINEMAS_TTL_SECONDS, 600),
     showtimes: parsePositiveInteger(process.env.CACHE_SHOWTIMES_TTL_SECONDS, 120),
+    nowShowingLastGood: parsePositiveInteger(process.env.CACHE_NOW_SHOWING_LAST_GOOD_TTL_SECONDS, 2592000), // 30 days
     seatMap: parsePositiveInteger(process.env.CACHE_SEAT_MAP_TTL_SECONDS, 5),
     // Stripe Checkout requires expires_at to be at least 30 minutes in the future.
     // Keep a one-minute network/clock buffer and use the same TTL for DB + Redis holds.

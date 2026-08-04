@@ -1,10 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  fetchHomeHero,
-  fetchHomeNowShowing,
-  fetchPopularMovies,
-  fetchUpcomingMovies,
-} from '../services/tmdb';
+import { fetchPopularMovies, fetchUpcomingMovies } from '../services/tmdb';
+import { useHomeData } from '../context/HomeDataContext';
 
 const initialState = {
   hero: null,
@@ -29,52 +26,35 @@ const useMobileHomeData = ({ enabled = true } = {}) => {
     });
 
     Promise.allSettled([
-      fetchHomeHero({ signal: controller.signal }),
-      fetchHomeNowShowing({ limit: 12, signal: controller.signal }),
-    ]).then(([heroResult, nowResult]) => {
+      fetchPopularMovies({ pages: 1, maxAdult: 2, signal: controller.signal }),
+      fetchUpcomingMovies({ signal: controller.signal }),
+    ]).then(([popularResult, upcomingResult]) => {
       if (!alive || controller.signal.aborted) return;
-      const hero = heroResult.status === 'fulfilled' ? heroResult.value : null;
-      const nowShowing = nowResult.status === 'fulfilled'
-        ? (nowResult.value?.movies || [])
-        : [];
       setState((current) => ({
         ...current,
-        hero,
-        nowShowing,
-        criticalStatus: 'settled',
-        error: !hero && !nowShowing.length ? 'Movie data is not available yet.' : '',
+        popular: popularResult.status === 'fulfilled' ? popularResult.value : [],
+        upcoming: upcomingResult.status === 'fulfilled' ? upcomingResult.value : [],
+        secondaryStatus: 'settled',
       }));
-
-      deferredTimer = window.setTimeout(() => {
-        setState((current) => ({ ...current, secondaryStatus: 'loading' }));
-        Promise.allSettled([
-          fetchPopularMovies({ pages: 1, maxAdult: 2, signal: controller.signal }),
-          fetchUpcomingMovies({ signal: controller.signal }),
-        ]).then(([popularResult, upcomingResult]) => {
-          if (!alive || controller.signal.aborted) return;
-          setState((current) => ({
-            ...current,
-            popular: popularResult.status === 'fulfilled' ? popularResult.value : [],
-            upcoming: upcomingResult.status === 'fulfilled' ? upcomingResult.value : [],
-            secondaryStatus: 'settled',
-          }));
-        });
-      }, 50);
     });
 
     return () => {
       alive = false;
       controller.abort();
-      window.clearTimeout(deferredTimer);
     };
   }, [enabled]);
 
+  const { hero, nowShowing, heroStatus, nowShowingStatus, error: homeError } = useHomeData();
+
   return useMemo(() => ({
     ...state,
-    criticalReady: state.criticalStatus === 'settled',
-    featured: state.hero?.movies?.[0] || state.nowShowing[0] || null,
-    recommendations: state.hero?.movies?.slice(1) || [],
-  }), [state]);
+    hero,
+    nowShowing,
+    criticalReady: heroStatus === 'success' || nowShowingStatus === 'success' || nowShowingStatus === 'stale',
+    featured: hero?.movies?.[0] || nowShowing[0] || null,
+    recommendations: hero?.movies?.slice(1) || [],
+    error: homeError || state.error,
+  }), [state, hero, nowShowing, heroStatus, nowShowingStatus, homeError]);
 };
 
 export default useMobileHomeData;

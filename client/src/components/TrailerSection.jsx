@@ -37,6 +37,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
   const [hasError, setHasError]         = useState(false);
   const [carouselPaused, setCarouselPaused]   = useState(false);
   const [activeIndex, setActiveIndex]         = useState(0);
+  const [playIntent, setPlayIntent]           = useState(false);
   const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
   const saveData = useSaveData();
 
@@ -49,6 +50,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
   const switchTrailer = useCallback((index) => {
     if (index === currentIndex || !trailers.length) return;
     setCurrentIndex(index);
+    setPlayIntent(false);
   }, [currentIndex, trailers.length]);
 
   const goNext = useCallback(() => { if (trailers.length) switchTrailer((currentIndex + 1) % trailers.length); }, [currentIndex, trailers.length, switchTrailer]);
@@ -246,17 +248,28 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
       <section id={sectionId} className="scroll-mt-20 relative overflow-hidden" style={{ background: 'transparent', marginTop: 20 }}>
         <div className="ts-content-shell">
           {currentTrailer && getTrailerVideoId(currentTrailer) && (
-            <CinematicTrailerPlayer
-              videoId={getTrailerVideoId(currentTrailer)}
-              movieTitle={currentTrailer.videoName || currentTrailer.title}
-              rating={currentTrailer.vote_average}
-              year={currentTrailer.release_date?.substring(0, 4)}
-              qualityLabel={currentTrailer.qualityLabel}
-              currentIndex={currentIndex}
-              total={trailers.length}
-              onNext={goNext}
-              onPrevious={goPrev}
-            />
+            !playIntent ? (
+              <div className="relative aspect-video w-full max-w-[1248px] mx-auto rounded-xl overflow-hidden bg-black border border-white/10 shadow-2xl cursor-pointer group" onClick={() => setPlayIntent(true)}>
+                <img src={currentTrailer.backdrop_path || currentTrailer.poster_path || currentTrailer.thumbnail} alt={currentTrailer.title} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="w-16 h-16 rounded-full bg-rose-500/90 flex items-center justify-center text-white border border-white/20 shadow-xl group-hover:scale-110 transition-transform">
+                    <Play className="w-8 h-8 ml-1 fill-white" />
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <CinematicTrailerPlayer
+                videoId={getTrailerVideoId(currentTrailer)}
+                movieTitle={currentTrailer.videoName || currentTrailer.title}
+                rating={currentTrailer.vote_average}
+                year={currentTrailer.release_date?.substring(0, 4)}
+                qualityLabel={currentTrailer.qualityLabel}
+                currentIndex={currentIndex}
+                total={trailers.length}
+                onNext={goNext}
+                onPrevious={goPrev}
+              />
+            )
           )}
         </div>
       </section>
@@ -279,18 +292,29 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnl
       </div>
 
       {currentTrailer && getTrailerVideoId(currentTrailer) && (
-        <div className="relative z-10 w-full">
-          <CinematicTrailerPlayer
-            videoId={getTrailerVideoId(currentTrailer)}
-            movieTitle={currentTrailer.title}
-            rating={currentTrailer.vote_average}
-            year={currentTrailer.release_date?.substring(0, 4)}
-            qualityLabel={currentTrailer.qualityLabel}
-            currentIndex={currentIndex}
-            total={trailers.length}
-            onNext={goNext}
-            onPrevious={goPrev}
-          />
+        <div className="relative z-10 w-full mb-8">
+          {!playIntent ? (
+            <div className="relative aspect-video w-full max-w-[1248px] mx-auto rounded-xl overflow-hidden bg-black border border-white/10 shadow-2xl cursor-pointer group" onClick={() => setPlayIntent(true)}>
+              <img src={currentTrailer.backdrop_path || currentTrailer.poster_path || currentTrailer.thumbnail} alt={currentTrailer.title} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="w-16 h-16 rounded-full bg-rose-500/90 flex items-center justify-center text-white border border-white/20 shadow-xl group-hover:scale-110 transition-transform">
+                  <Play className="w-8 h-8 ml-1 fill-white" />
+                </div>
+              </div>
+            </div>
+          ) : (
+            <CinematicTrailerPlayer
+              videoId={getTrailerVideoId(currentTrailer)}
+              movieTitle={currentTrailer.title}
+              rating={currentTrailer.vote_average}
+              year={currentTrailer.release_date?.substring(0, 4)}
+              qualityLabel={currentTrailer.qualityLabel}
+              currentIndex={currentIndex}
+              total={trailers.length}
+              onNext={goNext}
+              onPrevious={goPrev}
+            />
+          )}
         </div>
       )}
 

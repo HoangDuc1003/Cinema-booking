@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Star, ChevronLeft, ChevronRight, Play, Film } from 'lucide-react';
-import { fetchHomeNowShowing, fetchHomeHero } from '../services/tmdb';
 import Loading from './Loading';
 import BlurCircle from './BlurCircle';
+import { useHomeData } from '../context/HomeDataContext';
 import { useMediaQuery, useSaveData } from './hero/useHeroEnvironment';
 import { resolveConfiguredHeroVideoSource } from './hero/heroVideoSource';
 import { isHeroTrailerMockEnabled } from './hero/heroMock';
@@ -35,9 +35,9 @@ const mergeMovieList = (...lists) => {
 };
 
 const NativeTrailerSection = ({ featuredMovie = null, sectionId = 'home-trailer-section' }) => {
+  const { hero, nowShowing, heroStatus, nowShowingStatus, error } = useHomeData();
   const [trailers, setTrailers] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [carouselPaused, setCarouselPaused] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -108,40 +108,20 @@ const NativeTrailerSection = ({ featuredMovie = null, sectionId = 'home-trailer-
   }, []);
 
   useEffect(() => {
-    let mounted = true;
-    const controller = new AbortController();
+    if (heroStatus === 'loading' || nowShowingStatus === 'loading') return;
+    
+    if (heroStatus === 'error' && nowShowingStatus === 'error') {
+      setHasError(true);
+      return;
+    }
 
-    const load = async () => {
-      setIsLoading(true);
-      try {
-        const [heroData, nowShowingData] = await Promise.all([
-          fetchHomeHero({ signal: controller.signal }).catch(() => null),
-          fetchHomeNowShowing({ limit: 10, signal: controller.signal }).catch(() => []),
-        ]);
-        if (!mounted) return;
+    const heroMovies = Array.isArray(hero?.movies) ? hero.movies : [];
+    const nowMovies = Array.isArray(nowShowing) ? nowShowing : [];
+    const combined = mergeMovieList(featuredMovie ? [featuredMovie] : [], heroMovies, nowMovies);
 
-        const heroMovies = Array.isArray(heroData?.movies) ? heroData.movies : [];
-        const nowMovies = Array.isArray(nowShowingData) ? nowShowingData : [];
-        const combined = mergeMovieList(featuredMovie ? [featuredMovie] : [], heroMovies, nowMovies);
-
-        setTrailers(combined);
-        setHasError(false);
-      } catch (e) {
-        if (mounted && e?.name !== 'AbortError') {
-          console.error('Failed to load native trailers:', e);
-          setHasError(true);
-        }
-      } finally {
-        if (mounted) setIsLoading(false);
-      }
-    };
-
-    load();
-    return () => {
-      mounted = false;
-      controller.abort();
-    };
-  }, [featuredMovie]);
+    setTrailers(combined);
+    setHasError(false);
+  }, [hero, nowShowing, heroStatus, nowShowingStatus, featuredMovie]);
 
   useEffect(() => {
     if (!featuredMovie || trailers.length === 0) return undefined;
@@ -181,7 +161,7 @@ const NativeTrailerSection = ({ featuredMovie = null, sectionId = 'home-trailer-
     carouselRef.current.scrollBy({ left: dir * w, behavior: reducedMotion ? 'auto' : 'smooth' });
   };
 
-  if (isLoading) return <div className="px-6 md:px-16 lg:px-24 py-20"><Loading /></div>;
+  if (heroStatus === 'loading' && nowShowingStatus === 'loading') return <div className="px-6 md:px-16 lg:px-24 py-20"><Loading /></div>;
   if (hasError || trailers.length === 0) return null;
 
   return (

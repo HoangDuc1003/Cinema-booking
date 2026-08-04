@@ -34,7 +34,7 @@ test('Home renders immediately and Hero performs no client-side TMDB video looku
   await page.route(/\/api\/show\/hero(?:\?|$)/, (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
-    body: JSON.stringify({ success: true, movies: candidates }),
+    body: JSON.stringify({ success: true, movies: candidates, settings: { mode: 'manual' } }),
   }));
   await page.route('**/api/show/tmdb/home-now-showing**', (route) => route.fulfill({
     status: 200,
@@ -93,7 +93,7 @@ test('Hero never renders mock data while the server response is pending', async 
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ success: true, movies: candidates }),
+      body: JSON.stringify({ success: true, movies: candidates, settings: { mode: 'manual' } }),
     });
   });
   await page.route('**/api/show/tmdb/movie/*/videos', (route) => route.fulfill({
@@ -127,7 +127,7 @@ test('Hero shows retry on failure and preserves the five server movies in order'
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ success: true, movies: candidates }),
+      body: JSON.stringify({ success: true, movies: candidates, settings: { mode: 'manual' } }),
     });
   });
   await page.route('**/api/show/tmdb/movie/*/videos', (route) => route.fulfill({

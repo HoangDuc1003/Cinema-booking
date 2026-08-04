@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import Loading from '../../components/Loading';
 import Title from '../../components/admin/Title';
 import { useAppContext } from '../../context/AppContext';
+import apiClient from '../../lib/apiClient';
 import HeroVideoUploader from './HeroVideoUploader';
 
 const MAX_HERO_MOVIES = 5;
@@ -48,7 +49,7 @@ const HeroPoolGrid = ({ movies, onUpdated }) => (
 );
 
 const HeroSettings = () => {
-  const { axios, user } = useAppContext();
+  const { user } = useAppContext();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [randomizing, setRandomizing] = useState(false);
@@ -74,7 +75,7 @@ const HeroSettings = () => {
   const handleRandomize = async () => {
     try {
       setRandomizing(true);
-      const { data } = await axios.post('/api/admin/hero/randomize');
+      const { data } = await apiClient.post('/api/admin/hero/randomize');
       if (!data.success) {
         toast.error(data.message || 'Unable to randomize hero.');
         return;
@@ -92,7 +93,7 @@ const HeroSettings = () => {
     try {
       setRefreshingHero(true);
       const idempotencyKey = `admin-${new Date().toISOString().slice(0, 16).replace(/[^0-9]/g, '')}`;
-      const { data } = await axios.post('/api/admin/hero/refresh', { idempotencyKey });
+      const { data } = await apiClient.post('/api/admin/hero/refresh', { idempotencyKey });
       if (!data.success) throw new Error(data.message || 'Hero refresh failed.');
       if (data.result?.skipped) {
         toast.success(`Hero refresh was idempotent (${data.result.reason}).`);
@@ -115,7 +116,7 @@ const HeroSettings = () => {
   const handleSaveSound = async () => {
     try {
       setSavingSound(true);
-      const { data } = await axios.put('/api/admin/hero/sound', {
+      const { data } = await apiClient.put('/api/admin/hero/sound', {
         heroSoundDefaultEnabled: soundDefaultEnabled,
         heroDefaultVolume: Number(defaultVolume),
       });
@@ -134,7 +135,7 @@ const HeroSettings = () => {
     try {
       setRefreshingCatalog(true);
       setRefreshStatus('Queueing...');
-      const { data } = await axios.post('/api/admin/catalog/refresh', { dryRun });
+      const { data } = await apiClient.post('/api/admin/catalog/refresh', { dryRun });
       if (!data.success || !data.jobId) throw new Error(data.message || 'Catalog refresh was not queued.');
       sessionStorage.setItem(CATALOG_JOB_STORAGE_KEY, data.jobId);
       terminalToastRef.current = '';
@@ -153,7 +154,7 @@ const HeroSettings = () => {
     let timer;
     const poll = async () => {
       try {
-        const { data } = await axios.get(`/api/admin/catalog/refresh/${encodeURIComponent(catalogJobId)}`);
+        const { data } = await apiClient.get(`/api/admin/catalog/refresh/${encodeURIComponent(catalogJobId)}`);
         if (!active || !data.success) return;
         const job = data.job;
         const terminal = job.status === 'succeeded' || job.status === 'failed';
@@ -189,7 +190,7 @@ const HeroSettings = () => {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [axios, catalogJobId]);
+  }, [catalogJobId]);
 
   const movieById = useMemo(() => {
     return new Map(availableMovies.map((movie) => [String(movie._id || movie.id), movie]));
@@ -208,7 +209,7 @@ const HeroSettings = () => {
   const fetchHeroSettings = async () => {
     try {
       setLoading(true);
-      const { data } = await axios.get('/api/admin/hero');
+      const { data } = await apiClient.get('/api/admin/hero');
       if (!data.success) {
         toast.error(data.message || 'Unable to load hero settings.');
         return;
@@ -279,7 +280,7 @@ const HeroSettings = () => {
     try {
       setSaving(true);
       setInvalidMoviesError(null);
-      const { data } = await axios.put('/api/admin/hero', { mode, movieIds: selectedIds });
+      const { data } = await apiClient.put('/api/admin/hero', { mode, movieIds: selectedIds });
       if (!data.success) {
         toast.error(data.message || 'Unable to update hero.');
         return;

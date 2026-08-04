@@ -10,6 +10,7 @@ import { getHeroTrailerMode } from '../components/hero/heroTrailerMode';
 
 const FeatureSection = lazy(() => import('../components/FeatureSection'));
 const NativeTrailerSection = lazy(() => import('../components/NativeTrailerSection'));
+import { HomeDataProvider } from '../context/HomeDataContext';
 
 const SectionSkeleton = ({ trailer = false }) => (
   <div className="px-4 py-10 animate-pulse sm:px-6 md:px-16 lg:px-24 xl:px-40">
@@ -57,7 +58,7 @@ const Home = () => {
   const showTrailerSection = trailerMode === 'section' || trailerMode === 'hybrid';
 
   return (
-    <>
+    <HomeDataProvider>
       <HeroSection autoPreview onTrailerRequest={setRequestedTrailerMovie} />
       <DeferredSection fallback={<SectionSkeleton />}>
         <FeatureSection />
@@ -67,7 +68,7 @@ const Home = () => {
           <NativeTrailerSection sectionId="home-trailer-section" featuredMovie={requestedTrailerMovie} />
         </DeferredSection>
       )}
-    </>
+    </HomeDataProvider>
   );
 };
 

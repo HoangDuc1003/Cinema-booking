@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { rememberJson } from './cacheService.js';
+import { rememberJson, getJson, setJson } from './cacheService.js';
 import { redisKeys, redisTtl } from './redisKeys.js';
 import {
     getBookableNowShowingMovies,
@@ -72,10 +72,25 @@ export const getPublicHomeNowShowing = async ({
             now,
         }),
     );
-    const results = (Array.isArray(result.value) ? result.value : [])
+    let results = (Array.isArray(result.value) ? result.value : [])
         .slice(0, limit)
         .map(normalizeHomeNowShowingMovie)
         .filter(Boolean);
+
+    let source = 'bookable-shows';
+    let stale = false;
+
+    const lastGoodKey = redisKeys.nowShowingLastGood();
+    if (results.length > 0) {
+        setJson(lastGoodKey, results, redisTtl.nowShowingLastGood).catch(() => {});
+    } else {
+        const lastGood = await getJson(lastGoodKey);
+        if (Array.isArray(lastGood) && lastGood.length > 0) {
+            results = lastGood.slice(0, limit);
+            source = 'last-good';
+            stale = true;
+        }
+    }
 
     return {
         value: {
@@ -83,7 +98,8 @@ export const getPublicHomeNowShowing = async ({
             meta: {
                 region,
                 limit,
-                source: 'bookable-shows',
+                source,
+                stale,
                 partial: results.length < limit,
                 catalog: null,
                 generatedAt: now.toISOString(),

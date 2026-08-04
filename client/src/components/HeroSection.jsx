@@ -915,13 +915,13 @@ const HeroSection = ({ autoPreview = false, onTrailerRequest = null }) => {
       return;
     }
 
-    if (trailerAvailable) {
+    if (trailerAvailable || trailerFailed) {
       handlePlayTrailer();
       return;
     }
 
     scrollToTrailerSection();
-  }, [handlePlayTrailer, scrollToTrailerSection, trailerAvailable, trailerMode]);
+  }, [handlePlayTrailer, scrollToTrailerSection, trailerAvailable, trailerFailed, trailerMode]);
 
   if (!currentMovie) {
     if (!catalogSettled) {
@@ -1050,6 +1050,7 @@ const HeroSection = ({ autoPreview = false, onTrailerRequest = null }) => {
 
       <HeroContent
         movieKey={currentMovieKey}
+        generation={videoGeneration}
         index={currentIndex}
         movie={currentMovie}
         year={currentMovie.release_date?.slice(0, 4) || 'N/A'}
