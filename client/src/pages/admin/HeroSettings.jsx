@@ -65,6 +65,7 @@ const HeroSettings = () => {
   const [defaultVolume, setDefaultVolume] = useState(0.35);
   const [savingSound, setSavingSound] = useState(false);
   const [refreshingHero, setRefreshingHero] = useState(false);
+  const [syncingNowPlaying, setSyncingNowPlaying] = useState(false);
   
   const [dryRun, setDryRun] = useState(false);
   const [refreshingCatalog, setRefreshingCatalog] = useState(() => Boolean(sessionStorage.getItem(CATALOG_JOB_STORAGE_KEY)));
@@ -110,6 +111,20 @@ const HeroSettings = () => {
       await fetchHeroSettings();
     } finally {
       setRefreshingHero(false);
+    }
+  };
+
+  const handleNowPlayingSync = async () => {
+    try {
+      setSyncingNowPlaying(true);
+      const { data } = await apiClient.post('/api/show/sync-now-playing');
+      if (!data.success) throw new Error(data.message || 'Now Showing sync failed.');
+      const summary = data.summary || {};
+      toast.success(`Now Showing synced: ${summary.scheduledMovies ?? 0} scheduled, ${summary.showsCreated ?? 0} created.`);
+    } catch (error) {
+      toast.error(error.response?.data?.message || error.message || 'Now Showing sync failed.');
+    } finally {
+      setSyncingNowPlaying(false);
     }
   };
 
@@ -371,6 +386,14 @@ const HeroSettings = () => {
             >
               <SaveIcon className="w-4 h-4" />
               {saving ? 'Saving' : 'Save'}
+            </button>
+            <button
+              type="button"
+              onClick={handleNowPlayingSync}
+              disabled={syncingNowPlaying}
+              className="rounded-md border border-white/15 bg-white/[0.06] px-4 py-2 text-sm transition hover:bg-white/[0.12] disabled:opacity-60 cursor-pointer shrink-0"
+            >
+              {syncingNowPlaying ? 'Syncing Now Showing…' : 'Sync Now Showing'}
             </button>
           </div>
         </div>

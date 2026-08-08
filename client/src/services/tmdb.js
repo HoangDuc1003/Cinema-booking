@@ -324,7 +324,7 @@ const loadHomeNowShowingFromServer = async ({ query, signal }) => {
             if (error?.name === 'AbortError') throw error;
             lastError = error;
             const retryable = error instanceof HttpError
-                ? [408, 429, 500, 502, 503, 504].includes(error.status)
+                ? [408, 429, 500, 502, 504].includes(error.status)
                 : error?.name === 'FetchTimeoutError' || error?.name === 'TypeError';
             if (attempt === 1 || !retryable) break;
             const retryDelay = Math.min(350, 150 + Math.floor(Math.random() * 151));

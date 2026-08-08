@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useEffect, useState, useMemo } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { fetchHomeHero, fetchHomeNowShowing } from '../services/tmdb';
+import { getInitialHeroPayload } from '../components/hero/heroCatalogLoader';
 
 const HomeDataContext = createContext({
   hero: null,
@@ -10,28 +11,23 @@ const HomeDataContext = createContext({
   error: null,
 });
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const useHomeData = () => useContext(HomeDataContext);
 
 export const HomeDataProvider = ({ children }) => {
-  const [state, setState] = useState({
-    hero: null,
+  const [state, setState] = useState(() => ({
+    hero: getInitialHeroPayload(),
     nowShowing: [],
-    heroStatus: 'idle',
-    nowShowingStatus: 'idle',
+    heroStatus: 'loading',
+    nowShowingStatus: 'loading',
     nowShowingSource: null,
     error: null,
-  });
+    retryCount: 0,
+  }));
 
   useEffect(() => {
     const controller = new AbortController();
     let alive = true;
-
-    setState((prev) => ({
-      ...prev,
-      heroStatus: 'loading',
-      nowShowingStatus: 'loading',
-      error: null,
-    }));
 
     Promise.allSettled([
       fetchHomeHero({ signal: controller.signal }),
@@ -53,14 +49,17 @@ export const HomeDataProvider = ({ children }) => {
         errorStr = nowResult.reason?.message || 'Now Showing data unavailable';
       }
 
-      setState({
-        hero,
+      setState((previous) => ({
+        ...previous,
+        hero: hero || previous.hero,
         nowShowing,
-        heroStatus: heroResult.status === 'fulfilled' ? 'success' : 'error',
+        heroStatus: heroResult.status === 'fulfilled'
+          ? 'success'
+          : (previous.hero ? 'stale' : 'error'),
         nowShowingStatus: nsStatus,
         nowShowingSource: source,
         error: errorStr,
-      });
+      }));
     });
 
     return () => {
@@ -69,10 +68,15 @@ export const HomeDataProvider = ({ children }) => {
     };
   }, [state.retryCount]);
 
-  const value = useMemo(() => ({
-    ...state,
-    retry: () => setState(prev => ({ ...prev, retryCount: (prev.retryCount || 0) + 1 }))
-  }), [state]);
+  const retry = useCallback(() => setState((previous) => ({
+    ...previous,
+    heroStatus: 'loading',
+    nowShowingStatus: 'loading',
+    error: null,
+    retryCount: previous.retryCount + 1,
+  })), []);
+
+  const value = useMemo(() => ({ ...state, retry }), [retry, state]);
 
   return (
     <HomeDataContext.Provider value={value}>

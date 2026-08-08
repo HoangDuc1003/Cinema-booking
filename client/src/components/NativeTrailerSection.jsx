@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Star, ChevronLeft, ChevronRight, Play, Film } from 'lucide-react';
 import Loading from './Loading';
 import BlurCircle from './BlurCircle';
@@ -35,10 +35,8 @@ const mergeMovieList = (...lists) => {
 };
 
 const NativeTrailerSection = ({ featuredMovie = null, sectionId = 'home-trailer-section' }) => {
-  const { hero, nowShowing, heroStatus, nowShowingStatus, error } = useHomeData();
-  const [trailers, setTrailers] = useState([]);
+  const { hero, nowShowing, heroStatus, nowShowingStatus } = useHomeData();
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [hasError, setHasError] = useState(false);
   const [carouselPaused, setCarouselPaused] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
@@ -48,7 +46,12 @@ const NativeTrailerSection = ({ featuredMovie = null, sectionId = 'home-trailer-
   const styleRef = useRef(false);
   const videoRef = useRef(null);
 
-  const currentTrailer = trailers[currentIndex] || null;
+  const trailers = useMemo(() => {
+    const heroMovies = Array.isArray(hero?.movies) ? hero.movies : [];
+    const nowMovies = Array.isArray(nowShowing) ? nowShowing : [];
+    return mergeMovieList(featuredMovie ? [featuredMovie] : [], heroMovies, nowMovies);
+  }, [featuredMovie, hero, nowShowing]);
+  const currentTrailer = trailers[Math.min(currentIndex, Math.max(trailers.length - 1, 0))] || null;
   const nativeSource = resolveNativeTrailerSource(currentTrailer);
 
   const switchTrailer = useCallback((index) => {
@@ -108,22 +111,6 @@ const NativeTrailerSection = ({ featuredMovie = null, sectionId = 'home-trailer-
   }, []);
 
   useEffect(() => {
-    if (heroStatus === 'loading' || nowShowingStatus === 'loading') return;
-    
-    if (heroStatus === 'error' && nowShowingStatus === 'error') {
-      setHasError(true);
-      return;
-    }
-
-    const heroMovies = Array.isArray(hero?.movies) ? hero.movies : [];
-    const nowMovies = Array.isArray(nowShowing) ? nowShowing : [];
-    const combined = mergeMovieList(featuredMovie ? [featuredMovie] : [], heroMovies, nowMovies);
-
-    setTrailers(combined);
-    setHasError(false);
-  }, [hero, nowShowing, heroStatus, nowShowingStatus, featuredMovie]);
-
-  useEffect(() => {
     if (!featuredMovie || trailers.length === 0) return undefined;
     const featuredId = String(featuredMovie._id || featuredMovie.id || '');
     const foundIndex = trailers.findIndex((t) => String(t._id || t.id || '') === featuredId);
@@ -162,7 +149,6 @@ const NativeTrailerSection = ({ featuredMovie = null, sectionId = 'home-trailer-
   };
 
   if (heroStatus === 'loading' && nowShowingStatus === 'loading') return <div className="px-6 md:px-16 lg:px-24 py-20"><Loading /></div>;
-  if (hasError || trailers.length === 0) return null;
 
   return (
     <section id={sectionId} className="scroll-mt-20 px-6 md:px-16 lg:px-24 py-16 md:py-20 relative overflow-hidden min-h-screen md:min-h-[80vh]">
@@ -176,7 +162,7 @@ const NativeTrailerSection = ({ featuredMovie = null, sectionId = 'home-trailer-
           <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-white tracking-wide">Trailers</h2>
         </div>
 
-        {currentTrailer && (
+        {currentTrailer ? (
           <div className="relative z-10 w-full mb-8">
             {nativeSource ? (
               <div className="relative aspect-video w-full max-w-[1248px] mx-auto rounded-xl overflow-hidden bg-black border border-white/10 shadow-2xl">
@@ -218,9 +204,15 @@ const NativeTrailerSection = ({ featuredMovie = null, sectionId = 'home-trailer-
               </div>
             )}
           </div>
+        ) : (
+          <div className="relative z-10 mx-auto mb-8 flex min-h-[360px] max-w-[1248px] flex-col items-center justify-center rounded-xl border border-white/10 bg-slate-950/80 px-6 text-center shadow-2xl" role="status">
+            <Film className="mb-3 h-12 w-12 text-rose-500" aria-hidden="true" />
+            <p className="text-lg font-semibold text-white">Trailer previews are temporarily unavailable.</p>
+            <p className="mt-2 text-sm text-gray-400">Please check back shortly.</p>
+          </div>
         )}
 
-        <div
+        {trailers.length > 0 && <div
           className="ts-carousel-wrap relative z-10"
           onMouseEnter={() => setCarouselPaused(true)}
           onMouseLeave={() => setCarouselPaused(false)}
@@ -283,8 +275,8 @@ const NativeTrailerSection = ({ featuredMovie = null, sectionId = 'home-trailer-
               />
             ))}
           </div>
-        </div>
-        <p className="ts-hint relative z-10">{carouselPaused ? 'Auto-scroll paused' : 'Click any trailer to browse • Auto-scrolling'}</p>
+        </div>}
+        {trailers.length > 0 && <p className="ts-hint relative z-10">{carouselPaused ? 'Auto-scroll paused' : 'Click any trailer to browse'} • Auto-scrolling</p>}
       </div>
     </section>
   );

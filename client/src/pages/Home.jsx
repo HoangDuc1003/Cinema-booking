@@ -16,7 +16,7 @@ const SectionSkeleton = ({ trailer = false }) => (
   <div className="px-4 py-10 animate-pulse sm:px-6 md:px-16 lg:px-24 xl:px-40">
     <div className="mb-6 h-9 w-52 rounded bg-white/10" />
     {trailer ? (
-      <div className="mx-auto aspect-video w-full max-w-4xl rounded-xl bg-white/10" />
+      <div className="mx-auto min-h-[60vh] aspect-video w-full max-w-4xl rounded-xl bg-white/10" />
     ) : (
       <div className="grid grid-cols-2 gap-6 md:grid-cols-3 lg:grid-cols-5">
         {Array.from({ length: 5 }, (_, index) => (
@@ -55,19 +55,16 @@ const DeferredSection = ({ children, fallback, anchorId }) => {
 const Home = () => {
   const [requestedTrailerMovie, setRequestedTrailerMovie] = useState(null);
   const trailerMode = getHeroTrailerMode();
-  const showTrailerSection = trailerMode === 'section' || trailerMode === 'hybrid';
 
   return (
-    <HomeDataProvider>
+    <HomeDataProvider trailerMode={trailerMode}>
       <HeroSection autoPreview onTrailerRequest={setRequestedTrailerMovie} />
       <DeferredSection fallback={<SectionSkeleton />}>
         <FeatureSection />
       </DeferredSection>
-      {showTrailerSection && (
-        <DeferredSection anchorId="trailers" fallback={<SectionSkeleton trailer />}>
-          <NativeTrailerSection sectionId="home-trailer-section" featuredMovie={requestedTrailerMovie} />
-        </DeferredSection>
-      )}
+      <DeferredSection anchorId="trailers" fallback={<SectionSkeleton trailer />}>
+        <NativeTrailerSection sectionId="home-trailer-section" featuredMovie={requestedTrailerMovie} />
+      </DeferredSection>
     </HomeDataProvider>
   );
 };

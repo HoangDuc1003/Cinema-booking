@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RefreshCw } from 'lucide-react';
-import { fetchHomeHero } from '../services/tmdb';
 import HeroContent from './hero/HeroContent';
 import HeroMedia from './hero/HeroMedia';
 import HeroPosterRail from './hero/HeroPosterRail';
@@ -39,6 +38,7 @@ import {
   getVietnamDateKey,
 } from '../utils/heroDailyShuffle';
 import './hero/hero.css';
+import { useHomeData } from '../context/HomeDataContext';
 
 const HERO_POSTER_SWAP_DELAY_MS = 400;
 const HERO_POSTER_TRANSITION_MS = 1_200;
@@ -122,6 +122,7 @@ const reportHeroDevelopmentEvent = (event, detail = {}) => {
 
 const HeroSection = ({ autoPreview = false, onTrailerRequest = null }) => {
   const navigate = useNavigate();
+  const { hero: sharedHero, heroStatus: sharedHeroStatus, retry: retryHomeData } = useHomeData();
   const [initialPayload] = useState(() => getInitialHeroPayload());
   const [initialAudio] = useState(readStoredAudio);
 
@@ -133,7 +134,6 @@ const HeroSection = ({ autoPreview = false, onTrailerRequest = null }) => {
   const [catalogSource, setCatalogSource] = useState(initialPayload ? 'cache' : 'loading');
   const [catalogSettled, setCatalogSettled] = useState(Boolean(initialPayload));
   const [catalogError, setCatalogError] = useState(null);
-  const [reloadToken, setReloadToken] = useState(0);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isTransitioning, setIsTransitioning] = useState(false);
 
@@ -496,56 +496,49 @@ const HeroSection = ({ autoPreview = false, onTrailerRequest = null }) => {
 
   useEffect(() => {
     const controller = new AbortController();
-    const load = async () => {
+    const applySharedPayload = async () => {
       setCatalogError(null);
-      if (!moviesRef.current.length) {
-        setCatalogSource('loading');
-        setCatalogSettled(false);
+      if (sharedHeroStatus === 'loading' || sharedHeroStatus === 'idle') {
+        if (!moviesRef.current.length) {
+          setCatalogSource('loading');
+          setCatalogSettled(false);
+        }
+        return;
       }
 
-      for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (sharedHero) {
         try {
-          const data = await fetchHomeHero({ signal: controller.signal });
-          await applyServerPayload(data, controller.signal);
-          break;
+          await applyServerPayload(sharedHero, controller.signal);
+          if (!controller.signal.aborted) setCatalogSettled(true);
+          return;
         } catch (error) {
           if (controller.signal.aborted || error?.name === 'AbortError') return;
-          const retryable = error?.name === 'TimeoutError'
-            || error?.name === 'TypeError'
-            || error?.status === 429
-            || error?.status >= 500;
-          if (attempt === 1 || !retryable) {
-            if (!moviesRef.current.length) {
-              setCatalogSource('error');
-              setCatalogError(error);
-            }
-            break;
+          if (!moviesRef.current.length) {
+            setCatalogSource('error');
+            setCatalogError(error);
           }
-          await new Promise((resolve, reject) => {
-            const timer = window.setTimeout(resolve, 650);
-            controller.signal.addEventListener('abort', () => {
-              window.clearTimeout(timer);
-              reject(controller.signal.reason || new DOMException('Aborted', 'AbortError'));
-            }, { once: true });
-          });
         }
+      } else if (!moviesRef.current.length) {
+        setCatalogSource('error');
+        setCatalogError(new Error('Featured movies are temporarily unavailable.'));
       }
+
       if (!controller.signal.aborted) setCatalogSettled(true);
     };
-    void load();
+    void applySharedPayload();
     return () => controller.abort(new DOMException('Hero view changed', 'AbortError'));
-  }, [applyServerPayload, reloadToken]);
+  }, [applyServerPayload, sharedHero, sharedHeroStatus]);
 
   useEffect(() => {
     const nextRefresh = Date.parse(catalogMeta?.nextRefreshAt || '');
     if (!Number.isFinite(nextRefresh)) return undefined;
     const delay = Math.max(1_000, nextRefresh - Date.now() + 250);
     const timer = window.setTimeout(
-      () => setReloadToken((token) => token + 1),
+      retryHomeData,
       Math.min(delay, 2_147_483_000),
     );
     return () => window.clearTimeout(timer);
-  }, [catalogMeta?.nextRefreshAt, catalogMeta?.version]);
+  }, [catalogMeta?.nextRefreshAt, catalogMeta?.version, retryHomeData]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -564,13 +557,13 @@ const HeroSection = ({ autoPreview = false, onTrailerRequest = null }) => {
       if (!document.hidden && catalogMeta?.dateKey) {
         const currentDateKey = getVietnamDateKey();
         if (currentDateKey !== catalogMeta.dateKey) {
-          setReloadToken((token) => token + 1);
+          retryHomeData();
         }
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [catalogMeta?.dateKey]);
+  }, [catalogMeta?.dateKey, retryHomeData]);
 
   useEffect(() => {
     if (!videoSource || manualPlaybackRef.current || !automaticMediaBlocked) return;
@@ -954,7 +947,7 @@ const HeroSection = ({ autoPreview = false, onTrailerRequest = null }) => {
           <p className="hero-catalog-state__eyebrow">NitroCine</p>
           <h1>Unable to load featured movies</h1>
           <p>{catalogError?.message || 'The server connection was interrupted. Please try again.'}</p>
-          <button type="button" onClick={() => setReloadToken((token) => token + 1)}>
+          <button type="button" onClick={retryHomeData}>
             <RefreshCw aria-hidden="true" />
             Try again
           </button>
