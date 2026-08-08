@@ -1,8 +1,16 @@
-  {
-    "rewrites": [
-      {
-        "source": "/(.*)",
-        "destination": "/"
-      }
-    ]
-  }
+{
+  "rewrites": [
+    {
+      "source": "/__clerk",
+      "destination": "/api/__clerk"
+    },
+    {
+      "source": "/__clerk/(.*)",
+      "destination": "/api/__clerk/$1"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/"
+    }
+  ]
+}
