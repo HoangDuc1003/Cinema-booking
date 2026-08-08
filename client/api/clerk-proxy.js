@@ -12,6 +12,7 @@ const HOP_BY_HOP_HEADERS = new Set([
     'transfer-encoding',
     'upgrade',
 ]);
+const FETCH_DECODED_RESPONSE_HEADERS = new Set(['content-encoding', 'content-length']);
 
 export const config = {
     api: {
@@ -103,7 +104,7 @@ const copyResponseHeaders = (res, upstream, upstreamUrl, proxyUrl) => {
     let setCookies = [];
     for (const [name, value] of upstream.headers.entries()) {
         const lowerName = name.toLowerCase();
-        if (HOP_BY_HOP_HEADERS.has(lowerName)) continue;
+        if (HOP_BY_HOP_HEADERS.has(lowerName) || FETCH_DECODED_RESPONSE_HEADERS.has(lowerName)) continue;
         if (lowerName === 'set-cookie') {
             setCookies = typeof upstream.headers.getSetCookie === 'function'
                 ? upstream.headers.getSetCookie()

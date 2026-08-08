@@ -103,3 +103,49 @@ test('Clerk proxy fails closed when its server-only secret is missing', async ()
   assert.equal(response.statusCode, 500);
   assert.equal(response.getBody(), '{"error":"CLERK_PROXY_NOT_CONFIGURED"}');
 });
+
+test('Clerk proxy drops stale compression headers while preserving JSON, cookies, and redirects', async () => {
+  const originalFetch = globalThis.fetch;
+
+  try {
+    for (const encoding of ['gzip', 'br']) {
+      globalThis.fetch = async () => new Response(JSON.stringify({ ok: true, encoding }), {
+        status: 307,
+        headers: {
+          'content-type': 'application/json',
+          'content-encoding': encoding,
+          'content-length': '999',
+          location: 'https://frontend-api.clerk.dev/v1/environment?next=1',
+          'set-cookie': 'session=proxy-cookie; Path=/; Secure',
+        },
+      });
+
+      const request = createRequest({
+        url: '/api/clerk-proxy?_clerk_path=%2Fv1%2Fenvironment',
+        headers: { host: 'nitrocine.vercel.app' },
+      });
+      const response = createResponse();
+      const finished = new Promise((resolve) => response.once('finish', resolve));
+
+      await handleClerkProxy(request, response, {
+        CLERK_SECRET_KEY: 'server_fixture_only',
+        CLERK_PROXY_URL: 'https://nitrocine.vercel.app/__clerk',
+        CLERK_FAPI: 'https://frontend-api.clerk.dev',
+      });
+      await finished;
+
+      assert.equal(response.statusCode, 307);
+      assert.equal(response.headers['content-encoding'], undefined);
+      assert.equal(response.headers['content-length'], undefined);
+      assert.equal(response.headers['content-type'], 'application/json');
+      assert.deepEqual(response.headers['set-cookie'], ['session=proxy-cookie; Path=/; Secure']);
+      assert.equal(
+        response.headers.location,
+        'https://nitrocine.vercel.app/__clerk/v1/environment?next=1',
+      );
+      assert.deepEqual(JSON.parse(response.getBody()), { ok: true, encoding });
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
