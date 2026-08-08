@@ -15,7 +15,8 @@ import {
     getPaymentConfigStatus,
     validateClerkConfig,
 } from '../configs/runtimeConfig.js';
-import { connectCloudinary } from '../configs/cloudinary.js';
+import { connectCloudinary, getCloudinaryConfigStatus } from '../configs/cloudinary.js';
+import { HERO_RUNTIME_CONFIG } from '../configs/heroRotation.js';
 import { createCorsMiddleware, handleCorsError } from '../middleware/corsPolicy.js';
 
 connectCloudinary();
@@ -79,6 +80,7 @@ app.get('/api/health/ready', async (req, res) => {
     const redis = await getRedisHealth();
     const paymentConfig = getPaymentConfigStatus();
     const clerkConfig = getClerkConfigStatus();
+    const cloudinaryConfig = getCloudinaryConfigStatus();
     let clientUrl = paymentConfig.clientUrl;
     try {
         clientUrl = { configured: Boolean(getConfiguredClientUrl()) };
@@ -99,6 +101,13 @@ app.get('/api/health/ready', async (req, res) => {
             clerk: clerkConfig,
             tmdb: { configured: Boolean(process.env.TMDB_API_KEY) },
             clientUrl,
+            cloudinary: cloudinaryConfig,
+            hero: {
+                refreshIntervalHours: HERO_RUNTIME_CONFIG.refreshIntervalHours,
+                refreshTimezone: HERO_RUNTIME_CONFIG.refreshTimezone,
+                requireNativeVideo: HERO_RUNTIME_CONFIG.requireNativeVideo,
+                videoAllowedHosts: HERO_RUNTIME_CONFIG.videoAllowedHosts,
+            },
         },
     });
 });
