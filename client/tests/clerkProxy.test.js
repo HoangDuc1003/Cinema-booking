@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Buffer } from 'node:buffer';
 import { Readable, Writable } from 'node:stream';
-import handleClerkProxy from '../api/__clerk/[...path].js';
+import handleClerkProxy from '../api/clerk-proxy.js';
 
 const createRequest = ({ method = 'GET', url, headers = {}, body = '' }) => {
   const request = Readable.from(body ? [Buffer.from(body)] : []);
@@ -53,7 +53,7 @@ test('Clerk proxy forwards the request and rewrites upstream redirects', async (
   try {
     const request = createRequest({
       method: 'POST',
-      url: '/api/__clerk/sessions?mode=redirect',
+      url: '/api/clerk-proxy?_clerk_path=%2Fsessions&mode=redirect',
       headers: {
         host: 'nitrocine.vercel.app',
         cookie: 'foo=bar',
@@ -93,7 +93,7 @@ test('Clerk proxy forwards the request and rewrites upstream redirects', async (
 });
 
 test('Clerk proxy fails closed when its server-only secret is missing', async () => {
-  const request = createRequest({ url: '/api/__clerk/health' });
+  const request = createRequest({ url: '/api/clerk-proxy?_clerk_path=%2Fhealth' });
   const response = createResponse();
   const finished = new Promise((resolve) => response.once('finish', resolve));
 

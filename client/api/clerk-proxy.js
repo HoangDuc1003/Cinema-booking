@@ -43,11 +43,10 @@ const getRequestUrl = (req) => new URL(
 );
 
 const getClerkPath = (req) => {
-    const pathname = getRequestUrl(req).pathname;
-    const prefix = ['/api/__clerk', '/__clerk'].find((candidate) => pathname.startsWith(candidate));
-    if (!prefix) throw new Error('Invalid Clerk proxy path');
-    const path = pathname.slice(prefix.length);
-    return path || '/';
+    const requestUrl = getRequestUrl(req);
+    const routedPath = requestUrl.searchParams.get('_clerk_path');
+    if (routedPath) return routedPath.startsWith('/') ? routedPath : `/${routedPath}`;
+    return '/';
 };
 
 const getProxyUrl = (req, env) => {
@@ -61,8 +60,10 @@ const getProxyUrl = (req, env) => {
 const getUpstreamUrl = (req, env) => {
     const fapi = new URL(String(env.CLERK_FAPI || CLERK_FAPI_DEFAULT).trim());
     const requestUrl = getRequestUrl(req);
+    const query = new URLSearchParams(requestUrl.search);
+    query.delete('_clerk_path');
     fapi.pathname = getClerkPath(req);
-    fapi.search = requestUrl.search;
+    fapi.search = query.toString();
     return fapi;
 };
 
