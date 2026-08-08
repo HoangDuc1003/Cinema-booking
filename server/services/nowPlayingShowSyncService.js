@@ -327,11 +327,16 @@ const fetchMovieForDemoSchedule = async (movieId, fetcher = axios.get) => {
 
 export const isDemoScheduleKey = (value) => String(value || '').startsWith('demo-vn:');
 
-export const isDemoShowtimesEnabled = () => (
-    String(process.env.DEMO_SHOWTIMES_ENABLED || '').trim()
-        ? String(process.env.DEMO_SHOWTIMES_ENABLED).trim().toLowerCase() === 'true'
-        : /^pk_test_/i.test(String(process.env.CLERK_PUBLISHABLE_KEY || '').trim())
-);
+export const isDemoShowtimesEnabled = () => {
+    const isProduction = String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production'
+        || String(process.env.VERCEL_ENV || '').trim().toLowerCase() === 'production';
+    if (isProduction) return false;
+
+    const configured = String(process.env.DEMO_SHOWTIMES_ENABLED || '').trim();
+    return configured
+        ? configured.toLowerCase() === 'true'
+        : /^pk_test_/i.test(String(process.env.CLERK_PUBLISHABLE_KEY || '').trim());
+};
 
 export const ensureDemoShowtimes = async ({
     movieId,

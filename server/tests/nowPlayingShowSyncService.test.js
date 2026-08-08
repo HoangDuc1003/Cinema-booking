@@ -215,17 +215,30 @@ test('demo showtimes persist seven bookable dates with real Mongo-compatible sho
 test('demo showtimes are opt-in through the server environment', () => {
     const previous = process.env.DEMO_SHOWTIMES_ENABLED;
     const previousClerkKey = process.env.CLERK_PUBLISHABLE_KEY;
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousVercelEnv = process.env.VERCEL_ENV;
     delete process.env.DEMO_SHOWTIMES_ENABLED;
+    delete process.env.NODE_ENV;
+    delete process.env.VERCEL_ENV;
     process.env.CLERK_PUBLISHABLE_KEY = 'pk_live_example';
     assert.equal(isDemoShowtimesEnabled(), false);
     process.env.CLERK_PUBLISHABLE_KEY = 'pk_test_example';
     assert.equal(isDemoShowtimesEnabled(), true);
     process.env.DEMO_SHOWTIMES_ENABLED = 'true';
     assert.equal(isDemoShowtimesEnabled(), true);
+    process.env.NODE_ENV = 'production';
+    assert.equal(isDemoShowtimesEnabled(), false);
+    delete process.env.NODE_ENV;
+    process.env.VERCEL_ENV = 'production';
+    assert.equal(isDemoShowtimesEnabled(), false);
     if (previous === undefined) delete process.env.DEMO_SHOWTIMES_ENABLED;
     else process.env.DEMO_SHOWTIMES_ENABLED = previous;
     if (previousClerkKey === undefined) delete process.env.CLERK_PUBLISHABLE_KEY;
     else process.env.CLERK_PUBLISHABLE_KEY = previousClerkKey;
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+    if (previousVercelEnv === undefined) delete process.env.VERCEL_ENV;
+    else process.env.VERCEL_ENV = previousVercelEnv;
 });
 
 test('TMDB sync does not fall back to another catalog when now-playing fails', async () => {
