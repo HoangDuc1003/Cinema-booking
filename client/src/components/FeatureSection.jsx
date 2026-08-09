@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowRightIcon, ChevronLeftIcon, ChevronRightIcon, StarIcon, Calendar, Clock, Ticket } from 'lucide-react';
+import { ArrowRightIcon, StarIcon, Calendar, Clock } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
 import BlurCircle from './BlurCircle';
 import { useHomeData } from '../context/HomeDataContext';
@@ -13,7 +13,6 @@ const getImageUrl = (path) => {
 };
 
 const MobileCarouselCard = ({ movie }) => {
-  const navigate = useNavigate();
   const movieId = movie._id || movie.id;
   const movieHref = `/movies/${movieId}`;
 
@@ -52,18 +51,12 @@ const MobileCarouselCard = ({ movie }) => {
             <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{runtime}</span>
           </div>
 
-          <button
-            type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              handleNavigate();
-              navigate(movieHref);
-            }}
+          <span
             className="w-full flex items-center justify-center gap-1 py-1.5 px-2 rounded-lg bg-primary text-white text-[11px] font-bold shadow-md active:scale-95"
           >
-            <Ticket className="w-3 h-3" />
-            Book Now
-          </button>
+            <ArrowRightIcon className="w-3 h-3" />
+            View Details
+          </span>
         </div>
       </Link>
 
@@ -80,7 +73,7 @@ const MobileCarouselCard = ({ movie }) => {
 
 const FeatureSection = () => {
   const navigate = useNavigate();
-  const { nowShowing, nowShowingStatus, nowShowingSource, retry } = useHomeData();
+  const { nowShowing, nowShowingStatus, nowShowingSource, retryNowShowing } = useHomeData();
   const [scrollProgress, setScrollProgress] = useState(0);
   const railRef = useRef(null);
 
@@ -161,13 +154,14 @@ const FeatureSection = () => {
               columns="grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
               animated={true}
               staggerDelay={80}
+              ctaLabel="View details"
             />
           </div>
         </>
       ) : nowShowingStatus === 'error' ? (
         <div role="alert" className="rounded-2xl border border-red-300/20 bg-red-300/10 px-6 py-10 text-center text-sm text-red-100">
           <p>Current releases are temporarily unavailable.</p>
-          <button type="button" onClick={retry} className="mt-4 rounded-full border border-red-200/30 px-5 py-2 font-semibold hover:bg-red-200/10">
+          <button type="button" onClick={retryNowShowing} className="mt-4 rounded-full border border-red-200/30 px-5 py-2 font-semibold hover:bg-red-200/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-100">
             Retry
           </button>
         </div>

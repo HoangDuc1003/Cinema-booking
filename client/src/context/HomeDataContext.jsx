@@ -1,64 +1,57 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { fetchHomeHero, fetchHomeNowShowing } from '../services/tmdb';
 import { getInitialHeroPayload } from '../components/hero/heroCatalogLoader';
+import { readHomeNowShowingCache } from '../services/homeNowShowingCache';
 
 const HomeDataContext = createContext({
   hero: null,
   nowShowing: [],
   heroStatus: 'idle',
+  heroError: null,
   nowShowingStatus: 'idle',
+  nowShowingError: null,
   nowShowingSource: null,
-  error: null,
+  retryHero: () => {},
+  retryNowShowing: () => {},
+  retry: () => {},
 });
 
 // eslint-disable-next-line react-refresh/only-export-components
 export const useHomeData = () => useContext(HomeDataContext);
 
 export const HomeDataProvider = ({ children }) => {
+  const [initialHero] = useState(() => getInitialHeroPayload());
+  const [initialNowShowing] = useState(() => readHomeNowShowingCache());
+  const [heroRetryCount, setHeroRetryCount] = useState(0);
+  const [nowShowingRetryCount, setNowShowingRetryCount] = useState(0);
   const [state, setState] = useState(() => ({
-    hero: getInitialHeroPayload(),
-    nowShowing: [],
-    heroStatus: 'loading',
-    nowShowingStatus: 'loading',
-    nowShowingSource: null,
-    error: null,
-    retryCount: 0,
+    hero: initialHero,
+    nowShowing: initialNowShowing?.movies || [],
+    heroStatus: initialHero ? 'stale' : 'loading',
+    heroError: null,
+    nowShowingStatus: initialNowShowing ? 'stale' : 'loading',
+    nowShowingError: null,
+    nowShowingSource: initialNowShowing?.source || null,
   }));
 
   useEffect(() => {
     const controller = new AbortController();
     let alive = true;
 
-    Promise.allSettled([
-      fetchHomeHero({ signal: controller.signal }),
-      fetchHomeNowShowing({ limit: 10, signal: controller.signal }),
-    ]).then(([heroResult, nowResult]) => {
+    fetchHomeHero({ signal: controller.signal }).then((hero) => {
       if (!alive || controller.signal.aborted) return;
-      
-      const hero = heroResult.status === 'fulfilled' ? heroResult.value : null;
-      let nowShowing = [];
-      let source = null;
-      let nsStatus = 'error';
-      let errorStr = null;
-
-      if (nowResult.status === 'fulfilled') {
-        nowShowing = nowResult.value.movies || [];
-        source = nowResult.value.source;
-        nsStatus = source === 'stale-server-cache' ? 'stale' : 'success';
-      } else {
-        errorStr = nowResult.reason?.message || 'Now Showing data unavailable';
-      }
-
       setState((previous) => ({
         ...previous,
-        hero: hero || previous.hero,
-        nowShowing,
-        heroStatus: heroResult.status === 'fulfilled'
-          ? 'success'
-          : (previous.hero ? 'stale' : 'error'),
-        nowShowingStatus: nsStatus,
-        nowShowingSource: source,
-        error: errorStr,
+        hero,
+        heroStatus: 'success',
+        heroError: null,
+      }));
+    }).catch((error) => {
+      if (!alive || controller.signal.aborted || error?.name === 'AbortError') return;
+      setState((previous) => ({
+        ...previous,
+        heroStatus: previous.hero ? 'stale' : 'error',
+        heroError: error,
       }));
     });
 
@@ -66,17 +59,62 @@ export const HomeDataProvider = ({ children }) => {
       alive = false;
       controller.abort();
     };
-  }, [state.retryCount]);
+  }, [heroRetryCount]);
 
-  const retry = useCallback(() => setState((previous) => ({
-    ...previous,
-    heroStatus: 'loading',
-    nowShowingStatus: 'loading',
-    error: null,
-    retryCount: previous.retryCount + 1,
-  })), []);
+  useEffect(() => {
+    const controller = new AbortController();
+    let alive = true;
 
-  const value = useMemo(() => ({ ...state, retry }), [retry, state]);
+    fetchHomeNowShowing({ limit: 10, signal: controller.signal }).then((result) => {
+      if (!alive || controller.signal.aborted) return;
+      setState((previous) => ({
+        ...previous,
+        nowShowing: result.movies || [],
+        nowShowingStatus: result.source === 'stale-server-cache' ? 'stale' : 'success',
+        nowShowingSource: result.meta?.source || result.source || null,
+        nowShowingError: result.error || null,
+      }));
+    }).catch((error) => {
+      if (!alive || controller.signal.aborted || error?.name === 'AbortError') return;
+      setState((previous) => ({
+        ...previous,
+        nowShowingStatus: previous.nowShowing.length ? 'stale' : 'error',
+        nowShowingError: error,
+      }));
+    });
+
+    return () => {
+      alive = false;
+      controller.abort();
+    };
+  }, [nowShowingRetryCount]);
+
+  const retryHero = useCallback(() => {
+    setState((previous) => ({ ...previous, heroStatus: previous.hero ? 'stale' : 'loading', heroError: null }));
+    setHeroRetryCount((count) => count + 1);
+  }, []);
+
+  const retryNowShowing = useCallback(() => {
+    setState((previous) => ({
+      ...previous,
+      nowShowingStatus: previous.nowShowing.length ? 'stale' : 'loading',
+      nowShowingError: null,
+    }));
+    setNowShowingRetryCount((count) => count + 1);
+  }, []);
+
+  const retry = useCallback(() => {
+    retryHero();
+    retryNowShowing();
+  }, [retryHero, retryNowShowing]);
+
+  const value = useMemo(() => ({
+    ...state,
+    error: state.nowShowingError?.message || state.heroError?.message || null,
+    retryHero,
+    retryNowShowing,
+    retry,
+  }), [retry, retryHero, retryNowShowing, state]);
 
   return (
     <HomeDataContext.Provider value={value}>

@@ -4,6 +4,12 @@ import User from '../models/User.js';
 import { reconcileHeroAssets } from '../services/heroVideoService.js';
 import { getISOWeekKey, refreshWeeklyCatalog, rotateActiveCatalogSlot } from '../services/catalogRefreshService.js';
 import { createEnrichHeroVideosFunction } from './functions/enrichHeroVideos.js';
+import {
+    createHeroMediaIngestFunction,
+    createHeroMediaRequestedFunction,
+    createHeroMediaVerifyFunction,
+    createHeroPoolReconcileFunction,
+} from './functions/heroMediaPipeline.js';
 import { syncNowPlayingShows } from '../services/nowPlayingShowSyncService.js';
 import {
     getHeroLocalDateKey,
@@ -215,7 +221,16 @@ try {
         }
     );
 
-    const enrichHeroVideosJob = createEnrichHeroVideosFunction(inngest);
+    // This legacy Cloudinary scan bypasses the source-policy/registry pipeline.
+    // Keep it opt-in only for a controlled migration audit, never as the normal
+    // catalog activation path.
+    const enrichHeroVideosJob = process.env.HERO_ENABLE_LEGACY_CLOUDINARY_ENRICHMENT === 'true'
+        ? createEnrichHeroVideosFunction(inngest)
+        : null;
+    const heroMediaRequestedJob = createHeroMediaRequestedFunction(inngest);
+    const heroMediaIngestJob = createHeroMediaIngestFunction(inngest);
+    const heroMediaVerifyJob = createHeroMediaVerifyFunction(inngest);
+    const heroPoolReconcileJob = createHeroPoolReconcileFunction(inngest);
 
     // Export all functions for the Inngest serve handler
     functions = [
@@ -228,7 +243,11 @@ try {
         rotateActiveCatalogSlotJob,
         syncVnNowPlayingShows,
         reconcileHeroAssetsJob,
-        enrichHeroVideosJob
+        heroMediaRequestedJob,
+        heroMediaIngestJob,
+        heroMediaVerifyJob,
+        heroPoolReconcileJob,
+        ...(enrichHeroVideosJob ? [enrichHeroVideosJob] : []),
     ];
 } catch (error) {
     console.warn('[Inngest] Initialization skipped — missing config:', error.message);

@@ -9,7 +9,7 @@ import HeroSection from '../components/HeroSection';
 import { getHeroTrailerMode } from '../components/hero/heroTrailerMode';
 
 const FeatureSection = lazy(() => import('../components/FeatureSection'));
-const NativeTrailerSection = lazy(() => import('../components/NativeTrailerSection'));
+const TrailerSection = lazy(() => import('../components/TrailerSection'));
 import { HomeDataProvider } from '../context/HomeDataContext';
 
 const SectionSkeleton = ({ trailer = false }) => (
@@ -63,7 +63,7 @@ const Home = () => {
         <FeatureSection />
       </DeferredSection>
       <DeferredSection anchorId="trailers" fallback={<SectionSkeleton trailer />}>
-        <NativeTrailerSection sectionId="home-trailer-section" featuredMovie={requestedTrailerMovie} />
+        <TrailerSection sectionId="home-trailer-section" featuredMovie={requestedTrailerMovie} />
       </DeferredSection>
     </HomeDataProvider>
   );

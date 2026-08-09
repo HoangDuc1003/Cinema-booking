@@ -1,5 +1,5 @@
 import React, { useCallback, useState, useEffect, useRef } from 'react';
-import { StarIcon, Calendar, Clock, Play, Heart, Film } from 'lucide-react';
+import { StarIcon, Calendar, Clock, Play, Heart, Film, ArrowRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Link } from 'react-router-dom';
 import timeFormat from '../lib/timeFormat';
@@ -14,7 +14,7 @@ const readStoredFavorites = () => {
   }
 };
 
-const MovieCard = ({ movie }) => {
+const MovieCard = ({ movie, ctaLabel = 'Book tickets' }) => {
   const [hasImageError, setHasImageError] = useState(false);
   const cardRef = useRef(null);
   const motionFrameRef = useRef(null);
@@ -174,8 +174,8 @@ const MovieCard = ({ movie }) => {
       </button>
 
       <Link to={movieHref} onClick={handleNavigate} className="movie-card__cta">
-        <Play aria-hidden="true" />
-        Book tickets
+        {ctaLabel === 'View details' ? <ArrowRight aria-hidden="true" /> : <Play aria-hidden="true" />}
+        {ctaLabel}
       </Link>
     </article>
   );

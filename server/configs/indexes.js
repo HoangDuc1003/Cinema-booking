@@ -3,6 +3,7 @@ import SeatReservation from '../models/SeatReservation.js';
 import CatalogBatch from '../models/CatalogBatch.js';
 import CatalogRefreshRun from '../models/CatalogRefreshRun.js';
 import HeroRotationBatch from '../models/HeroRotationBatch.js';
+import HeroMediaAsset from '../models/HeroMediaAsset.js';
 
 const state = globalThis.__nitroCineIndexState || { promise: null, ready: false };
 globalThis.__nitroCineIndexState = state;
@@ -16,9 +17,11 @@ export const ensureCriticalIndexes = async () => {
             CatalogBatch.init(),
             CatalogRefreshRun.init(),
             HeroRotationBatch.init(),
+            HeroMediaAsset.init(),
         ]).then(() => Promise.all([
             verifyCatalogV2Indexes(),
             verifyHeroRotationIndexes(),
+            verifyHeroMediaAssetIndexes(),
         ])).then(() => {
             state.ready = true;
             return true;
@@ -67,6 +70,34 @@ export const verifyHeroRotationIndexes = async () => {
     }).map(([name]) => name);
     if (invalid.length) {
         throw new Error(`Hero rotation migration required; missing or invalid indexes: ${invalid.join(', ')}`);
+    }
+    return true;
+};
+
+export const verifyHeroMediaAssetIndexes = async () => {
+    const indexes = await HeroMediaAsset.collection.indexes();
+    const byName = new Map(indexes.map((index) => [index.name, index]));
+    const required = {
+        hero_media_source_identity_unique: {
+            key: { movieId: 1, sourceIdentity: 1 },
+            unique: true,
+        },
+        hero_media_ready_cloudinary_public_id_unique: {
+            key: { cloudinaryPublicId: 1 },
+            unique: true,
+            partialFilterExpression: { status: 'ready', cloudinaryPublicId: { $gt: '' } },
+        },
+        hero_media_movie_status: { key: { movieId: 1, status: 1, verifiedAt: -1 } },
+        hero_media_queue_status: { key: { status: 1, updatedAt: 1 } },
+    };
+    const invalid = Object.entries(required).filter(([name, shape]) => {
+        const actual = byName.get(name);
+        return !actual || Object.entries(shape).some(
+            ([key, value]) => JSON.stringify(actual[key]) !== JSON.stringify(value),
+        );
+    }).map(([name]) => name);
+    if (invalid.length) {
+        throw new Error(`Hero media migration required; missing or invalid indexes: ${invalid.join(', ')}`);
     }
     return true;
 };

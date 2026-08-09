@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { UploadCloudIcon, Trash2Icon, FileVideoIcon, Loader2Icon } from 'lucide-react';
+import { UploadCloudIcon, Trash2Icon, FileVideoIcon, Link2Icon, Loader2Icon } from 'lucide-react';
 import toast from 'react-hot-toast';
 import apiClient from '../../lib/apiClient';
 
@@ -47,6 +47,57 @@ const HeroVideoUploader = ({ movie, onUpdated }) => {
   const videoHeight = Number(videoMetadata.height ?? movie.heroVideoHeight);
   const [progress, setProgress] = useState(0);
   const isVerifiedReady = movie.nativeVideoValid === true;
+  const movieId = movie._id || movie.id;
+  const [sourceUrl, setSourceUrl] = useState('');
+  const [rightsConfirmed, setRightsConfirmed] = useState(false);
+  const [queueingSource, setQueueingSource] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const [showReplacement, setShowReplacement] = useState(!isVerifiedReady);
+
+  const handleSourceSubmit = async (event) => {
+    event.preventDefault();
+    if (!rightsConfirmed) {
+      toast.error('Confirm authorization before queueing this source.');
+      return;
+    }
+    try {
+      setQueueingSource(true);
+      const { data } = await apiClient.post(`/api/admin/hero/${movieId}/source`, {
+        sourceType: 'AUTHORIZED_REMOTE_URL',
+        sourceProvider: 'admin-approved',
+        sourceUrl,
+        rightsStatus: 'AUTHORIZED',
+        rightsConfirmed: true,
+        provenance: { submittedVia: 'hero-admin' },
+      });
+      if (!data.success) throw new Error(data.message || 'Unable to queue the source.');
+      toast.success(data.reused ? 'Verified media is already in the library.' : 'Authorized source queued for Cloudinary ingestion.');
+      setSourceUrl('');
+      setRightsConfirmed(false);
+      setShowReplacement(false);
+      onUpdated?.();
+    } catch (error) {
+      toast.error(error.response?.data?.message || error.message || 'Unable to queue the source.');
+    } finally {
+      setQueueingSource(false);
+    }
+  };
+
+  const handleRetry = async () => {
+    const assetId = movie.media?.id;
+    if (!assetId) return;
+    try {
+      setRetrying(true);
+      const { data } = await apiClient.post(`/api/admin/hero/media/${assetId}/retry`);
+      if (!data.success) throw new Error(data.message || 'Unable to retry ingestion.');
+      toast.success('Hero media ingestion was queued again.');
+      onUpdated?.();
+    } catch (error) {
+      toast.error(error.response?.data?.message || error.message || 'Unable to retry ingestion.');
+    } finally {
+      setRetrying(false);
+    }
+  };
 
   const handleFileChange = async (event) => {
     const file = event.target.files?.[0];
@@ -75,7 +126,7 @@ const HeroVideoUploader = ({ movie, onUpdated }) => {
         throw new Error('Video must be decodable, at most 180 seconds, and at least 640×360.');
       }
 
-      const { data: sigData } = await apiClient.get(`/api/admin/hero/upload-signature?movieId=${movie._id || movie.id}`);
+      const { data: sigData } = await apiClient.get(`/api/admin/hero/upload-signature?movieId=${movieId}`);
       if (!sigData.success) throw new Error(sigData.message || 'Failed to get upload signature');
 
       const {
@@ -115,7 +166,7 @@ const HeroVideoUploader = ({ movie, onUpdated }) => {
         xhr.open('POST', cloudinaryUrl, true);
         xhr.send(formData);
       }).then(async (cloudinaryRes) => {
-        const { data: commitData } = await apiClient.post(`/api/admin/hero/${movie._id || movie.id}/commit`, {
+        const { data: commitData } = await apiClient.post(`/api/admin/hero/${movieId}/commit`, {
           publicId: cloudinaryRes.public_id,
         });
         if (!commitData.success) throw new Error(commitData.message);
@@ -138,7 +189,7 @@ const HeroVideoUploader = ({ movie, onUpdated }) => {
     if (!window.confirm('Are you sure you want to remove the native video?')) return;
     try {
       setUploading(true);
-      const { data } = await apiClient.delete(`/api/admin/hero/${movie._id || movie.id}/video`);
+      const { data } = await apiClient.delete(`/api/admin/hero/${movieId}/video`);
       if (data.success) {
         toast.success('Video removed.');
         onUpdated?.();
@@ -153,9 +204,9 @@ const HeroVideoUploader = ({ movie, onUpdated }) => {
   };
 
   return (
-    <div className="mt-2 text-sm flex flex-wrap items-center gap-3">
+    <div className="mt-2 text-sm">
       {isVerifiedReady ? (
-        <>
+        <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-1 text-green-400">
              <FileVideoIcon className="w-4 h-4" />
              Ready
@@ -170,6 +221,14 @@ const HeroVideoUploader = ({ movie, onUpdated }) => {
           )}
           <button
             type="button"
+            onClick={() => setShowReplacement((value) => !value)}
+            className="flex items-center gap-1 text-blue-300 hover:text-blue-200"
+          >
+            <Link2Icon className="w-3 h-3" />
+            Replace asset
+          </button>
+          <button
+            type="button"
             onClick={handleRemove}
             disabled={uploading}
             className="flex items-center gap-1 text-red-400 hover:text-red-300 disabled:opacity-50"
@@ -177,18 +236,72 @@ const HeroVideoUploader = ({ movie, onUpdated }) => {
             <Trash2Icon className="w-3 h-3" />
             Remove
           </button>
-        </>
+        </div>
       ) : (
-        <>
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            className="flex items-center gap-1.5 px-3 py-1 bg-white/10 hover:bg-white/20 rounded text-gray-300 disabled:opacity-50"
-          >
-            {uploading ? <Loader2Icon className="w-4 h-4 animate-spin" /> : <UploadCloudIcon className="w-4 h-4" />}
-            {uploading ? `Uploading ${progress}%` : 'Upload Video'}
-          </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-xs text-amber-300">{movie.media?.failureCode || movie.media?.sourceStatus || 'NEEDS_AUTHORIZED_SOURCE'}</p>
+          {!showReplacement && (
+            <button
+              type="button"
+              onClick={() => setShowReplacement(true)}
+              className="text-[11px] text-blue-300 hover:text-blue-200"
+            >
+              Provide source
+            </button>
+          )}
+          {movie.media?.status === 'failed' && movie.media?.id && (
+            <button
+              type="button"
+              onClick={handleRetry}
+              disabled={retrying}
+              className="rounded border border-amber-400/30 px-2 py-1 text-[11px] text-amber-200 hover:bg-amber-400/10 disabled:opacity-50"
+            >
+              {retrying ? 'Retrying' : 'Retry ingestion'}
+            </button>
+          )}
+        </div>
+      )}
+      {showReplacement && (
+        <form onSubmit={handleSourceSubmit} className="mt-3 space-y-2 rounded border border-blue-500/30 bg-blue-500/5 p-2">
+          <label className="block text-xs text-gray-300">
+            Authorized direct media URL
+            <input
+              type="url"
+              required
+              value={sourceUrl}
+              onChange={(event) => setSourceUrl(event.target.value)}
+              placeholder="https://licensed-cdn.example/trailer.mp4"
+              className="mt-1 w-full rounded border border-white/15 bg-black/30 px-2 py-1.5 text-xs text-white outline-none focus:border-primary"
+            />
+          </label>
+          <label className="flex items-start gap-2 text-xs text-gray-300">
+            <input
+              type="checkbox"
+              checked={rightsConfirmed}
+              onChange={(event) => setRightsConfirmed(event.target.checked)}
+              className="mt-0.5 rounded border-white/20 bg-black/30 text-primary"
+            />
+            <span>I confirm NitroCine is authorized to ingest and rehost this asset.</span>
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="submit"
+              disabled={queueingSource}
+              className="flex items-center gap-1.5 rounded bg-primary px-2.5 py-1.5 text-xs text-white disabled:opacity-60"
+            >
+              {queueingSource ? <Loader2Icon className="h-3.5 w-3.5 animate-spin" /> : <Link2Icon className="h-3.5 w-3.5" />}
+              {queueingSource ? 'Queueing' : 'Queue authorized source'}
+            </button>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="flex items-center gap-1.5 rounded bg-white/10 px-2.5 py-1.5 text-xs text-gray-300 hover:bg-white/20 disabled:opacity-50"
+            >
+              {uploading ? <Loader2Icon className="h-3.5 w-3.5 animate-spin" /> : <UploadCloudIcon className="h-3.5 w-3.5" />}
+              {uploading ? `Uploading ${progress}%` : 'Upload manually'}
+            </button>
+          </div>
           <input
             ref={fileInputRef}
             type="file"
@@ -196,7 +309,7 @@ const HeroVideoUploader = ({ movie, onUpdated }) => {
             className="hidden"
             onChange={handleFileChange}
           />
-        </>
+        </form>
       )}
     </div>
   );

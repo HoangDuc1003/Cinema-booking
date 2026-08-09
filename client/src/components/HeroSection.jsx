@@ -122,7 +122,7 @@ const reportHeroDevelopmentEvent = (event, detail = {}) => {
 
 const HeroSection = ({ autoPreview = false, onTrailerRequest = null }) => {
   const navigate = useNavigate();
-  const { hero: sharedHero, heroStatus: sharedHeroStatus, retry: retryHomeData } = useHomeData();
+  const { hero: sharedHero, heroStatus: sharedHeroStatus, retryHero: retryHomeData } = useHomeData();
   const [initialPayload] = useState(() => getInitialHeroPayload());
   const [initialAudio] = useState(readStoredAudio);
 

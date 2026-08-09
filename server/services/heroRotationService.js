@@ -8,6 +8,7 @@ import {
     HERO_DEFAULT_VOLUME,
     HERO_MIN_VOTE_AVERAGE,
     HERO_MIN_VOTE_COUNT,
+    HERO_POOL_CANDIDATE_RESERVE,
     HERO_REFRESH_INTERVAL_HOURS,
     HERO_REFRESH_TIMEZONE,
     HERO_REQUIRE_NATIVE_VIDEO,
@@ -33,10 +34,12 @@ import {
 } from './cacheService.js';
 import { getDeterministicPermutation } from './catalogRefreshService.js';
 import { redisKeys, redisTtl } from './redisKeys.js';
+import { getHeroMediaDiagnostics, getHeroMediaStates } from './heroMediaAssetService.js';
 
 export {
     HERO_MIN_VOTE_AVERAGE,
     HERO_MIN_VOTE_COUNT,
+    HERO_POOL_CANDIDATE_RESERVE,
     HERO_REFRESH_INTERVAL_HOURS,
     HERO_REFRESH_TIMEZONE,
     HERO_REQUIRE_NATIVE_VIDEO,
@@ -54,6 +57,7 @@ export const heroRotationRuntime = {
     renewFencedLock,
     setJson,
     setRequiredJson,
+    startSession: () => mongoose.startSession(),
     verifyFencedLock,
     buildPool: (...args) => buildHeroPoolFromCatalog(...args),
     getPublicRotation: (...args) => getPublicHeroRotation(...args),
@@ -934,6 +938,111 @@ export const buildHeroPoolFromCatalog = async ({
     };
 };
 
+/**
+ * Limits acquisition work to ranked pool candidates plus a small per-category
+ * reserve. It intentionally does not inspect or download media for the rest
+ * of the catalog.
+ */
+export const buildHeroCandidateReserveFromCatalog = async ({
+    catalogBatch,
+    selectionSeed,
+    previousBatch,
+    reservePerCategory = HERO_POOL_CANDIDATE_RESERVE,
+}) => {
+    const desiredPool = await buildHeroPoolFromCatalog({
+        catalogBatch,
+        selectionSeed,
+        previousBatch,
+        requireNative: false,
+    });
+    const reserveSize = Math.max(0, Number(reservePerCategory) || 0);
+    if (!reserveSize) return { desiredPool, reserve: { newest: [], hot: [], discovery: [] } };
+    const candidates = await Movie.find({ _id: { $in: catalogBatch.movieIds } })
+        .select(MOVIE_PUBLIC_SELECT)
+        .lean();
+    const used = new Set(desiredPool.movieIds);
+    const eligible = candidates.filter(isEligibleHeroCandidate);
+    const reserve = { newest: [], hot: [], discovery: [] };
+    const addReserve = (category, ranked) => {
+        for (const movie of ranked) {
+            if (reserve[category].length === reserveSize) break;
+            const id = String(movie._id);
+            if (used.has(id)) continue;
+            reserve[category].push(id);
+            used.add(id);
+        }
+    };
+    const byId = new Map(eligible.map((movie) => [String(movie._id), movie]));
+    addReserve('newest', normalizeIds(catalogBatch.buckets?.newest)
+        .map((id) => byId.get(id))
+        .filter(Boolean)
+        .sort(compareNewest));
+    addReserve('hot', eligible
+        .filter((movie) => Number(movie.vote_count || 0) >= HERO_MIN_VOTE_COUNT)
+        .sort(compareHot));
+    const discoveryOrdered = getDeterministicPermutation(
+        eligible
+            .filter((movie) => (
+                Number(movie.vote_average || 0) >= HERO_MIN_VOTE_AVERAGE
+                && Number(movie.vote_count || 0) >= HERO_MIN_VOTE_COUNT
+            ))
+            .map((movie) => String(movie._id)),
+        `${selectionSeed}:discovery-reserve`,
+    ).map((id) => byId.get(id)).filter(Boolean);
+    addReserve('discovery', discoveryOrdered);
+    return {
+        desiredPool,
+        reserve,
+        candidateMovieIds: [...desiredPool.movieIds, ...Object.values(reserve).flat()],
+    };
+};
+
+export const getHeroPoolReadiness = ({ pool, movies }) => {
+    const groups = {
+        newest: normalizeIds(pool?.newestMovieIds),
+        hot: normalizeIds(pool?.hotMovieIds),
+        discovery: normalizeIds(pool?.discoveryMovieIds),
+    };
+    const byId = new Map(
+        (Array.isArray(movies) ? movies : [])
+            .map((movie) => [String(movie?._id || movie?.id || ''), movie])
+            .filter(([id]) => id),
+    );
+    const allIds = Object.values(groups).flat();
+    const validations = allIds.map((movieId) => {
+        const movie = byId.get(movieId);
+        return movie
+            ? validateNativeHeroMovie(movie)
+            : { valid: false, movieId, reasons: ['movie-not-found'] };
+    });
+    const validIds = new Set(validations.filter((item) => item.valid).map((item) => item.movieId));
+    const urls = allIds.map((movieId) => String(byId.get(movieId)?.heroVideoUrl || ''));
+    const duplicateUrls = urls.filter((url, index) => url && urls.indexOf(url) !== index);
+    const categoryCounts = Object.fromEntries(
+        Object.entries(groups).map(([category, ids]) => [
+            category,
+            ids.filter((id) => validIds.has(id)).length,
+        ]),
+    );
+    const uniqueIds = new Set(allIds).size === HERO_POOL_SIZE;
+    const uniqueUrls = urls.length === HERO_POOL_SIZE && new Set(urls).size === HERO_POOL_SIZE;
+    const complete = allIds.length === HERO_POOL_SIZE
+        && uniqueIds
+        && uniqueUrls
+        && validations.every((item) => item.valid)
+        && Object.values(categoryCounts).every((count) => count === HERO_POOL_GROUP_SIZE);
+    return {
+        status: complete ? 'READY' : 'DEGRADED',
+        complete,
+        categoryCounts,
+        readyCount: validations.filter((item) => item.valid).length,
+        totalCount: HERO_POOL_SIZE,
+        missingMovieIds: validations.filter((item) => !item.valid).map((item) => item.movieId),
+        invalid: validations.filter((item) => !item.valid).map(({ movieId, reasons }) => ({ movieId, reasons })),
+        duplicateUrls: [...new Set(duplicateUrls)],
+    };
+};
+
 const assertHeroLease = async (lock, lostLease = () => false) => {
     if (lostLease() || !await heroRotationRuntime.verifyFencedLock(lock)) {
         throw new HeroRotationError('HERO_REFRESH_LOCK_LOST', 'The Hero refresh lease was lost.', {
@@ -1002,6 +1111,8 @@ const serializeBatch = (batch, extra = {}) => ({
     version: batch?.version ?? null,
     status: batch?.status || null,
     generatedAt: batch?.generatedAt || null,
+    preparedAt: batch?.preparedAt || null,
+    readyAt: batch?.readyAt || null,
     activatedAt: batch?.activatedAt || null,
     nextRefreshAt: batch?.nextRefreshAt || null,
     timezone: batch?.timezone || HERO_REFRESH_TIMEZONE,
@@ -1124,6 +1235,25 @@ export const refreshHeroRotation = async ({
             ).catch(() => undefined);
             return { skipped: true, reason: 'idempotent-after-lock', ...result };
         }
+        if (lockedExisting && ['preparing', 'ready_to_activate'].includes(lockedExisting.status)) {
+            const readiness = getHeroPoolReadiness({
+                pool: lockedExisting,
+                movies: await Movie.find({ _id: { $in: lockedExisting.movieIds } })
+                    .select(MOVIE_PUBLIC_SELECT)
+                    .lean(),
+            });
+            const result = {
+                ...serializeBatch(lockedExisting),
+                nextPoolStatus: readiness.complete ? 'READY_TO_ACTIVATE' : 'NEXT_POOL_PREPARING',
+                readiness,
+            };
+            await heroRotationRuntime.setRequiredJson(
+                idempotencyKey,
+                { status: 'succeeded', result },
+                redisTtl.heroRefreshRun,
+            ).catch(() => undefined);
+            return { skipped: true, reason: 'next-pool-preparing', ...result };
+        }
         await SiteConfig.findOneAndUpdate(
             { key: 'heroRotation' },
             {
@@ -1177,8 +1307,76 @@ export const refreshHeroRotation = async ({
             catalogBatch: activeCatalog,
             selectionSeed: buildingBatch.selectionSeed,
             previousBatch,
+            requireNative: false,
         });
+        let candidateSelection = { reserve: { newest: [], hot: [], discovery: [] } };
+        try {
+            candidateSelection = await buildHeroCandidateReserveFromCatalog({
+                catalogBatch: activeCatalog,
+                selectionSeed: buildingBatch.selectionSeed,
+                previousBatch,
+            });
+        } catch (error) {
+            console.warn('[HeroRotation] Candidate reserve unavailable:', error.code || error.message);
+        }
         const nextRefreshAt = calculateNextHeroRefreshAt(now);
+        const candidateMovies = await Movie.find({ _id: { $in: pool.movieIds } })
+            .select(MOVIE_PUBLIC_SELECT)
+            .lean();
+        const readiness = getHeroPoolReadiness({ pool, movies: candidateMovies });
+        if (!readiness.complete) {
+            await assertHeroLease(lock, () => lost);
+            Object.assign(buildingBatch, pool, {
+                status: 'preparing',
+                preparedAt: now,
+                nextRefreshAt,
+                failureReason: '',
+                sourceMetadata: {
+                    ...(buildingBatch.sourceMetadata || {}),
+                    ...pool.sourceMetadata,
+                    source,
+                    requestedBy,
+                    nextPoolReadiness: readiness,
+                    candidateReserve: candidateSelection.reserve,
+                },
+            });
+            await buildingBatch.save();
+            await HeroRotationBatch.updateMany(
+                {
+                    _id: { $ne: buildingBatch._id },
+                    status: { $in: ['building', 'preparing', 'ready_to_activate'] },
+                },
+                {
+                    $set: {
+                        status: 'failed',
+                        failureReason: 'SUPERSEDED_BY_NEW_PREPARING_BATCH',
+                    },
+                },
+            );
+            await SiteConfig.updateOne(
+                { key: 'heroRotation' },
+                {
+                    $setOnInsert: { key: 'heroRotation' },
+                    $set: {
+                        'heroRotation.nextRefreshAt': nextRefreshAt,
+                        'heroRotation.refreshing': false,
+                    },
+                },
+                { upsert: true },
+            );
+            const result = {
+                skipped: false,
+                nextPoolStatus: 'NEXT_POOL_PREPARING',
+                ...serializeBatch(buildingBatch),
+                readiness,
+            };
+            await heroRotationRuntime.setRequiredJson(
+                idempotencyKey,
+                { status: 'succeeded', result },
+                redisTtl.heroRefreshRun,
+            ).catch(() => undefined);
+            return result;
+        }
         await assertHeroLease(lock, () => lost);
         const session = await mongoose.startSession();
         try {
@@ -1205,6 +1403,7 @@ export const refreshHeroRotation = async ({
                 batch.sourceMetadata = {
                     ...(batch.sourceMetadata || {}),
                     ...pool.sourceMetadata,
+                    candidateReserve: candidateSelection.reserve,
                     source,
                     requestedBy,
                 };
@@ -1318,6 +1517,122 @@ export const refreshHeroRotation = async ({
         ).catch(() => undefined);
         await heroRotationRuntime.releaseFencedLock(lock);
     }
+};
+
+/**
+ * Activates a complete preparing batch in one transaction.  It deliberately
+ * never retires the active batch until every one of the next batch's fifteen
+ * assets still passes the native validation at commit time.
+ */
+export const reconcilePreparingHeroBatches = async ({
+    now = new Date(),
+    source = 'pool-reconcile',
+} = {}) => {
+    const preparingBatches = await HeroRotationBatch.find({
+        status: { $in: ['preparing', 'ready_to_activate'] },
+    })
+        .sort({ preparedAt: -1, createdAt: -1 })
+        .lean();
+    if (!preparingBatches.length) {
+        return { status: 'NO_PREPARING_BATCH', activated: false };
+    }
+    const batch = preparingBatches[0];
+    const movies = await Movie.find({ _id: { $in: batch.movieIds } })
+        .select(MOVIE_PUBLIC_SELECT)
+        .lean();
+    const readiness = getHeroPoolReadiness({ pool: batch, movies });
+    if (!readiness.complete) {
+        await HeroRotationBatch.updateOne(
+            { _id: batch._id, status: { $in: ['preparing', 'ready_to_activate'] } },
+            {
+                $set: {
+                    status: 'preparing',
+                    'sourceMetadata.nextPoolReadiness': readiness,
+                    'sourceMetadata.lastReconciledAt': now,
+                },
+            },
+        );
+        return {
+            status: 'NEXT_POOL_PREPARING',
+            activated: false,
+            batch: serializeBatch(batch),
+            readiness,
+        };
+    }
+    await HeroRotationBatch.updateOne(
+        { _id: batch._id, status: { $in: ['preparing', 'ready_to_activate'] } },
+        {
+            $set: {
+                status: 'ready_to_activate',
+                readyAt: now,
+                'sourceMetadata.nextPoolReadiness': readiness,
+                'sourceMetadata.lastReconciledAt': now,
+            },
+        },
+    );
+    const session = await heroRotationRuntime.startSession();
+    let activatedBatch = null;
+    try {
+        await session.withTransaction(async () => {
+            const transactionalBatch = await HeroRotationBatch.findOne({
+                _id: batch._id,
+                status: 'ready_to_activate',
+            }).session(session);
+            if (!transactionalBatch) {
+                throw new HeroRotationError('HERO_PREPARING_BATCH_STALE', 'Preparing Hero batch changed before activation.', {
+                    transient: true,
+                });
+            }
+            const transactionalMovies = await Movie.find({
+                _id: { $in: transactionalBatch.movieIds },
+            })
+                .select(MOVIE_PUBLIC_SELECT)
+                .session(session)
+                .lean();
+            assertHeroPoolAssetsReady({
+                movies: transactionalMovies,
+                expectedMovieIds: transactionalBatch.movieIds,
+            });
+            transactionalBatch.status = 'active';
+            transactionalBatch.activatedAt = now;
+            transactionalBatch.readyAt = transactionalBatch.readyAt || now;
+            transactionalBatch.sourceMetadata = {
+                ...(transactionalBatch.sourceMetadata || {}),
+                nextPoolReadiness: readiness,
+                activationSource: source,
+            };
+            await HeroRotationBatch.updateMany(
+                { status: 'active', _id: { $ne: transactionalBatch._id } },
+                { $set: { status: 'retired', retiredAt: now } },
+                { session },
+            );
+            await transactionalBatch.save({ session });
+            await SiteConfig.findOneAndUpdate(
+                { key: 'heroRotation' },
+                {
+                    $setOnInsert: { key: 'heroRotation' },
+                    $set: {
+                        'heroRotation.activeBatchId': transactionalBatch._id,
+                        'heroRotation.lastSuccessfulRefreshAt': now,
+                        'heroRotation.nextRefreshAt': transactionalBatch.nextRefreshAt,
+                        'heroRotation.refreshing': false,
+                    },
+                    $inc: { 'heroRotation.cacheGeneration': 1 },
+                },
+                { upsert: true, returnDocument: 'after', session },
+            );
+            activatedBatch = transactionalBatch.toObject();
+        });
+    } finally {
+        await session.endSession();
+    }
+    await invalidateHeroCaches();
+    return {
+        status: 'ACTIVE',
+        activated: true,
+        batch: serializeBatch(activatedBatch),
+        readiness,
+    };
 };
 
 export const rerandomizeActiveHero = async ({
@@ -1474,11 +1789,15 @@ export const updateHeroSoundSettings = async ({
 };
 
 export const getAdminHeroRotation = async () => {
-    const [settings, activeBatch, recentBatches, config] = await Promise.all([
+    const [settings, activeBatch, preparingBatch, recentBatches, config, mediaDiagnostics] = await Promise.all([
         getHeroSettings(),
         HeroRotationBatch.findOne({ status: 'active' }).lean(),
+        HeroRotationBatch.findOne({ status: { $in: ['preparing', 'ready_to_activate'] } })
+            .sort({ preparedAt: -1, createdAt: -1 })
+            .lean(),
         HeroRotationBatch.find({}).sort({ createdAt: -1 }).limit(10).lean(),
         SiteConfig.findOne({ key: 'heroRotation' }).select('heroRotation').lean(),
+        getHeroMediaDiagnostics(),
     ]);
     const heroRotation = config?.heroRotation || {};
     const refreshState = {
@@ -1488,6 +1807,36 @@ export const getAdminHeroRotation = async () => {
         cacheGeneration: Number(heroRotation.cacheGeneration || 0),
         lastFencingToken: Number(heroRotation.lastFencingToken || 0),
     };
+    const prepareBatchState = async (batch) => {
+        if (!batch?.movieIds?.length) return null;
+        const movies = await loadOrderedMovies(batch.movieIds);
+        const mediaStates = await getHeroMediaStates(batch.movieIds);
+        const categories = new Map([
+            ...normalizeIds(batch.newestMovieIds).map((id) => [id, 'newest']),
+            ...normalizeIds(batch.hotMovieIds).map((id) => [id, 'hot']),
+            ...normalizeIds(batch.discoveryMovieIds).map((id) => [id, 'discovery']),
+        ]);
+        const pool = movies.map((movie) => {
+            const validation = validateNativeHeroMovie(movie);
+            return {
+                ...normalizeHeroMovie(movie, { posterOnly: !validation.valid }),
+                category: categories.get(String(movie._id)) || null,
+                active: false,
+                nativeVideoValid: validation.valid,
+                nativeVideoIssues: validation.reasons,
+                media: mediaStates.get(String(movie._id)) || {
+                    sourceStatus: 'needs_authorized_source',
+                    rightsStatus: 'UNKNOWN',
+                },
+            };
+        });
+        return {
+            ...serializeBatch(batch),
+            readiness: getHeroPoolReadiness({ pool: batch, movies }),
+            pool,
+        };
+    };
+    const nextPool = await prepareBatchState(preparingBatch);
     if (!activeBatch) {
         const catalog = await CatalogBatch.findOne({ status: 'active' })
             .select('_id status version weekKey movieIds buckets')
@@ -1542,6 +1891,8 @@ export const getAdminHeroRotation = async () => {
                 activeHeroMovieIds: [],
             } : null,
             activeMovies: [],
+            preparingBatch: nextPool,
+            mediaLibrary: mediaDiagnostics,
             missingTrailers: candidateState.filter((movie) => !movie.nativeVideoValid),
             candidateCatalog: catalog ? {
                 batchId: String(catalog._id),
@@ -1589,6 +1940,8 @@ export const getAdminHeroRotation = async () => {
             .map((id) => poolById.get(id))
             .filter(Boolean),
         missingTrailers: pool.filter((movie) => !movie.nativeVideoValid),
+        preparingBatch: nextPool,
+        mediaLibrary: mediaDiagnostics,
         recentBatches: recentBatches.map((batch) => serializeBatch(batch)),
     };
 };

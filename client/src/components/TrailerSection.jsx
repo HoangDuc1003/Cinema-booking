@@ -1,370 +1,268 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Star, ChevronLeft, ChevronRight, Play } from 'lucide-react';
-import { fetchLatestTrailers, fetchMovieTrailers } from '../services/tmdb';
-import Loading from './Loading';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronLeft, ChevronRight, Film, Play, Star } from 'lucide-react';
 import BlurCircle from './BlurCircle';
-import CinematicTrailerPlayer from './CinematicTrailerPlayer';
-import { extractYouTubeVideoId } from '../lib/youtubeVideo';
-import { useMediaQuery, useSaveData } from './hero/useHeroEnvironment';
+import Loading from './Loading';
+import { useHomeData } from '../context/HomeDataContext';
+import { fetchHomeTrailers } from '../services/tmdb';
+import { useMediaQuery } from './hero/useHeroEnvironment';
 
-const CARD_SLIDE_INTERVAL = 4000;
+const MAX_TRAILER_CANDIDATES = 10;
 
-const getTrailerKey = (trailer) => trailer?.videoId || trailer?.videoUrl || trailer?.embedUrl || trailer?.id;
+const movieIdFor = (movie) => {
+  const value = String(movie?._id || movie?.id || '').trim();
+  return /^\d+$/.test(value) ? value : '';
+};
 
-const mergeTrailerLists = (...lists) => {
+const mergeCandidateMovies = ({ featuredMovie, heroMovies, nowShowingMovies }) => {
   const seen = new Set();
   const merged = [];
-  for (const list of lists) {
-    for (const trailer of list || []) {
-      const key = getTrailerKey(trailer);
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      merged.push(trailer);
-    }
+  for (const movie of [...nowShowingMovies, ...heroMovies]) {
+    const movieId = movieIdFor(movie);
+    if (!movieId || seen.has(movieId)) continue;
+    seen.add(movieId);
+    merged.push(movie);
+    if (merged.length >= MAX_TRAILER_CANDIDATES) break;
   }
-  return merged;
+
+  const featuredId = movieIdFor(featuredMovie);
+  if (!featuredId) return merged;
+  const existingIndex = merged.findIndex((movie) => movieIdFor(movie) === featuredId);
+  if (existingIndex >= 0) {
+    return [merged[existingIndex], ...merged.filter((_, index) => index !== existingIndex)];
+  }
+  return [featuredMovie, ...merged].slice(0, MAX_TRAILER_CANDIDATES);
 };
 
-const getTrailerVideoId = (trailer) => {
-  const candidates = [trailer?.videoId, trailer?.embedUrl, trailer?.videoUrl];
-  return candidates.map(extractYouTubeVideoId).find(Boolean) || null;
-};
+const imageFor = (movie) => (
+  movie?.backdrop_path || movie?.poster_path || movie?.heroImageUrl || ''
+);
 
-const TrailerSection = ({ featuredMovie = null, sectionId = 'trailers', movieOnly = false }) => {
-  const [trailers, setTrailers]         = useState([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [isLoading, setIsLoading]       = useState(true);
-  const [hasError, setHasError]         = useState(false);
-  const [carouselPaused, setCarouselPaused]   = useState(false);
-  const [activeIndex, setActiveIndex]         = useState(0);
-  const [playIntent, setPlayIntent]           = useState(false);
+const TrailerUnavailable = ({ movie, allUnavailable = false }) => (
+  <div className="relative flex aspect-video w-full items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-slate-950 shadow-2xl">
+    {imageFor(movie) && (
+      <img
+        src={imageFor(movie)}
+        alt=""
+        aria-hidden="true"
+        className="absolute inset-0 h-full w-full object-cover opacity-30"
+      />
+    )}
+    <div className="relative z-10 mx-6 max-w-md rounded-2xl border border-white/10 bg-black/75 px-6 py-8 text-center backdrop-blur-md">
+      <Film className="mx-auto h-11 w-11 text-rose-400" aria-hidden="true" />
+      <h3 className="mt-3 text-lg font-semibold text-white">
+        {allUnavailable ? 'Trailers are currently unavailable' : 'Trailer unavailable for this movie'}
+      </h3>
+      <p className="mt-2 text-sm text-gray-300">
+        {allUnavailable
+          ? 'No verified YouTube trailer is available for the current selection.'
+          : 'Choose another movie below to keep browsing trailers.'}
+      </p>
+    </div>
+  </div>
+);
+
+const TrailerSection = ({ featuredMovie = null, sectionId = 'home-trailer-section' }) => {
+  const { hero, heroStatus, nowShowing, nowShowingStatus } = useHomeData();
   const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
-  const saveData = useSaveData();
+  const railRef = useRef(null);
+  const [selection, setSelection] = useState({ movieId: null, featuredId: null });
+  const [requestState, setRequestState] = useState({
+    key: '',
+    status: 'idle',
+    trailers: [],
+    error: null,
+  });
 
-  const carouselRef = useRef(null);
-  const styleRef    = useRef(false);
-  const prefetchedRef = useRef(new Set());
-
-  const currentTrailer = trailers[currentIndex] || null;
-
-  const switchTrailer = useCallback((index) => {
-    if (index === currentIndex || !trailers.length) return;
-    setCurrentIndex(index);
-    setPlayIntent(false);
-  }, [currentIndex, trailers.length]);
-
-  const goNext = useCallback(() => { if (trailers.length) switchTrailer((currentIndex + 1) % trailers.length); }, [currentIndex, trailers.length, switchTrailer]);
-  const goPrev = useCallback(() => { if (trailers.length) switchTrailer((currentIndex - 1 + trailers.length) % trailers.length); }, [currentIndex, trailers.length, switchTrailer]);
-
-  useEffect(() => {
-    if (trailers.length === 0 || carouselPaused || reducedMotion || saveData) return;
-    const id = setInterval(() => {
-      if (!carouselRef.current) return;
-      const c = carouselRef.current;
-      const w = (c.firstElementChild?.offsetWidth || 0) + 12;
-      const atEnd = c.scrollLeft + c.clientWidth >= c.scrollWidth - 10;
-      c.scrollTo({ left: atEnd ? 0 : c.scrollLeft + w, behavior: 'smooth' });
-    }, CARD_SLIDE_INTERVAL);
-    return () => clearInterval(id);
-  }, [trailers.length, carouselPaused, reducedMotion, saveData]);
-
-  const handleScroll = () => {
-    if (!carouselRef.current) return;
-    const w = (carouselRef.current.firstElementChild?.offsetWidth || 0) + 12 || 1;
-    const i = Math.round(carouselRef.current.scrollLeft / w);
-    if (i !== activeIndex) setActiveIndex(i);
-  };
-
-  const scrollCarousel = (dir) => {
-    if (!carouselRef.current) return;
-    const w = (carouselRef.current.firstElementChild?.offsetWidth || 0) + 12;
-    carouselRef.current.scrollBy({ left: dir * w, behavior: reducedMotion ? 'auto' : 'smooth' });
-  };
+  const heroMovies = Array.isArray(hero?.movies) ? hero.movies : [];
+  const candidates = useMemo(() => mergeCandidateMovies({
+    featuredMovie,
+    heroMovies,
+    nowShowingMovies: Array.isArray(nowShowing) ? nowShowing : [],
+  }), [featuredMovie, heroMovies, nowShowing]);
+  const candidateIds = useMemo(() => candidates.map(movieIdFor).filter(Boolean), [candidates]);
+  const requestKey = candidateIds.join(',');
+  const sourcesSettled = !['idle', 'loading'].includes(nowShowingStatus)
+    && (nowShowing.length >= MAX_TRAILER_CANDIDATES || !['idle', 'loading'].includes(heroStatus));
 
   useEffect(() => {
-    if (styleRef.current) return;
-    styleRef.current = true;
-    const s = document.createElement('style');
-    s.textContent = `
-      .ts-content-shell { position:relative; width:100%; max-width:1248px; margin-inline:auto; }
-      .ts-nav-btn { width:42px; height:42px; border-radius:50%; background:rgba(255,255,255,0.06); backdrop-filter:blur(12px); border:1px solid rgba(255,255,255,0.1); display:flex; align-items:center; justify-content:center; cursor:pointer; color:#d1d5db; transition:all 0.25s ease; flex-shrink:0; }
-      .ts-nav-btn:hover { background:rgba(248,69,101,0.2); border-color:rgba(248,69,101,0.4); color:#fff; transform:scale(1.08); }
-      .ts-carousel-wrap { position:relative; width:100%; max-width:100%; margin:32px auto 0; }
-      .ts-carousel-inner { display:flex; align-items:center; gap:10px; }
-      .ts-carousel-track { display:flex; gap:12px; overflow-x:auto; flex:1; scroll-behavior:smooth; scrollbar-width:none; scroll-snap-type:x mandatory; padding-bottom:6px; }
-      .ts-carousel-track::-webkit-scrollbar { display:none; }
-      .ts-card { flex:0 0 clamp(180px,18.5%,260px); min-width:0; cursor:pointer; border-radius:12px; overflow:hidden; background:rgba(15,17,28,0.9); border:1.5px solid rgba(255,255,255,0.06); transition:all 0.4s cubic-bezier(0.4,0,0.2,1); position:relative; scroll-snap-align:start; }
-      .ts-card:hover { transform:translateY(-4px); border-color:rgba(248,69,101,0.5); box-shadow:0 12px 28px rgba(0,0,0,0.4),0 0 0 1px rgba(248,69,101,0.15); }
-      .ts-card:focus-visible { outline:3px solid #fff; outline-offset:3px; border-color:rgba(248,69,101,0.8); transform:translateY(-4px); }
-      .ts-card.active { border-color:rgba(248,69,101,0.8); box-shadow:0 0 20px rgba(248,69,101,0.2),0 8px 24px rgba(0,0,0,0.5); }
-      .ts-card-thumb { position:relative; width:100%; aspect-ratio:16/9; overflow:hidden; }
-      .ts-card-thumb img { width:100%; height:100%; object-fit:cover; display:block; transition:transform 0.5s ease; }
-      .ts-card:hover .ts-card-thumb img { transform:scale(1.08); }
-      .ts-card-play { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.3); opacity:0; transition:opacity 0.3s ease; }
-      .ts-card:hover .ts-card-play { opacity:1; }
-      .ts-card-play-icon { width:30px; height:30px; border-radius:50%; background:rgba(248,69,101,0.85); display:flex; align-items:center; justify-content:center; border:2px solid rgba(255,255,255,0.3); transition:transform 0.25s ease; }
-      .ts-card:hover .ts-card-play-icon { transform:scale(1.1); }
-      .ts-card-rating { position:absolute; top:5px; left:5px; background:rgba(0,0,0,0.6); backdrop-filter:blur(6px); padding:2px 6px; border-radius:5px; font-size:0.62rem; font-weight:700; color:#facc15; display:flex; align-items:center; gap:3px; z-index:5; }
-      .ts-card-meta { padding:7px 9px; }
-      .ts-card-title { color:#fff; font-weight:600; font-size:0.77rem; line-height:1.35; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-      .ts-card-sub { color:#6b7280; font-size:0.67rem; margin-top:2px; display:flex; align-items:center; justify-content:space-between; }
-      .ts-card.active::after { content:''; position:absolute; bottom:0; left:10%; right:10%; height:2px; background:linear-gradient(90deg,transparent,#F84565,transparent); border-radius:2px; }
-      .ts-dots { display:flex; align-items:center; justify-content:center; gap:7px; margin-top:14px; }
-      .ts-dot { width:7px; height:7px; border-radius:50%; background:rgba(255,255,255,0.2); border:none; cursor:pointer; transition:all 0.3s ease; padding:0; }
-      .ts-dot:hover { background:rgba(255,255,255,0.4); }
-      .ts-dot.active { width:22px; border-radius:9999px; background:#F84565; }
-      .ts-hint { max-width:100%; margin:8px auto 0; text-align:center; font-size:0.72rem; color:#4b5563; letter-spacing:0.5px; }
-      @media (max-width:768px) {
-        .ts-nav-btn { width:34px; height:34px; }
-        .ts-carousel-track { gap:8px; }
-        .ts-card { flex:0 0 min(44%,260px); }
-      }
-      @media (max-width:480px) {
-        .ts-card-meta { padding:5px 7px; }
-        .ts-card-title { font-size:0.7rem; }
-        .ts-card-sub { font-size:0.6rem; }
-        .ts-card { flex:0 0 62%; }
-      }
-      @media (prefers-reduced-motion:reduce) {
-        .ts-nav-btn,.ts-card,.ts-card-thumb img,.ts-card-play,.ts-card-play-icon,.ts-dot { animation:none!important; transition:none!important; transform:none!important; }
-      }
-    `;
-    document.head.appendChild(s);
-  }, []);
-
-  useEffect(() => {
-    if (movieOnly) return;
-    let mounted = true;
-    const load = async () => {
-      setIsLoading(true);
-      try {
-        const data = await fetchLatestTrailers({ limit: 10 });
-        if (!mounted) return;
-        setTrailers((cur) => mergeTrailerLists(
-          cur.filter((t) => t.isRequestedTrailer),
-          data.map((candidate) => ({ ...candidate, videoResolved: false })),
-        ));
-        setHasError(false);
-      } catch (e) {
-        console.error('Failed to load trailers:', e);
-        setHasError(true);
-      } finally {
-        if (mounted) {
-          setIsLoading(false);
-        }
-      }
-    };
-    load();
-    return () => { mounted = false; };
-  }, [movieOnly]);
-
-  useEffect(() => {
-    const movieId = featuredMovie?._id || featuredMovie?.id;
-    if (!movieId) { if (movieOnly) Promise.resolve().then(() => setIsLoading(false)); return; }
-    let mounted = true;
+    if (!sourcesSettled || !requestKey) return undefined;
     const controller = new AbortController();
-    const load = async () => {
-      if (movieOnly) { setIsLoading(true); setTrailers([]); }
-      try {
-        const data = await fetchMovieTrailers(featuredMovie, { signal: controller.signal });
-        if (!mounted || !data.length) return;
-        setTrailers((cur) => movieOnly ? data : mergeTrailerLists(data, cur));
-        setCurrentIndex(0);
-        setActiveIndex(0);
-        setHasError(false);
-      } catch (err) {
-        if (err.name !== 'AbortError') console.warn('Failed to load trailer:', err.message);
-        if (movieOnly && mounted) setHasError(true);
-      } finally {
-        if (movieOnly && mounted) setIsLoading(false);
-      }
-    };
-    load();
-    return () => { mounted = false; controller.abort(); };
-  }, [featuredMovie, movieOnly]);
+    let alive = true;
 
-  useEffect(() => {
-    if (movieOnly) return undefined;
-    const candidate = trailers[currentIndex];
-    if (!candidate || candidate.videoResolved) return undefined;
-    let mounted = true;
-    const controller = new AbortController();
+    fetchHomeTrailers({ movieIds: candidateIds, signal: controller.signal }).then((result) => {
+      if (!alive || controller.signal.aborted) return;
+      setRequestState({
+        key: requestKey,
+        status: 'success',
+        trailers: result.trailers,
+        error: null,
+      });
+    }).catch((error) => {
+      if (!alive || controller.signal.aborted || error?.name === 'AbortError') return;
+      setRequestState({ key: requestKey, status: 'error', trailers: [], error });
+    });
 
-    const resolveCandidate = async (index, movie) => {
-      const data = await fetchMovieTrailers(movie, { signal: controller.signal }).catch(() => []);
-      if (!mounted) return false;
-      setTrailers((current) => current.map((item, itemIndex) => (
-        itemIndex === index
-          ? { ...item, ...(data[0] || {}), videoResolved: true }
-          : item
-      )));
-      return data.length > 0;
-    };
-
-    const load = async () => {
-      await resolveCandidate(currentIndex, candidate);
-    };
-
-    void load();
-    return () => { mounted = false; controller.abort(); };
-  }, [currentIndex, movieOnly, trailers]);
-
-  useEffect(() => {
-    if (movieOnly || saveData || trailers.length < 2) return undefined;
-    const current = trailers[currentIndex];
-    if (!current?.videoResolved || !getTrailerVideoId(current)) return undefined;
-    const nextIndex = (currentIndex + 1) % trailers.length;
-    const next = trailers[nextIndex];
-    const nextKey = String(next?._id || next?.id || nextIndex);
-    if (!next || next.videoResolved || prefetchedRef.current.has(nextKey)) return undefined;
-    prefetchedRef.current.add(nextKey);
-    let mounted = true;
-    const controller = new AbortController();
-    const timer = window.setTimeout(async () => {
-      const data = await fetchMovieTrailers(next, { signal: controller.signal }).catch(() => []);
-      if (!mounted) return;
-      setTrailers((items) => items.map((item, index) => (
-        index === nextIndex ? { ...item, ...(data[0] || {}), videoResolved: true } : item
-      )));
-    }, 750);
     return () => {
-      mounted = false;
-      window.clearTimeout(timer);
+      alive = false;
       controller.abort();
     };
-  }, [currentIndex, movieOnly, saveData, trailers]);
+  }, [candidateIds, requestKey, sourcesSettled]);
 
-  if (movieOnly) {
-    if (isLoading) {
-      return (
-        <section id={sectionId} className="relative py-10">
-          <div className="flex items-center justify-center py-16"><Loading /></div>
-        </section>
-      );
-    }
-    if (hasError || trailers.length === 0) return null;
+  const resolvedByMovie = useMemo(() => new Map(
+    (requestState.key === requestKey ? requestState.trailers : [])
+      .map((trailer) => [trailer.movieId, trailer]),
+  ), [requestKey, requestState.key, requestState.trailers]);
+  const items = useMemo(() => candidates.map((movie) => ({
+    movie,
+    movieId: movieIdFor(movie),
+    trailer: resolvedByMovie.get(movieIdFor(movie)) || null,
+  })), [candidates, resolvedByMovie]);
 
-    return (
-      <section id={sectionId} className="scroll-mt-20 relative overflow-hidden" style={{ background: 'transparent', marginTop: 20 }}>
-        <div className="ts-content-shell">
-          {currentTrailer && getTrailerVideoId(currentTrailer) && (
-            !playIntent ? (
-              <div className="relative aspect-video w-full max-w-[1248px] mx-auto rounded-xl overflow-hidden bg-black border border-white/10 shadow-2xl cursor-pointer group" onClick={() => setPlayIntent(true)}>
-                <img src={currentTrailer.backdrop_path || currentTrailer.poster_path || currentTrailer.thumbnail} alt={currentTrailer.title} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="w-16 h-16 rounded-full bg-rose-500/90 flex items-center justify-center text-white border border-white/20 shadow-xl group-hover:scale-110 transition-transform">
-                    <Play className="w-8 h-8 ml-1 fill-white" />
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <CinematicTrailerPlayer
-                videoId={getTrailerVideoId(currentTrailer)}
-                movieTitle={currentTrailer.videoName || currentTrailer.title}
-                rating={currentTrailer.vote_average}
-                year={currentTrailer.release_date?.substring(0, 4)}
-                qualityLabel={currentTrailer.qualityLabel}
-                currentIndex={currentIndex}
-                total={trailers.length}
-                onNext={goNext}
-                onPrevious={goPrev}
-              />
-            )
-          )}
-        </div>
-      </section>
-    );
-  }
+  const featuredId = movieIdFor(featuredMovie);
+  const selectedMovieId = selection.featuredId === featuredId
+    ? selection.movieId
+    : featuredId;
+  const selectedIndex = Math.max(0, items.findIndex((item) => item.movieId === selectedMovieId));
+  const current = items[selectedIndex] || items[0] || null;
+  const availableCount = items.filter((item) => item.trailer?.available).length;
+  const loading = !sourcesSettled || (requestKey && requestState.key !== requestKey);
+  const allUnavailable = !loading && items.length > 0 && availableCount === 0;
 
-  if (isLoading) return <div className="px-6 md:px-16 lg:px-24 py-20"><Loading /></div>;
-  if (hasError || trailers.length === 0) return null;
+  const selectMovie = (movieId) => {
+    setSelection({ movieId, featuredId });
+  };
+
+  const scrollRail = (direction) => {
+    const rail = railRef.current;
+    if (!rail) return;
+    rail.scrollBy({
+      left: direction * Math.max(220, rail.clientWidth * 0.72),
+      behavior: reducedMotion ? 'auto' : 'smooth',
+    });
+  };
 
   return (
-    <section id={sectionId} className="scroll-mt-20 px-6 md:px-16 lg:px-24 py-16 md:py-20 relative overflow-hidden min-h-screen md:min-h-[80vh]">
-      <BlurCircle top='220px' right='-60px' delay="0.5s" />
-      <BlurCircle top='600px' left='-65px' delay="1s" />
-      <BlurCircle top='800px' right='-100px' delay="1.5s" />
-      <BlurCircle top='240px' left='0' delay="2s" />
+    <section
+      id={sectionId}
+      aria-labelledby={`${sectionId}-title`}
+      data-trailer-status={loading ? 'loading' : requestState.status}
+      className="relative min-h-[70vh] scroll-mt-20 overflow-hidden px-4 py-16 sm:px-6 md:px-16 md:py-20 lg:px-24 xl:px-40"
+    >
+      <BlurCircle top="220px" right="-60px" delay="0.5s" />
+      <BlurCircle top="600px" left="-65px" delay="1s" />
 
-      <div className="ts-content-shell relative z-10">
-      <div className="flex items-end justify-between max-w-[1248px] mx-auto mb-8 relative z-10">
-        <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-white tracking-wide">Trailers</h2>
-      </div>
+      <div className="relative z-10 mx-auto w-full max-w-[1248px]">
+        <h2 id={`${sectionId}-title`} className="mb-8 text-3xl font-bold tracking-wide text-white md:text-4xl lg:text-5xl">
+          Trailers
+        </h2>
 
-      {currentTrailer && getTrailerVideoId(currentTrailer) && (
-        <div className="relative z-10 w-full mb-8">
-          {!playIntent ? (
-            <div className="relative aspect-video w-full max-w-[1248px] mx-auto rounded-xl overflow-hidden bg-black border border-white/10 shadow-2xl cursor-pointer group" onClick={() => setPlayIntent(true)}>
-              <img src={currentTrailer.backdrop_path || currentTrailer.poster_path || currentTrailer.thumbnail} alt={currentTrailer.title} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="w-16 h-16 rounded-full bg-rose-500/90 flex items-center justify-center text-white border border-white/20 shadow-xl group-hover:scale-110 transition-transform">
-                  <Play className="w-8 h-8 ml-1 fill-white" />
-                </div>
-              </div>
-            </div>
-          ) : (
-            <CinematicTrailerPlayer
-              videoId={getTrailerVideoId(currentTrailer)}
-              movieTitle={currentTrailer.title}
-              rating={currentTrailer.vote_average}
-              year={currentTrailer.release_date?.substring(0, 4)}
-              qualityLabel={currentTrailer.qualityLabel}
-              currentIndex={currentIndex}
-              total={trailers.length}
-              onNext={goNext}
-              onPrevious={goPrev}
-            />
-          )}
-        </div>
-      )}
-
-      {currentTrailer && !getTrailerVideoId(currentTrailer) && !currentTrailer.videoResolved && (
-        <div className="flex items-center justify-center py-20"><Loading /></div>
-      )}
-
-      <div className="ts-carousel-wrap relative z-10" onMouseEnter={() => setCarouselPaused(true)} onMouseLeave={() => setCarouselPaused(false)}>
-        <div className="ts-carousel-inner">
-          <button className="ts-nav-btn hidden md:flex" onClick={() => scrollCarousel(-1)} aria-label="Previous thumbnails"><ChevronLeft className="w-4 h-4" /></button>
-          <div className="ts-carousel-track" ref={carouselRef} onScroll={handleScroll}>
-            {trailers.map((t, i) => (
-              <button
-                key={t.id || i}
-                type="button"
-                className={`ts-card ${currentIndex === i ? 'active' : ''}`}
-                onClick={() => switchTrailer(i)}
-                aria-label={`Play trailer for ${t.title}`}
-                aria-pressed={currentIndex === i}
-              >
-                <div className="ts-card-thumb">
-                  <img src={t.thumbnail || t.backdrop_path || t.poster_path} alt={t.title} loading="lazy" decoding="async" />
-                  <div className="ts-card-play"><div className="ts-card-play-icon"><Play className="w-3 h-3 text-white fill-white ml-0.5" /></div></div>
-                  {t.vote_average && <div className="ts-card-rating"><Star className="w-2.5 h-2.5 fill-yellow-400 text-yellow-400" />{Number(t.vote_average).toFixed(1)}</div>}
-                </div>
-                <div className="ts-card-meta">
-                  <p className="ts-card-title">{t.title}</p>
-                  <div className="ts-card-sub">
-                    <span>{t.release_date?.substring(0, 4) || 'N/A'}</span>
-                    <span>{t.qualityLabel || 'HD'}</span>
-                  </div>
-                </div>
-              </button>
-            ))}
+        {loading ? (
+          <div className="flex aspect-video w-full items-center justify-center rounded-2xl border border-white/10 bg-white/5" aria-busy="true">
+            <Loading />
           </div>
-          <button className="ts-nav-btn hidden md:flex" onClick={() => scrollCarousel(1)} aria-label="Next thumbnails"><ChevronRight className="w-4 h-4" /></button>
-        </div>
+        ) : !current ? (
+          <div className="flex min-h-80 items-center justify-center rounded-2xl border border-white/10 bg-slate-950/80 px-6 text-center" role="status">
+            <div>
+              <Film className="mx-auto h-11 w-11 text-rose-400" aria-hidden="true" />
+              <p className="mt-3 text-lg font-semibold text-white">Trailer candidates are temporarily unavailable.</p>
+              <p className="mt-2 text-sm text-gray-400">Hero and Now Showing remain available independently.</p>
+            </div>
+          </div>
+        ) : current.trailer?.available ? (
+          <div className="aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl">
+            <iframe
+              key={current.trailer.key}
+              id={`${sectionId}-player`}
+              src={`https://www.youtube-nocookie.com/embed/${current.trailer.key}?rel=0&modestbranding=1`}
+              title={`${current.movie.title || current.movie.name} ${current.trailer.name || 'trailer'}`}
+              loading="lazy"
+              referrerPolicy="strict-origin-when-cross-origin"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+              className="h-full w-full"
+            />
+          </div>
+        ) : (
+          <TrailerUnavailable movie={current.movie} allUnavailable={allUnavailable || requestState.status === 'error'} />
+        )}
 
-        <div className="ts-dots">
-          {trailers.map((_, i) => (
-            <button key={i} className={`ts-dot ${activeIndex === i ? 'active' : ''}`} onClick={() => {
-              if (carouselRef.current) {
-                const w = (carouselRef.current.firstElementChild?.offsetWidth || 0) + 12;
-                carouselRef.current.scrollTo({ left: i * w, behavior: reducedMotion ? 'auto' : 'smooth' });
-              }
-            }} aria-label={`Go to slide ${i + 1}`} />
-          ))}
-        </div>
-      </div>
-      <p className="ts-hint relative z-10">{carouselPaused ? 'Auto-scroll paused' : 'Click any trailer to browse • Auto-scrolling'}</p>
+        {requestState.status === 'error' && (
+          <p className="mt-4 text-center text-sm text-amber-200" role="status">
+            Trailer lookup is temporarily unavailable. You can continue browsing NitroCine.
+          </p>
+        )}
+
+        {items.length > 0 && (
+          <div className="mt-8 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => scrollRail(-1)}
+              aria-label="Previous trailer cards"
+              className="hidden h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/5 text-gray-200 transition hover:border-rose-400/50 hover:bg-rose-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white motion-reduce:transition-none md:flex"
+            >
+              <ChevronLeft className="h-5 w-5" aria-hidden="true" />
+            </button>
+
+            <div
+              ref={railRef}
+              className="flex min-w-0 flex-1 snap-x snap-mandatory gap-3 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              aria-label="Trailer movie selector"
+            >
+              {items.map((item) => {
+                const selected = item.movieId === current?.movieId;
+                const title = item.movie.title || item.movie.name || 'Movie';
+                const thumbnail = item.trailer?.thumbnailUrl || imageFor(item.movie);
+                return (
+                  <button
+                    key={item.movieId}
+                    type="button"
+                    onClick={() => selectMovie(item.movieId)}
+                    aria-pressed={selected}
+                    aria-controls={`${sectionId}-player`}
+                    aria-label={`${item.trailer?.available ? 'Play trailer for' : 'Select'} ${title}`}
+                    className={`group w-[72%] max-w-64 shrink-0 snap-start overflow-hidden rounded-xl border bg-slate-950 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white motion-reduce:transition-none sm:w-[42%] md:w-[30%] lg:w-[23%] ${selected ? 'border-rose-400 shadow-lg shadow-rose-500/15' : 'border-white/10 hover:border-rose-400/50'}`}
+                  >
+                    <span className="relative block aspect-video overflow-hidden bg-black/50">
+                      {thumbnail ? (
+                        <img src={thumbnail} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover transition duration-300 group-hover:scale-105 motion-reduce:transition-none" />
+                      ) : (
+                        <span className="flex h-full items-center justify-center"><Film className="h-8 w-8 text-gray-500" aria-hidden="true" /></span>
+                      )}
+                      <span className="absolute inset-0 flex items-center justify-center bg-black/25" aria-hidden="true">
+                        <span className="flex h-10 w-10 items-center justify-center rounded-full bg-rose-500/90 text-white shadow-lg">
+                          <Play className="h-4 w-4 fill-current" />
+                        </span>
+                      </span>
+                      {item.movie.vote_average > 0 && (
+                        <span className="absolute left-2 top-2 flex items-center gap-1 rounded-full bg-black/70 px-2 py-1 text-xs font-semibold text-yellow-300">
+                          <Star className="h-3 w-3 fill-current" aria-hidden="true" />
+                          {Number(item.movie.vote_average).toFixed(1)}
+                        </span>
+                      )}
+                    </span>
+                    <span className="block px-3 py-3">
+                      <span className="block truncate text-sm font-semibold text-white">{title}</span>
+                      <span className="mt-1 block text-xs text-gray-400">
+                        {item.trailer?.available
+                          ? `${item.trailer.official ? 'Official ' : ''}${item.trailer.type}`
+                          : 'Trailer unavailable'}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => scrollRail(1)}
+              aria-label="Next trailer cards"
+              className="hidden h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/5 text-gray-200 transition hover:border-rose-400/50 hover:bg-rose-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white motion-reduce:transition-none md:flex"
+            >
+              <ChevronRight className="h-5 w-5" aria-hidden="true" />
+            </button>
+          </div>
+        )}
       </div>
     </section>
   );

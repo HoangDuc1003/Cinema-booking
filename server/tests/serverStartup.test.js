@@ -31,6 +31,8 @@ for (const heroRefreshIntervalHours of ['24', '48']) {
             INNGEST_EVENT_KEY: '',
             INNGEST_SIGNING_KEY: '',
             HERO_REFRESH_INTERVAL_HOURS: heroRefreshIntervalHours,
+            HERO_MEDIA_AUTHORIZED_SOURCE_HOSTS: '',
+            HERO_ENABLE_LEGACY_CLOUDINARY_ENRICHMENT: 'false',
         };
 
         const script = `

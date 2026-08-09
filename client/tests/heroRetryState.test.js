@@ -27,38 +27,40 @@ test('heroRetryState: button label transitions (Trailer -> Loading… -> Retry t
   assert.match(content, /'Trailer'/);
 
   // Verify button is disabled ONLY when loading or unavailable (enabled during Retry trailer)
-  assert.match(content, /disabled=\{trailerLoading \|\| trailerUnavailable\}/);
+  assert.match(content, /const isNativeMode = trailerMode === 'native';/);
+  assert.match(content, /const effectiveTrailerUnavailable = trailerUnavailable && isNativeMode/);
+  assert.match(content, /disabled=\{trailerLoading \|\| effectiveTrailerUnavailable\}/);
 
   // Unit calculation helper test
-  const computeLabel = ({ trailerLoading, trailerUnavailable, effectiveTrailerFailed }) => (
+  const computeLabel = ({ trailerLoading, trailerUnavailable, isNativeMode, effectiveTrailerFailed }) => (
     trailerLoading
       ? 'Loading…'
-      : trailerUnavailable
+      : trailerUnavailable && isNativeMode
         ? 'Trailer unavailable'
         : effectiveTrailerFailed
           ? 'Retry trailer'
           : 'Trailer'
   );
 
-  const computeDisabled = ({ trailerLoading, trailerUnavailable }) => (
-    trailerLoading || trailerUnavailable
+  const computeDisabled = ({ trailerLoading, trailerUnavailable, isNativeMode }) => (
+    trailerLoading || (trailerUnavailable && isNativeMode)
   );
 
   // State 1: Idle with valid source -> "Trailer", enabled
-  assert.equal(computeLabel({ trailerLoading: false, trailerUnavailable: false, effectiveTrailerFailed: false }), 'Trailer');
-  assert.equal(computeDisabled({ trailerLoading: false, trailerUnavailable: false }), false);
+  assert.equal(computeLabel({ trailerLoading: false, trailerUnavailable: false, isNativeMode: true, effectiveTrailerFailed: false }), 'Trailer');
+  assert.equal(computeDisabled({ trailerLoading: false, trailerUnavailable: false, isNativeMode: true }), false);
 
   // State 2: Loading -> "Loading…", disabled
-  assert.equal(computeLabel({ trailerLoading: true, trailerUnavailable: false, effectiveTrailerFailed: false }), 'Loading…');
-  assert.equal(computeDisabled({ trailerLoading: true, trailerUnavailable: false }), true);
+  assert.equal(computeLabel({ trailerLoading: true, trailerUnavailable: false, isNativeMode: true, effectiveTrailerFailed: false }), 'Loading…');
+  assert.equal(computeDisabled({ trailerLoading: true, trailerUnavailable: false, isNativeMode: true }), true);
 
   // State 3: Transient error -> "Retry trailer", enabled
-  assert.equal(computeLabel({ trailerLoading: false, trailerUnavailable: false, effectiveTrailerFailed: true }), 'Retry trailer');
-  assert.equal(computeDisabled({ trailerLoading: false, trailerUnavailable: false }), false);
+  assert.equal(computeLabel({ trailerLoading: false, trailerUnavailable: false, isNativeMode: true, effectiveTrailerFailed: true }), 'Retry trailer');
+  assert.equal(computeDisabled({ trailerLoading: false, trailerUnavailable: false, isNativeMode: true }), false);
 
   // State 4: Permanent missing video -> "Trailer unavailable", disabled
-  assert.equal(computeLabel({ trailerLoading: false, trailerUnavailable: true, effectiveTrailerFailed: false }), 'Trailer unavailable');
-  assert.equal(computeDisabled({ trailerLoading: false, trailerUnavailable: true }), true);
+  assert.equal(computeLabel({ trailerLoading: false, trailerUnavailable: true, isNativeMode: true, effectiveTrailerFailed: false }), 'Trailer unavailable');
+  assert.equal(computeDisabled({ trailerLoading: false, trailerUnavailable: true, isNativeMode: true }), true);
 });
 
 test('heroRetryState: videoGeneration resets error states and increments generation counter', async () => {

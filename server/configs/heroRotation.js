@@ -172,6 +172,12 @@ export const validateHeroRuntimeConfig = (env = process.env) => {
             300,
             { integer: true, min: 0, max: Number.MAX_SAFE_INTEGER },
         ),
+        poolCandidateReserve: readNumber(
+            env,
+            'HERO_POOL_CANDIDATE_RESERVE',
+            2,
+            { integer: true, min: 0, max: 10 },
+        ),
     });
 };
 
@@ -192,6 +198,7 @@ export const HERO_REFRESH_LOCK_TTL_MS = HERO_RUNTIME_CONFIG.refreshLockTtlMs;
 export const HERO_REFRESH_RUN_TTL_SECONDS = HERO_RUNTIME_CONFIG.refreshRunTtlSeconds;
 export const HERO_MIN_VOTE_AVERAGE = HERO_RUNTIME_CONFIG.minVoteAverage;
 export const HERO_MIN_VOTE_COUNT = HERO_RUNTIME_CONFIG.minVoteCount;
+export const HERO_POOL_CANDIDATE_RESERVE = HERO_RUNTIME_CONFIG.poolCandidateReserve;
 
 export const HERO_VIDEO_CODEC_RULES = Object.freeze({
     'video/mp4': Object.freeze({

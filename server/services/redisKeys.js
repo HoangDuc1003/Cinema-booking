@@ -27,6 +27,8 @@ export const redisKeys = {
     bookableNowShowing: (region = 'VN', days = 7) => key('cache', 'shows', 'now-playing', region, days),
     bookableNowShowingPattern: () => key('cache', 'shows', 'now-playing', '*'),
     nowShowingLastGood: () => key('cache', 'shows', 'now-playing', 'last-good'),
+    homeTmdbNowPlaying: (region = 'VN') => key('cache', 'home', 'tmdb', 'now-playing', region),
+    homeTmdbNowPlayingLastGood: (region = 'VN') => key('cache', 'home', 'tmdb', 'now-playing', region, 'last-good'),
     tmdbPopular: (page) => key('cache', 'tmdb', 'popular', page),
     tmdbUpcoming: (page) => key('cache', 'tmdb', 'upcoming', page),
     tmdbNowPlaying: (page) => key('cache', 'tmdb', 'now-playing', page),
@@ -34,6 +36,7 @@ export const redisKeys = {
     tmdbSimilar: (movieId, limit) => key('cache', 'tmdb', 'similar', movieId, limit),
     tmdbSimilarPattern: () => key('cache', 'tmdb', 'similar', '*'),
     tmdbVideos: (movieId) => key('cache', 'tmdb', 'videos-v2', movieId),
+    tmdbSelectedTrailer: (movieId) => key('cache', 'tmdb', 'selected-trailer-v1', movieId),
     tmdbTrailers: (batchId, slot, limit) => key('cache', 'tmdb', 'trailers', batchId, slot, limit),
     tmdbTrailersPattern: () => key('cache', 'tmdb', 'trailers', '*'),
     catalogSlot: (batchId, slot) => key('catalog', 'slot', batchId, slot),
@@ -65,6 +68,9 @@ export const redisTtl = Object.freeze({
     cinemas: parsePositiveInteger(process.env.CACHE_CINEMAS_TTL_SECONDS, 600),
     showtimes: parsePositiveInteger(process.env.CACHE_SHOWTIMES_TTL_SECONDS, 120),
     nowShowingLastGood: parsePositiveInteger(process.env.CACHE_NOW_SHOWING_LAST_GOOD_TTL_SECONDS, 2592000), // 30 days
+    homeNowShowingLastGood: parsePositiveInteger(process.env.CACHE_HOME_NOW_SHOWING_LAST_GOOD_TTL_SECONDS, 86400),
+    tmdbTrailer: parsePositiveInteger(process.env.CACHE_TMDB_TRAILER_TTL_SECONDS, 86400),
+    tmdbTrailerNegative: parsePositiveInteger(process.env.CACHE_TMDB_TRAILER_NEGATIVE_TTL_SECONDS, 3600),
     seatMap: parsePositiveInteger(process.env.CACHE_SEAT_MAP_TTL_SECONDS, 5),
     // Stripe Checkout requires expires_at to be at least 30 minutes in the future.
     // Keep a one-minute network/clock buffer and use the same TTL for DB + Redis holds.

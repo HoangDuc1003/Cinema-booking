@@ -234,6 +234,7 @@ const installRefreshHarness = (t, { warmFailures = 0 } = {}) => {
         _id: 'catalog-1',
         status: 'active',
         movieIds: pool.movieIds,
+        buckets: { newest: pool.newestMovieIds },
         version: 4,
         weekKey: '2026-W31',
     }));
