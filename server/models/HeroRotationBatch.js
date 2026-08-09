@@ -60,10 +60,12 @@ const heroRotationBatchSchema = new mongoose.Schema(
         status: {
             type: String,
             required: true,
-            enum: ['building', 'active', 'retired', 'failed'],
+            enum: ['building', 'preparing', 'ready_to_activate', 'active', 'retired', 'failed'],
             default: 'building',
         },
         generatedAt: { type: Date, required: true, default: Date.now },
+        preparedAt: { type: Date, default: null },
+        readyAt: { type: Date, default: null },
         activatedAt: {
             type: Date,
             required() {

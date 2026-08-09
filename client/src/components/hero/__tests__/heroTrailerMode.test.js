@@ -49,7 +49,7 @@ test('VITE_HERO_TRAILER_MODE supports native, section, and hybrid semantics', as
   assert.match(section, /if\s*\(trailerMode\s*===\s*'section'\)\s*\{\s*scrollToTrailerSection\(\);/);
 
   // 'hybrid' mode: tries native playback first when valid native source exists, retries native playback in Hero
-  assert.match(section, /if\s*\(trailerAvailable\)\s*\{\s*handlePlayTrailer\(\);/);
+  assert.match(section, /if\s*\(trailerAvailable \|\| trailerFailed\)\s*\{\s*handlePlayTrailer\(\);/);
 
   // HeroContent ignores trailerFailed in section mode
   assert.match(content, /const isSectionMode = trailerMode === 'section';/);

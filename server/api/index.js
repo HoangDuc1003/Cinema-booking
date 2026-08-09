@@ -119,7 +119,15 @@ app.use(clerkMiddleware({
 
 app.use(async (req, res, next) => {
     const isPublicShowRead = req.method === 'GET' && req.path.startsWith('/api/show');
+    const isDatabaseIndependentHomeRequest = (
+        (req.method === 'GET' && req.path === '/api/show/tmdb/home-now-showing')
+        || (req.method === 'POST' && req.path === '/api/show/tmdb/trailers')
+    );
     const timing = {};
+    if (isDatabaseIndependentHomeRequest) {
+        req.nitroTiming = { database: 'bypassed' };
+        return next();
+    }
     try {
         await connectDB({ ensureIndexes: !isPublicShowRead, timing });
         req.nitroTiming = timing;

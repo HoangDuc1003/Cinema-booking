@@ -18,6 +18,10 @@ import {
     verifyFencedLock,
 } from './lockService.js';
 import { redisKeys, redisTtl } from './redisKeys.js';
+import {
+    recordVerifiedHeroMediaAsset,
+    retireHeroMediaAsset,
+} from './heroMediaAssetService.js';
 
 const SUPPORTED_FORMATS = new Set(['mp4', 'webm']);
 
@@ -46,6 +50,8 @@ export const heroVideoRuntime = {
             };
         }
     },
+    recordVerifiedAsset: (...args) => recordVerifiedHeroMediaAsset(...args),
+    retireAsset: (...args) => retireHeroMediaAsset(...args),
 };
 
 export class HeroVideoError extends Error {
@@ -290,6 +296,18 @@ export const commitHeroVideo = async (movieId, { publicId } = {}) => {
         target.heroVideoSource = verified.source;
         target.heroVideoAttribution = verified.attribution;
         target.heroVideoChecksum = verified.checksum;
+        await heroVideoRuntime.recordVerifiedAsset({
+            movieId: id,
+            verified,
+            updateMovie: false,
+            source: {
+                sourceType: 'ADMIN_UPLOAD',
+                sourceProvider: 'cloudinary',
+                sourceReference: verified.publicId,
+                rightsStatus: 'USER_OWNED',
+                provenance: { method: 'admin-upload' },
+            },
+        });
         // Advance the generation before the durable movie write. If the write fails,
         // the extra cache miss is safe; a successful write can never remain hidden
         // behind an older generation after a crash between these operations.
@@ -381,6 +399,9 @@ export const removeHeroVideo = async (movieId) => {
         target.heroVideoChecksum = '';
         await bumpHeroVideoCacheGeneration();
         await target.save();
+        if (storedPublicId) {
+            await heroVideoRuntime.retireAsset({ movieId: id, publicId: storedPublicId });
+        }
         await invalidateHeroVideoCaches();
         if (storedPublicId) {
             try {

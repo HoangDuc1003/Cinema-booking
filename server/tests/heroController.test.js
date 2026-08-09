@@ -92,7 +92,7 @@ test('Home Hero controller returns 304 without a response body for a matching ET
 
 test('every Hero admin route applies protectAdmin before its action handler', () => {
     const heroLayers = adminRouter.stack.filter((layer) => layer.route?.path?.startsWith('/hero'));
-    assert.equal(heroLayers.length, 8);
+    assert.equal(heroLayers.length, 10);
     for (const layer of heroLayers) {
         assert.equal(layer.route.stack[0]?.handle?.name, 'protectAdmin', layer.route.path);
         assert.ok(layer.route.stack.length >= 2, layer.route.path);
@@ -205,4 +205,3 @@ test('updateHeroSettings controller action returns 422 with code MANUAL_HERO_INV
         Movie.find = originals.movieFind;
     }
 });
-

@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import axios from 'axios';
 import Movie from '../models/Movie.js';
 import Show from '../models/Show.js';
 import { importTrendingMoviesLogic } from '../services/movieService.js';
@@ -13,6 +12,12 @@ import {
     getPublicHomeNowShowing,
 } from '../services/homeNowShowingService.js';
 import { fetchTmdbImage } from '../services/tmdbImageService.js';
+import { fetchTmdbJson } from '../services/tmdbService.js';
+import {
+    getTmdbTrailersBatch,
+    MAX_TRAILER_MOVIES,
+    normalizeTrailerMovieIds,
+} from '../services/tmdbTrailerService.js';
 import { calculateCurrentSlot, getPublicHomePayload } from '../services/catalogRefreshService.js';
 import { groupPersistedShowtimes, parseCinemaShowDateTime } from '../services/showtimeService.js';
 import {
@@ -25,7 +30,6 @@ import {
     syncNowPlayingShows,
 } from '../services/nowPlayingShowSyncService.js';
 
-const tmdbHeaders = () => ({ Authorization: `Bearer ${process.env.TMDB_API_KEY}` });
 const setCacheHeader = (res, cache) => res.set('X-Cache', cache);
 const HOME_BROWSER_CACHE_CONTROL = 'public, max-age=60, stale-if-error=86400';
 const HOME_CDN_CACHE_CONTROL = 's-maxage=300, stale-while-revalidate=43200, stale-if-error=86400';
@@ -46,16 +50,6 @@ const setTimingHeader = (res, timing = {}) => {
         ['total', timing.totalMs],
     ].filter(([, value]) => Number.isFinite(value));
     if (entries.length) res.set('Server-Timing', entries.map(([name, value]) => `${name};dur=${Number(value).toFixed(2)}`).join(', '));
-};
-
-const fetchTmdbJson = async (path, params = {}) => {
-    if (!process.env.TMDB_API_KEY) throw new Error('TMDB_API_KEY is not configured');
-    const { data } = await axios.get(`https://api.themoviedb.org/3${path}`, {
-        headers: tmdbHeaders(),
-        params,
-        timeout: Number(process.env.TMDB_TIMEOUT_MS) || 3000,
-    });
-    return data;
 };
 
 const parsePage = (value) => Math.min(Math.max(Number.parseInt(value, 10) || 1, 1), 500);
@@ -229,15 +223,24 @@ export const createGetHomeNowShowingHandler = ({
             dbConnectionState: timing.dbConnectionState,
             errorCode: error?.code || error?.name || 'UNKNOWN',
         }));
-        const code = error?.code === 'DATABASE_UNAVAILABLE' || error?.code === 'DATABASE_INDEX_UNAVAILABLE'
-            ? 'DATABASE_UNAVAILABLE'
+        const unavailableCodes = new Set([
+            'DATABASE_UNAVAILABLE',
+            'DATABASE_INDEX_UNAVAILABLE',
+            'TMDB_UNAVAILABLE',
+            'TMDB_EMPTY_RESPONSE',
+            'INVALID_CONFIGURATION',
+        ]);
+        const code = unavailableCodes.has(error?.code)
+            ? (String(error.code).startsWith('DATABASE') ? 'DATABASE_UNAVAILABLE' : 'TMDB_UNAVAILABLE')
             : 'INTERNAL_ERROR';
-        return res.status(code === 'DATABASE_UNAVAILABLE' ? 503 : 500).json({
+        return res.status(code === 'INTERNAL_ERROR' ? 500 : 503).json({
             success: false,
             code,
             requestId,
-            message: code === 'DATABASE_UNAVAILABLE'
-                ? 'Database temporarily unavailable. Please retry.'
+            message: code === 'TMDB_UNAVAILABLE'
+                ? 'Current theatrical releases are temporarily unavailable.'
+                : code === 'DATABASE_UNAVAILABLE'
+                    ? 'Database temporarily unavailable. Please retry.'
                 : 'Unable to load home now-showing movies.',
         });
     }
@@ -370,6 +373,38 @@ export const createGetTmdbVideosHandler = ({
 };
 
 export const getTmdbVideos = createGetTmdbVideosHandler();
+
+export const createGetTmdbTrailersBatchHandler = ({
+    loadTrailers = getTmdbTrailersBatch,
+} = {}) => async (req, res) => {
+    const requestedIds = req.body?.movieIds;
+    if (!Array.isArray(requestedIds) || requestedIds.length === 0 || requestedIds.length > MAX_TRAILER_MOVIES) {
+        return res.status(400).json({
+            success: false,
+            message: `movieIds must contain between 1 and ${MAX_TRAILER_MOVIES} TMDB IDs.`,
+        });
+    }
+    const movieIds = normalizeTrailerMovieIds(requestedIds);
+    if (!movieIds.length || movieIds.length !== new Set(requestedIds.map((id) => String(id).trim())).size) {
+        return res.status(400).json({
+            success: false,
+            message: 'movieIds must contain numeric TMDB IDs.',
+        });
+    }
+
+    try {
+        const data = await loadTrailers({ movieIds });
+        return res.json({ success: true, data });
+    } catch (error) {
+        console.error('[getTmdbTrailersBatch]', error?.code || error?.name || 'UNKNOWN');
+        return res.status(502).json({
+            success: false,
+            message: 'Unable to load movie trailers.',
+        });
+    }
+};
+
+export const postTmdbTrailers = createGetTmdbTrailersBatchHandler();
 
 const loadBookableMovieIds = async () => Show.distinct('movie', {
     showDateTime: { $gte: new Date() },
@@ -557,32 +592,30 @@ export const getTmdbTrailers = async (req, res) => {
 
 const fetchMovieFromTmdb = async (movieId) => {
     const [details, credits] = await Promise.all([
-        axios.get(`https://api.themoviedb.org/3/movie/${movieId}`, { headers: tmdbHeaders() }),
-        axios.get(`https://api.themoviedb.org/3/movie/${movieId}/credits`, { headers: tmdbHeaders() }),
+        fetchTmdbJson(`/movie/${movieId}`),
+        fetchTmdbJson(`/movie/${movieId}/credits`),
     ]);
 
     return {
         _id: String(movieId),
-        title: details.data.title,
-        overview: details.data.overview,
-        poster_path: details.data.poster_path,
-        backdrop_path: details.data.backdrop_path,
-        genres: details.data.genres,
-        casts: credits.data.cast,
-        release_date: details.data.release_date,
-        original_language: details.data.original_language,
-        tagline: details.data.tagline || '',
-        vote_average: details.data.vote_average,
-        runtime: details.data.runtime,
+        title: details.title,
+        overview: details.overview,
+        poster_path: details.poster_path,
+        backdrop_path: details.backdrop_path,
+        genres: details.genres,
+        casts: credits.cast,
+        release_date: details.release_date,
+        original_language: details.original_language,
+        tagline: details.tagline || '',
+        vote_average: details.vote_average,
+        runtime: details.runtime,
     };
 };
 
 export const getNowPlayingMovies = async (req, res) => {
     try {
         const result = await rememberJson(redisKeys.nowPlayingMovies(), redisTtl.movies, async () => {
-            const { data } = await axios.get('https://api.themoviedb.org/3/movie/now_playing', {
-                headers: tmdbHeaders(),
-            });
+            const data = await fetchTmdbJson('/movie/now_playing');
             return data.results;
         });
         setCacheHeader(res, result.cache).json({ success: true, movies: result.value });

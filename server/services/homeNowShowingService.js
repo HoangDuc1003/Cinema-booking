@@ -1,16 +1,13 @@
 import { createHash } from 'node:crypto';
-import { rememberJson, getJson, setJson } from './cacheService.js';
+import { getJson, setJson } from './cacheService.js';
 import { redisKeys, redisTtl } from './redisKeys.js';
-import {
-    getBookableNowShowingMovies,
-    SCHEDULE_DAYS,
-    TMDB_REGION,
-} from './nowPlayingShowSyncService.js';
+import { fetchTmdbJson } from './tmdbService.js';
+import { TMDB_LANGUAGE, TMDB_REGION } from './nowPlayingShowSyncService.js';
 
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 20;
+const TMDB_PAGES = Object.freeze([1, 2]);
 const roundMs = (value) => Math.round(value * 100) / 100;
-
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
 export const parseHomeNowShowingLimit = (value) => {
@@ -18,42 +15,84 @@ export const parseHomeNowShowingLimit = (value) => {
     return clamp(Number.isFinite(parsed) ? parsed : DEFAULT_LIMIT, 1, MAX_LIMIT);
 };
 
-export const normalizeHomeNowShowingRegion = () => {
-    // Now Showing is intentionally VN-only; callers cannot switch this feed to another market.
-    return TMDB_REGION;
+export const normalizeHomeNowShowingRegion = () => TMDB_REGION;
+
+const finiteNumber = (value, fallback = 0) => {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
 };
 
 export const normalizeHomeNowShowingMovie = (movie) => {
-    const id = String(movie?._id || movie?.id || '').trim();
-    if (!id) return null;
+    if (!movie || movie.adult === true) return null;
+    const id = String(movie.id ?? movie._id ?? '').trim();
+    const title = String(movie.title || movie.name || '').trim();
+    const posterPath = String(movie.poster_path || '').trim() || null;
+    const backdropPath = String(movie.backdrop_path || '').trim() || null;
+    const releaseDate = String(movie.release_date || '').slice(0, 10);
+    const numericId = Number(id);
+    if (!/^\d+$/.test(id) || !Number.isSafeInteger(numericId) || numericId <= 0) return null;
+    if (!title || (!posterPath && !backdropPath)) return null;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(releaseDate)) return null;
+
     return {
         ...movie,
         _id: id,
-        id: /^\d+$/.test(id) ? Number(id) : id,
-        title: movie.title || movie.name || 'Untitled',
-        poster_path: movie.poster_path || null,
-        backdrop_path: movie.backdrop_path || null,
-        release_date: String(movie.release_date || '').slice(0, 10),
-        vote_average: Number(movie.vote_average) || 0,
-        runtime: Number.isFinite(Number(movie.runtime)) ? Number(movie.runtime) : null,
+        id: numericId,
+        title,
+        poster_path: posterPath,
+        backdrop_path: backdropPath,
+        release_date: releaseDate,
+        popularity: finiteNumber(movie.popularity),
+        vote_count: finiteNumber(movie.vote_count),
+        vote_average: finiteNumber(movie.vote_average),
+        runtime: Number(movie.runtime) > 0 ? Number(movie.runtime) : null,
+        adult: false,
     };
 };
 
-export const createHomeNowShowingEtag = (value) => {
-    const catalog = value?.meta?.catalog || {};
-    const identity = JSON.stringify({
-        batchId: catalog.batchId || '',
-        version: catalog.version ?? '',
-        slot: catalog.slot ?? '',
-        region: value?.meta?.region || TMDB_REGION,
-        limit: value?.meta?.limit || 0,
-        movies: (value?.results || []).map((movie) => String(movie?._id || movie?.id || '')),
-    });
-    const digest = createHash('sha256').update(identity).digest('hex').slice(0, 24);
-    return `"home-now-showing-${digest}"`;
+export const rankHomeNowShowingMovies = (movies = [], limit = MAX_LIMIT) => {
+    const seen = new Set();
+    return movies
+        .map(normalizeHomeNowShowingMovie)
+        .filter(Boolean)
+        .sort((left, right) => (
+            right.popularity - left.popularity
+            || right.vote_count - left.vote_count
+            || right.vote_average - left.vote_average
+            || String(left._id).localeCompare(String(right._id), 'en', { numeric: true })
+        ))
+        .filter((movie) => {
+            if (seen.has(movie._id)) return false;
+            seen.add(movie._id);
+            return true;
+        })
+        .slice(0, parseHomeNowShowingLimit(limit));
 };
 
-export const getPublicHomeNowShowing = async ({
+const isCachedMovieList = (value) => (
+    Array.isArray(value?.results)
+    && value.results.length > 0
+    && value.results.every((movie) => normalizeHomeNowShowingMovie(movie))
+);
+
+const makeValue = ({ cached, limit, now, region, source, stale }) => ({
+    results: cached.results.slice(0, limit),
+    meta: {
+        source,
+        region,
+        limit,
+        stale,
+        partial: cached.results.length < limit,
+        fetchedPages: cached.fetchedPages || 0,
+        generatedAt: cached.generatedAt || now.toISOString(),
+    },
+});
+
+export const createHomeNowShowingService = ({
+    fetchJson = fetchTmdbJson,
+    readCache = getJson,
+    writeCache = setJson,
+} = {}) => async ({
     limit: rawLimit = DEFAULT_LIMIT,
     region: rawRegion = TMDB_REGION,
     now = new Date(),
@@ -61,56 +100,122 @@ export const getPublicHomeNowShowing = async ({
     const limit = parseHomeNowShowingLimit(rawLimit);
     const region = normalizeHomeNowShowingRegion(rawRegion);
     const startedAt = performance.now();
-    const cacheKey = redisKeys.bookableNowShowing(region, SCHEDULE_DAYS);
-    const result = await rememberJson(
-        cacheKey,
-        redisTtl.movies,
-        () => getBookableNowShowingMovies({
-            region,
-            days: SCHEDULE_DAYS,
-            limit: MAX_LIMIT,
-            now,
-        }),
-    );
-    let results = (Array.isArray(result.value) ? result.value : [])
-        .slice(0, limit)
-        .map(normalizeHomeNowShowingMovie)
-        .filter(Boolean);
+    const freshKey = redisKeys.homeTmdbNowPlaying(region);
+    const lastGoodKey = redisKeys.homeTmdbNowPlayingLastGood(region);
+    const fresh = await readCache(freshKey);
 
-    let source = 'bookable-shows';
-    let stale = false;
-
-    const lastGoodKey = redisKeys.nowShowingLastGood();
-    if (results.length > 0) {
-        setJson(lastGoodKey, results, redisTtl.nowShowingLastGood).catch(() => {});
-    } else {
-        const lastGood = await getJson(lastGoodKey);
-        if (Array.isArray(lastGood) && lastGood.length > 0) {
-            results = lastGood.slice(0, limit);
-            source = 'last-good';
-            stale = true;
-        }
+    if (isCachedMovieList(fresh)) {
+        return {
+            value: makeValue({
+                cached: fresh,
+                limit,
+                now,
+                region,
+                source: 'tmdb-now-playing',
+                stale: false,
+            }),
+            cache: 'hit',
+            timing: {
+                upstreamMs: 0,
+                totalMs: roundMs(performance.now() - startedAt),
+            },
+        };
     }
 
-    return {
-        value: {
-            results,
-            meta: {
+    try {
+        const pageResponses = await Promise.allSettled(TMDB_PAGES.map((page) => fetchJson(
+            '/movie/now_playing',
+            {
                 region,
-                limit,
-                source,
-                stale,
-                partial: results.length < limit,
-                catalog: null,
-                generatedAt: now.toISOString(),
+                language: TMDB_LANGUAGE,
+                include_adult: false,
+                page,
             },
-        },
-        cache: result.cache,
-        timing: {
-            catalogMs: roundMs(performance.now() - startedAt),
-            totalMs: roundMs(performance.now() - startedAt),
-        },
-    };
+        )));
+        if (pageResponses[0]?.status !== 'fulfilled') {
+            throw pageResponses[0]?.reason || new Error('TMDB now-playing page one is unavailable');
+        }
+        const fulfilled = pageResponses.filter((result) => result.status === 'fulfilled');
+
+        const ranked = rankHomeNowShowingMovies(
+            fulfilled.flatMap((result) => (
+                Array.isArray(result.value?.results) ? result.value.results : []
+            )),
+            MAX_LIMIT,
+        );
+        if (!ranked.length) {
+            throw Object.assign(new Error('TMDB returned no valid now-playing movies'), {
+                code: 'TMDB_EMPTY_RESPONSE',
+            });
+        }
+
+        const cached = {
+            results: ranked,
+            fetchedPages: fulfilled.length,
+            generatedAt: now.toISOString(),
+        };
+        await Promise.all([
+            writeCache(freshKey, cached, redisTtl.movies),
+            writeCache(lastGoodKey, cached, redisTtl.homeNowShowingLastGood),
+        ]);
+
+        return {
+            value: makeValue({
+                cached,
+                limit,
+                now,
+                region,
+                source: 'tmdb-now-playing',
+                stale: false,
+            }),
+            cache: 'miss',
+            timing: {
+                upstreamMs: roundMs(performance.now() - startedAt),
+                totalMs: roundMs(performance.now() - startedAt),
+            },
+        };
+    } catch (error) {
+        const lastGood = await readCache(lastGoodKey);
+        if (isCachedMovieList(lastGood)) {
+            return {
+                value: makeValue({
+                    cached: lastGood,
+                    limit,
+                    now,
+                    region,
+                    source: 'tmdb-now-playing-last-good',
+                    stale: true,
+                }),
+                cache: 'stale',
+                timing: {
+                    upstreamMs: roundMs(performance.now() - startedAt),
+                    totalMs: roundMs(performance.now() - startedAt),
+                },
+            };
+        }
+        throw Object.assign(new Error('TMDB now-playing is unavailable and no last-good cache exists', {
+            cause: error,
+        }), {
+            code: error?.code === 'INVALID_CONFIGURATION' ? error.code : 'TMDB_UNAVAILABLE',
+            statusCode: 503,
+        });
+    }
 };
+
+export const createHomeNowShowingEtag = (value) => {
+    const identity = JSON.stringify({
+        source: value?.meta?.source || '',
+        region: value?.meta?.region || TMDB_REGION,
+        limit: value?.meta?.limit || 0,
+        movies: (value?.results || []).map((movie) => ({
+            id: String(movie?._id || movie?.id || ''),
+            popularity: finiteNumber(movie?.popularity),
+        })),
+    });
+    const digest = createHash('sha256').update(identity).digest('hex').slice(0, 24);
+    return `"home-now-showing-${digest}"`;
+};
+
+export const getPublicHomeNowShowing = createHomeNowShowingService();
 
 export default getPublicHomeNowShowing;

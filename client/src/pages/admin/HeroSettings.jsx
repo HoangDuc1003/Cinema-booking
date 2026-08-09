@@ -98,6 +98,8 @@ const HeroSettings = () => {
       if (!data.success) throw new Error(data.message || 'Hero refresh failed.');
       if (data.result?.skipped) {
         toast.success(`Hero refresh was idempotent (${data.result.reason}).`);
+      } else if (data.result?.nextPoolStatus === 'NEXT_POOL_PREPARING') {
+        toast.success(`Next Hero pool is preparing (${data.result.readiness?.readyCount || 0}/15 native assets ready).`);
       } else {
         toast.success(`Hero batch v${data.result?.version ?? 'new'} activated.`);
       }
@@ -722,6 +724,44 @@ const HeroSettings = () => {
               </div>
 
               <HeroPoolGrid movies={rotation.pool || []} onUpdated={fetchHeroSettings} />
+            </div>
+          )}
+
+          {rotation?.preparingBatch && (
+            <div className="rounded-lg border border-blue-500/30 bg-blue-500/[0.06] p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="font-medium text-blue-100">Next pool: {rotation.preparingBatch.status === 'ready_to_activate' ? 'ready to activate' : 'preparing'}</p>
+                  <p className="mt-1 text-sm text-blue-100/75">
+                    The healthy active batch remains live until this pool has 15 unique verified native assets.
+                  </p>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-center text-xs text-blue-100">
+                  {Object.entries(rotation.preparingBatch.readiness?.categoryCounts || {}).map(([category, count]) => (
+                    <span key={category} className="rounded border border-blue-400/20 bg-black/20 px-2 py-1">
+                      {category}: {count}/5
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <HeroPoolGrid movies={rotation.preparingBatch.pool || []} onUpdated={fetchHeroSettings} />
+            </div>
+          )}
+
+          {rotation?.mediaLibrary && (
+            <div className="grid gap-2 rounded-lg border border-white/10 bg-black/20 p-3 text-xs sm:grid-cols-5">
+              {[
+                ['Ready library', rotation.mediaLibrary.ready],
+                ['Pending', rotation.mediaLibrary.pending],
+                ['Ingesting', rotation.mediaLibrary.ingesting],
+                ['Processing', rotation.mediaLibrary.processing],
+                ['Failed', rotation.mediaLibrary.failed],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded bg-white/[0.04] p-2">
+                  <p className="text-gray-500">{label}</p>
+                  <p className="mt-1 text-base font-semibold text-white">{value || 0}</p>
+                </div>
+              ))}
             </div>
           )}
 

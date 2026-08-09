@@ -13,6 +13,7 @@ import {
     getTmdbPopular,
     getTmdbSimilar,
     getTmdbTrailers,
+    postTmdbTrailers,
     getTmdbUpcoming,
     getTmdbVideos,
     importTrendingMovies,
@@ -35,6 +36,7 @@ showRouter.get('/tmdb/now-playing', getTmdbNowPlaying)
 showRouter.get('/tmdb/home-now-showing', getTmdbHomeNowShowing)
 showRouter.get('/tmdb/image', getTmdbImage)
 showRouter.get('/tmdb/trailers', getTmdbTrailers)
+showRouter.post('/tmdb/trailers', express.json({ limit: '8kb' }), postTmdbTrailers)
 showRouter.get('/tmdb/search', searchTmdbMovies)
 showRouter.get('/tmdb/movie/:movieId/videos', getTmdbVideos)
 showRouter.get('/tmdb/movie/:movieId/similar', getTmdbSimilar)

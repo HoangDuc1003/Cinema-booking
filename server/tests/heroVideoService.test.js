@@ -97,6 +97,8 @@ const installMutationHarness = (t) => {
         deleteKeys: heroVideoRuntime.deleteKeys,
         deleteByPattern: heroVideoRuntime.deleteByPattern,
         activation: heroVideoRuntime.attemptActivation,
+        recordVerifiedAsset: heroVideoRuntime.recordVerifiedAsset,
+        retireAsset: heroVideoRuntime.retireAsset,
     };
     let lockHeld = false;
     SiteConfig.findOne = () => ({
@@ -121,6 +123,8 @@ const installMutationHarness = (t) => {
     heroVideoRuntime.deleteKeys = async () => 1;
     heroVideoRuntime.deleteByPattern = async () => 1;
     heroVideoRuntime.attemptActivation = async () => ({ activated: false, code: 'POOL_PENDING' });
+    heroVideoRuntime.recordVerifiedAsset = async () => ({ status: 'ready' });
+    heroVideoRuntime.retireAsset = async () => ({ modifiedCount: 1 });
     t.after(() => {
         SiteConfig.findOne = original.configFindOne;
         SiteConfig.updateOne = original.configUpdateOne;
@@ -131,6 +135,8 @@ const installMutationHarness = (t) => {
         heroVideoRuntime.deleteKeys = original.deleteKeys;
         heroVideoRuntime.deleteByPattern = original.deleteByPattern;
         heroVideoRuntime.attemptActivation = original.activation;
+        heroVideoRuntime.recordVerifiedAsset = original.recordVerifiedAsset;
+        heroVideoRuntime.retireAsset = original.retireAsset;
     });
     return {
         isLockHeld: () => lockHeld,

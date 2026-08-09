@@ -34,7 +34,7 @@ test('R3 & R4: HeroSection handleTrailerAction retries native playback via video
   // Verify handleTrailerAction respects mode and retry
   assert.match(section, /if\s*\(trailerMode\s*===\s*'section'\)\s*\{\s*scrollToTrailerSection\(\);/);
   assert.match(section, /if\s*\(trailerMode\s*===\s*'native'\)\s*\{\s*handlePlayTrailer\(\);/);
-  assert.match(section, /if\s*\(trailerAvailable\)\s*\{\s*handlePlayTrailer\(\);/);
+  assert.match(section, /if\s*\(trailerAvailable \|\| trailerFailed\)\s*\{\s*handlePlayTrailer\(\);/);
 });
 
 test('R4: section mode disables native playback and passes mode to HeroContent', async () => {

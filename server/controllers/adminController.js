@@ -8,6 +8,10 @@ import {
     updateHomeHero,
 } from "../services/heroService.js"
 import { getUploadSignature, commitHeroVideo, removeHeroVideo } from "../services/heroVideoService.js"
+import {
+    requestHeroMediaSource,
+    retryHeroMediaSource,
+} from '../services/heroMediaIngestionService.js';
 import { refreshHeroRotation } from "../services/heroRotationService.js"
 import { randomUUID } from 'node:crypto';
 import { inngest } from '../inngest/index.js';
@@ -222,6 +226,68 @@ export const removeHeroVideoAction = async (req, res) => {
         });
     }
 }
+
+export const requestHeroMediaSourceAction = async (req, res) => {
+    try {
+        if (typeof inngest?.send !== 'function') {
+            return res.status(503).json({
+                success: false,
+                code: 'HERO_MEDIA_QUEUE_UNAVAILABLE',
+                message: 'Hero media queue is unavailable.',
+            });
+        }
+        const requestedBy = req.auth()?.userId || 'admin';
+        const result = await requestHeroMediaSource({
+            movieId: req.params.movieId,
+            ...(req.body || {}),
+            approvedBy: requestedBy,
+        });
+        if (result.shouldEnqueue) {
+            await inngest.send({
+                id: randomUUID(),
+                name: 'hero/media.requested',
+                data: { assetId: result.asset.id, requestedBy },
+            });
+        }
+        return res.status(result.shouldEnqueue ? 202 : 200).json({
+            success: true,
+            asset: result.asset,
+            reused: result.reused,
+            status: result.shouldEnqueue ? 'queued' : result.asset.sourceStatus,
+        });
+    } catch (error) {
+        return res.status(error.status || error.statusCode || 500).json({
+            success: false,
+            code: error.code || 'HERO_MEDIA_SOURCE_REQUEST_FAILED',
+            message: error.message,
+        });
+    }
+};
+
+export const retryHeroMediaSourceAction = async (req, res) => {
+    try {
+        if (typeof inngest?.send !== 'function') {
+            return res.status(503).json({
+                success: false,
+                code: 'HERO_MEDIA_QUEUE_UNAVAILABLE',
+                message: 'Hero media queue is unavailable.',
+            });
+        }
+        const asset = await retryHeroMediaSource({ assetId: req.params.assetId });
+        await inngest.send({
+            id: randomUUID(),
+            name: 'hero/media.requested',
+            data: { assetId: asset.id, requestedBy: req.auth()?.userId || 'admin' },
+        });
+        return res.status(202).json({ success: true, asset, status: 'queued' });
+    } catch (error) {
+        return res.status(error.status || error.statusCode || 500).json({
+            success: false,
+            code: error.code || 'HERO_MEDIA_RETRY_FAILED',
+            message: error.message,
+        });
+    }
+};
 
 export const refreshCatalogAction = async (req, res) => {
     const runId = randomUUID();

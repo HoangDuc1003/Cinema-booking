@@ -11,7 +11,7 @@ import {
     saveHomeNowShowingCache,
 } from './homeNowShowingCache.js';
 
-import { buildApiUrl, fetchApi, API_BASE_URL } from '../lib/apiClient.js';
+import { buildApiUrl } from '../lib/apiClient.js';
 
 const runtimeEnv = import.meta.env || {};
 const MOCK_DATA_ENABLED = runtimeEnv.DEV === true && runtimeEnv.VITE_ENABLE_MOCK_DATA === 'true';
@@ -21,12 +21,13 @@ const HOME_NOW_SHOWING_API_TIMEOUT_MS = Number(runtimeEnv.VITE_HOME_NOW_SHOWING_
 const HOME_NOW_SHOWING_REQUEST_BUDGET_MS = Number(runtimeEnv.VITE_HOME_NOW_SHOWING_REQUEST_BUDGET_MS) || 14_000;
 const HERO_API_TIMEOUT_MS = Number(runtimeEnv.VITE_HERO_API_TIMEOUT_MS) || 12_000;
 const SHOWTIME_API_TIMEOUT_MS = Number(runtimeEnv.VITE_SHOWTIME_API_TIMEOUT_MS) || 10_000;
+const TRAILER_API_TIMEOUT_MS = Number(runtimeEnv.VITE_TRAILER_API_TIMEOUT_MS) || 12_000;
 const TRAILER_CACHE_TTL_MS = 30_000;
 const trailerResponseCache = new Map();
 const HERO_SHARED_ABORT_GRACE_MS = 75;
-const HOME_SHARED_ABORT_GRACE_MS = 75;
+const SHARED_BACKEND_ABORT_GRACE_MS = 75;
 let sharedHeroRequest = null;
-const sharedHomeRequests = new Map();
+const sharedBackendRequests = new Map();
 let lastHeroResponse = null;
 let lastHeroEtag = '';
 
@@ -337,9 +338,13 @@ const loadHomeNowShowingFromServer = async ({ query, signal }) => {
     throw lastError || new FetchTimeoutError(HOME_NOW_SHOWING_REQUEST_BUDGET_MS);
 };
 
-const getSharedHomeRequest = (query) => {
-    const key = query.toString();
-    const existing = sharedHomeRequests.get(key);
+const getSharedBackendRequest = (key, loader) => {
+    let existing = sharedBackendRequests.get(key);
+    if (existing?.settled && existing.consumers.size === 0) {
+        globalThis.clearTimeout(existing.abortTimer);
+        sharedBackendRequests.delete(key);
+        existing = null;
+    }
     if (existing) {
         globalThis.clearTimeout(existing.abortTimer);
         existing.abortTimer = null;
@@ -353,40 +358,39 @@ const getSharedHomeRequest = (query) => {
         settled: false,
         promise: null,
     };
-    request.promise = loadHomeNowShowingFromServer({ query, signal: request.controller.signal })
+    request.promise = loader(request.controller.signal)
         .finally(() => {
             request.settled = true;
             if (request.consumers.size) return;
             request.abortTimer = globalThis.setTimeout(() => {
-                if (!request.consumers.size && sharedHomeRequests.get(key) === request) sharedHomeRequests.delete(key);
-            }, HOME_SHARED_ABORT_GRACE_MS);
+                if (!request.consumers.size && sharedBackendRequests.get(key) === request) sharedBackendRequests.delete(key);
+            }, SHARED_BACKEND_ABORT_GRACE_MS);
         });
-    sharedHomeRequests.set(key, request);
+    sharedBackendRequests.set(key, request);
     return request;
 };
 
-const releaseHomeConsumer = (key, request, consumer) => {
+const releaseSharedBackendConsumer = (key, request, consumer) => {
     request.consumers.delete(consumer);
-    if (request.consumers.size || sharedHomeRequests.get(key) !== request) return;
+    if (request.consumers.size || sharedBackendRequests.get(key) !== request) return;
     globalThis.clearTimeout(request.abortTimer);
     request.abortTimer = globalThis.setTimeout(() => {
-        if (!request.consumers.size && sharedHomeRequests.get(key) === request) {
-            sharedHomeRequests.delete(key);
-            if (!request.settled) request.controller.abort(new DOMException('Home request abandoned', 'AbortError'));
+        if (!request.consumers.size && sharedBackendRequests.get(key) === request) {
+            sharedBackendRequests.delete(key);
+            if (!request.settled) request.controller.abort(new DOMException('Backend request abandoned', 'AbortError'));
         }
-    }, HOME_SHARED_ABORT_GRACE_MS);
+    }, SHARED_BACKEND_ABORT_GRACE_MS);
 };
 
-const fetchSharedHomeResponse = (query, signal) => {
-    const key = query.toString();
-    const request = getSharedHomeRequest(query);
+const fetchSharedBackendResponse = (key, loader, signal) => {
+    const request = getSharedBackendRequest(key, loader);
     const consumer = {};
     request.consumers.add(consumer);
     return new Promise((resolve, reject) => {
         let settled = false;
         const cleanup = () => {
             signal?.removeEventListener?.('abort', handleAbort);
-            releaseHomeConsumer(key, request, consumer);
+            releaseSharedBackendConsumer(key, request, consumer);
         };
         const finish = (callback, value) => {
             if (settled) return;
@@ -416,7 +420,12 @@ export const fetchHomeNowShowing = async ({ limit = 10, region, signal } = {}) =
     if (safeRegion) query.set('region', safeRegion);
 
     try {
-        const data = await fetchSharedHomeResponse(query, signal);
+        const requestKey = `home-now-showing:${query.toString()}`;
+        const data = await fetchSharedBackendResponse(
+            requestKey,
+            (sharedSignal) => loadHomeNowShowingFromServer({ query, signal: sharedSignal }),
+            signal,
+        );
         const rawMovies = Array.isArray(data?.results) ? data.results : [];
         const movies = onlyMoviesWithImages(rawMovies.map(normalizeMovieCard));
         if (!isValidHomeNowShowingMovies(movies)) {
@@ -448,6 +457,57 @@ export const fetchHomeNowShowing = async ({ limit = 10, region, signal } = {}) =
         if (MOCK_DATA_ENABLED) return developmentMockResult(safeLimit);
         throw error;
     }
+};
+
+const YOUTUBE_KEY_PATTERN = /^[A-Za-z0-9_-]{11}$/;
+
+const normalizeHomeTrailer = (entry) => {
+    const movieId = String(entry?.movieId || '').trim();
+    const key = String(entry?.key || '').trim();
+    const available = entry?.available === true
+        && entry?.provider === 'youtube'
+        && YOUTUBE_KEY_PATTERN.test(key);
+    return {
+        movieId,
+        available,
+        status: available ? 'available' : (entry?.status === 'error' ? 'error' : 'unavailable'),
+        provider: available ? 'youtube' : null,
+        key: available ? key : null,
+        type: available ? String(entry.type || 'Trailer') : null,
+        official: available && entry.official === true,
+        name: available ? String(entry.name || 'Trailer') : null,
+        publishedAt: available ? entry.publishedAt || null : null,
+        language: available ? entry.language || null : null,
+        embedUrl: available ? `https://www.youtube-nocookie.com/embed/${key}` : null,
+        thumbnailUrl: available ? `https://i.ytimg.com/vi/${key}/hqdefault.jpg` : null,
+    };
+};
+
+export const fetchHomeTrailers = async ({ movieIds = [], signal } = {}) => {
+    const ids = [...new Set(movieIds
+        .map((id) => String(id || '').trim())
+        .filter((id) => /^\d+$/.test(id)))]
+        .slice(0, 10);
+    if (!ids.length) return { trailers: [], meta: { requested: 0 } };
+
+    const requestKey = `home-trailers:${ids.join(',')}`;
+    const data = await fetchSharedBackendResponse(
+        requestKey,
+        (sharedSignal) => fetchBackendJson('/trailers', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ movieIds: ids }),
+            signal: sharedSignal,
+        }, TRAILER_API_TIMEOUT_MS),
+        signal,
+    );
+    if (!Array.isArray(data?.results)) {
+        throw new InvalidPayloadError('Trailer source returned an invalid payload.');
+    }
+    return {
+        trailers: data.results.map(normalizeHomeTrailer),
+        meta: data.meta && typeof data.meta === 'object' ? data.meta : {},
+    };
 };
 
 // Cache settings

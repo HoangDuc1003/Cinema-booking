@@ -10,6 +10,8 @@ import {
     getHeroVideoSignature,
     commitHeroVideoAction,
     removeHeroVideoAction,
+    requestHeroMediaSourceAction,
+    retryHeroMediaSourceAction,
     refreshCatalogAction,
     getCatalogRefreshStatusAction,
     randomizeHeroAction,
@@ -28,6 +30,8 @@ adminRouter.post('/hero/refresh', protectAdmin, refreshHeroRotationAction)
 adminRouter.put('/hero/sound', protectAdmin, updateHeroSoundAction)
 adminRouter.get('/hero/upload-signature', protectAdmin, getHeroVideoSignature)
 adminRouter.post('/hero/:movieId/commit', protectAdmin, commitHeroVideoAction)
+adminRouter.post('/hero/:movieId/source', protectAdmin, requestHeroMediaSourceAction)
+adminRouter.post('/hero/media/:assetId/retry', protectAdmin, retryHeroMediaSourceAction)
 adminRouter.delete('/hero/:movieId/video', protectAdmin, removeHeroVideoAction)
 adminRouter.get('/all-shows', protectAdmin,getAllShows)
 adminRouter.get('/all-bookings', protectAdmin,getAllBookings)

@@ -13,6 +13,7 @@ const MovieGrid = ({
   columns = 'grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5',
   animated = true,
   staggerDelay = 30,
+  ctaLabel,
 }) => {
   const { ref, isVisible } = useIntersectionObserver({
     threshold: 0.01,
@@ -32,11 +33,11 @@ const MovieGrid = ({
 
       return (
         <div key={key} className={className} style={{ '--catalog-card-delay': `${delay}ms` }}>
-          <MovieCard movie={movie} />
+          <MovieCard movie={movie} ctaLabel={ctaLabel} />
         </div>
       );
     });
-  }, [movies, animated, staggerDelay, isVisible]);
+  }, [movies, animated, staggerDelay, isVisible, ctaLabel]);
 
   if (!movieItems) return null;
 
