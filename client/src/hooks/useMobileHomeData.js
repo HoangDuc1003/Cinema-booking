@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import {
 import { fetchPopularMovies, fetchUpcomingMovies } from '../services/tmdb';
 import { useHomeData } from '../context/HomeDataContext';
 
@@ -20,7 +19,6 @@ const useMobileHomeData = ({ enabled = true } = {}) => {
     if (!enabled) return undefined;
     const controller = new AbortController();
     let alive = true;
-    let deferredTimer;
     queueMicrotask(() => {
       if (alive) setState((current) => ({ ...current, criticalStatus: 'loading', error: '' }));
     });

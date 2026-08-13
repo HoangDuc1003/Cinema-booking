@@ -37,9 +37,14 @@ test('native Hero markup disables controls, picture-in-picture, remote playback,
   assert.doesNotMatch(nativeVideo, />\s*Pause\s*</i);
 });
 
-test('the non-Hero TrailerSection keeps its YouTube parser outside the Hero directory', async () => {
-  const trailerSection = await readSource('components/TrailerSection.jsx');
-  assert.match(trailerSection, /lib\/youtubeVideo/);
+test('the non-Hero TrailerSection keeps its validated YouTube embed outside the Hero directory', async () => {
+  const [trailerSection, service] = await Promise.all([
+    readSource('components/TrailerSection.jsx'),
+    readSource('services/tmdb.js'),
+  ]);
+  assert.match(trailerSection, /youtube-nocookie\.com\/embed/);
+  assert.match(service, /YOUTUBE_KEY_PATTERN/);
+  assert.doesNotMatch(trailerSection, /components\/hero\/HeroNativeVideo|resolveConfiguredHeroVideoSource/);
 });
 
 test('Hero audio cleanup settles a pending ramp and keeps global gestures off the sound control', async () => {

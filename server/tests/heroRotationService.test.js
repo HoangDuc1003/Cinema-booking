@@ -8,6 +8,7 @@ import {
     getHeroLocalDateKey,
     getHeroRefreshRunIdentity,
     getHeroRefreshWindow,
+    heroRotationRuntime,
     isHeroRefreshDue,
     matchesHeroEtag,
     selectActiveHeroMovieIds,
@@ -17,6 +18,7 @@ import {
 } from '../services/heroRotationService.js';
 import { validateHeroRuntimeConfig } from '../configs/heroRotation.js';
 import Movie from '../models/Movie.js';
+import { registeredHeroAssetsForMovies } from './heroMediaTestFixtures.js';
 
 const groups = {
     newestMovieIds: Array.from({ length: 5 }, (_, index) => `new-${index}`),
@@ -165,8 +167,12 @@ test('native asset validation enforces limits, codec pair, version, and poster m
 
 test('Hero runtime configuration rejects malformed or contract-breaking environment values', () => {
     assert.equal(validateHeroRuntimeConfig({}).refreshIntervalHours, 48);
-    assert.equal(validateHeroRuntimeConfig({ HERO_REFRESH_INTERVAL_HOURS: '24' }).refreshIntervalHours, 24);
     assert.equal(validateHeroRuntimeConfig({ HERO_REFRESH_INTERVAL_HOURS: '48' }).refreshIntervalHours, 48);
+    assert.throws(
+        () => validateHeroRuntimeConfig({ HERO_REFRESH_INTERVAL_HOURS: '24' }),
+        (error) => error.code === 'HERO_CONFIG_INVALID'
+            && error.variable === 'HERO_REFRESH_INTERVAL_HOURS',
+    );
     assert.throws(
         () => validateHeroRuntimeConfig({ HERO_REFRESH_INTERVAL_HOURS: '36' }),
         (error) => error.code === 'HERO_CONFIG_INVALID'
@@ -311,6 +317,7 @@ const poolMovie = (id, {
 
 test('catalog pool builder persists exact disjoint 5/5/5 groups and rejects an incomplete native set', async () => {
     const originalFind = Movie.find;
+    const originalLoadReadyMediaAssets = heroRotationRuntime.loadReadyMediaAssets;
     const newest = Array.from({ length: 5 }, (_, index) => poolMovie(
         `new-${index}`,
         { popularity: 100 + index, releaseDate: `2026-08-0${index + 1}` },
@@ -329,7 +336,9 @@ test('catalog pool builder persists exact disjoint 5/5/5 groups and rejects an i
         movieIds: candidates.map((movie) => movie._id),
         buckets: { newest: newest.map((movie) => movie._id) },
     };
+    let currentMovies = candidates;
     const setMovies = (value) => {
+        currentMovies = value;
         Movie.find = () => ({
             select() {
                 return this;
@@ -337,6 +346,9 @@ test('catalog pool builder persists exact disjoint 5/5/5 groups and rejects an i
             lean: async () => value,
         });
     };
+    heroRotationRuntime.loadReadyMediaAssets = async (movieIds) => (
+        registeredHeroAssetsForMovies(currentMovies, movieIds)
+    );
 
     try {
         setMovies(candidates);
@@ -389,6 +401,7 @@ test('catalog pool builder persists exact disjoint 5/5/5 groups and rejects an i
         assert.equal(pendingPool.sourceMetadata.validNativeMovieCount, 14);
     } finally {
         Movie.find = originalFind;
+        heroRotationRuntime.loadReadyMediaAssets = originalLoadReadyMediaAssets;
     }
 });
 
@@ -448,12 +461,16 @@ test('loadManualPayload returns complete authoritative manual metadata and safe 
     const originals = {
         configFindOne: SiteConfig.findOne,
         movieFind: Movie.find,
+        loadReadyMediaAssets: heroRotationRuntime.loadReadyMediaAssets,
     };
     const ids = ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'];
     const movies = ids.map((id) => poolMovie(id));
 
     SiteConfig.findOne = () => chain({ heroRotation: { cacheGeneration: 42 } });
     Movie.find = () => chain(movies);
+    heroRotationRuntime.loadReadyMediaAssets = async (movieIds) => (
+        registeredHeroAssetsForMovies(movies, movieIds)
+    );
 
     try {
         const payload = await loadManualPayload({
@@ -476,5 +493,6 @@ test('loadManualPayload returns complete authoritative manual metadata and safe 
     } finally {
         SiteConfig.findOne = originals.configFindOne;
         Movie.find = originals.movieFind;
+        heroRotationRuntime.loadReadyMediaAssets = originals.loadReadyMediaAssets;
     }
 });

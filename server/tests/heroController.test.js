@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import adminRouter from '../routes/adminRoutes.js';
 import { createGetHomeHeroHandler } from '../controllers/showController.js';
+import { heroRotationRuntime } from '../services/heroRotationService.js';
+import { registeredHeroAssetsForMovies } from './heroMediaTestFixtures.js';
 
 const createResponse = () => ({
     headers: {},
@@ -115,6 +117,7 @@ test('updateHeroSettings controller action returns settings, liveHero, and meta 
         configFindOne: SiteConfig.findOne,
         configUpdateOne: SiteConfig.updateOne,
         movieFind: Movie.find,
+        loadReadyMediaAssets: heroRotationRuntime.loadReadyMediaAssets,
     };
     const validMovies = ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'].map((id) => ({
         _id: id,
@@ -151,6 +154,9 @@ test('updateHeroSettings controller action returns settings, liveHero, and meta 
     SiteConfig.findOne = () => chain(null);
     SiteConfig.updateOne = async () => ({ modifiedCount: 1 });
     Movie.find = () => chain(validMovies);
+    heroRotationRuntime.loadReadyMediaAssets = async (movieIds) => (
+        registeredHeroAssetsForMovies(validMovies, movieIds)
+    );
 
     try {
         const req = { body: { mode: 'manual', movieIds: ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'] } };
@@ -168,6 +174,7 @@ test('updateHeroSettings controller action returns settings, liveHero, and meta 
         SiteConfig.findOne = originals.configFindOne;
         SiteConfig.updateOne = originals.configUpdateOne;
         Movie.find = originals.movieFind;
+        heroRotationRuntime.loadReadyMediaAssets = originals.loadReadyMediaAssets;
     }
 });
 
@@ -185,11 +192,13 @@ test('updateHeroSettings controller action returns 422 with code MANUAL_HERO_INV
     const originals = {
         configFindOneAndUpdate: SiteConfig.findOneAndUpdate,
         movieFind: Movie.find,
+        loadReadyMediaAssets: heroRotationRuntime.loadReadyMediaAssets,
     };
     SiteConfig.findOneAndUpdate = () => {
         assert.fail('SiteConfig should not be updated on validation error');
     };
     Movie.find = () => chain([]);
+    heroRotationRuntime.loadReadyMediaAssets = async () => [];
 
     try {
         const req = { body: { mode: 'manual', movieIds: ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'] } };
@@ -203,5 +212,6 @@ test('updateHeroSettings controller action returns 422 with code MANUAL_HERO_INV
     } finally {
         SiteConfig.findOneAndUpdate = originals.configFindOneAndUpdate;
         Movie.find = originals.movieFind;
+        heroRotationRuntime.loadReadyMediaAssets = originals.loadReadyMediaAssets;
     }
 });

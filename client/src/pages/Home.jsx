@@ -6,7 +6,6 @@ import React, {
   useState,
 } from 'react';
 import HeroSection from '../components/HeroSection';
-import { getHeroTrailerMode } from '../components/hero/heroTrailerMode';
 
 const FeatureSection = lazy(() => import('../components/FeatureSection'));
 const TrailerSection = lazy(() => import('../components/TrailerSection'));
@@ -54,10 +53,9 @@ const DeferredSection = ({ children, fallback, anchorId }) => {
 
 const Home = () => {
   const [requestedTrailerMovie, setRequestedTrailerMovie] = useState(null);
-  const trailerMode = getHeroTrailerMode();
 
   return (
-    <HomeDataProvider trailerMode={trailerMode}>
+    <HomeDataProvider>
       <HeroSection autoPreview onTrailerRequest={setRequestedTrailerMovie} />
       <DeferredSection fallback={<SectionSkeleton />}>
         <FeatureSection />

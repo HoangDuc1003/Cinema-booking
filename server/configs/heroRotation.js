@@ -80,14 +80,8 @@ export const validateHeroRuntimeConfig = (env = process.env) => {
         env,
         'HERO_REFRESH_INTERVAL_HOURS',
         48,
-        { integer: true, min: 24, max: 48 },
+        { integer: true, min: 48, max: 48 },
     );
-    if (![24, 48].includes(refreshIntervalHours)) {
-        throw new HeroConfigError(
-            'HERO_REFRESH_INTERVAL_HOURS',
-            'must be either 24 or 48 during the production migration',
-        );
-    }
     const requireNativeVideo = readBoolean(env, 'HERO_REQUIRE_NATIVE_VIDEO', true);
     if (!requireNativeVideo) {
         throw new HeroConfigError(

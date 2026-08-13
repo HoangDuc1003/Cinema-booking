@@ -29,7 +29,12 @@ const movieFieldsFromVerifiedAsset = (verified) => ({
     heroVideoMimeType: verified.mimeType,
     heroVideoPosterUrl: verified.posterUrl,
     heroVideoStatus: 'ready',
-    heroVideoVersion: Date.now().toString(),
+    heroVideoVersion: String(
+        verified.version
+        || (verified.verifiedAt ? new Date(verified.verifiedAt).getTime() : '')
+        || verified.checksum
+        || verified.publicId,
+    ),
     heroVideoDuration: verified.duration,
     heroVideoWidth: verified.width,
     heroVideoHeight: verified.height,
@@ -41,6 +46,49 @@ const movieFieldsFromVerifiedAsset = (verified) => ({
     heroVideoChecksum: verified.checksum,
 });
 
+const verifiedAssetFields = (asset) => ({
+    publicId: asset.cloudinaryPublicId,
+    movieId: String(asset.movieId),
+    url: asset.secureUrl,
+    mimeType: asset.mimeType,
+    posterUrl: asset.posterUrl,
+    duration: asset.duration,
+    width: asset.width,
+    height: asset.height,
+    bytes: asset.bytes,
+    codec: [asset.videoCodec, asset.audioCodec].filter(Boolean).join('/'),
+    source: 'cloudinary',
+    attribution: asset.attribution || '',
+    checksum: asset.checksum || '',
+    verifiedAt: asset.verifiedAt,
+});
+
+export const syncMovieFromReadyHeroMediaAsset = async (asset) => {
+    if (
+        asset?.status !== 'ready'
+        || asset?.verificationStatus !== 'verified'
+        || !asset?.cloudinaryPublicId
+        || !asset?.secureUrl
+    ) {
+        const error = new Error('Hero media asset is not ready to synchronize.');
+        error.code = 'HERO_MEDIA_NOT_READY';
+        error.status = 409;
+        throw error;
+    }
+    const movie = await Movie.findOneAndUpdate(
+        { _id: String(asset.movieId) },
+        { $set: movieFieldsFromVerifiedAsset(verifiedAssetFields(asset)) },
+        { returnDocument: 'after' },
+    );
+    if (!movie) {
+        const error = new Error('Movie not found.');
+        error.code = 'HERO_MOVIE_NOT_FOUND';
+        error.status = 404;
+        throw error;
+    }
+    return movie;
+};
+
 export const createHeroMediaSourceIdentity = sourceIdentityFor;
 
 export const recordHeroMediaFailure = async (assetId, error) => HeroMediaAsset.findByIdAndUpdate(
@@ -51,6 +99,19 @@ export const recordHeroMediaFailure = async (assetId, error) => HeroMediaAsset.f
             verificationStatus: 'failed',
             verificationReasons: [String(error?.code || 'HERO_MEDIA_FAILED')],
             failure: asFailure(error),
+        },
+    },
+    { returnDocument: 'after' },
+).lean();
+
+export const recordHeroMediaVerificationRetry = async (assetId, error) => HeroMediaAsset.findByIdAndUpdate(
+    assetId,
+    {
+        $set: {
+            status: 'processing',
+            verificationStatus: 'processing',
+            verificationReasons: [String(error?.code || 'HERO_MEDIA_VERIFY_RETRY')],
+            failure: asFailure({ ...error, transient: true }),
         },
     },
     { returnDocument: 'after' },
@@ -83,7 +144,8 @@ export const recordVerifiedHeroMediaAsset = async ({
         sourceReference: sourceInput.sourceReference,
         originalUrlHash: sourceInput.originalUrlHash,
     });
-    const [duplicateUrl, duplicatePublicId, duplicateMovie] = await Promise.all([
+    const [targetMovie, duplicateUrl, duplicatePublicId, duplicateMovie] = await Promise.all([
+        Movie.exists({ _id: id }),
         HeroMediaAsset.exists({
             secureUrl: verified.url,
             sourceIdentity: { $ne: sourceIdentity },
@@ -112,6 +174,12 @@ export const recordVerifiedHeroMediaAsset = async ({
         error.status = 409;
         throw error;
     }
+    if (!targetMovie) {
+        const error = new Error('Movie not found.');
+        error.code = 'HERO_MOVIE_NOT_FOUND';
+        error.status = 404;
+        throw error;
+    }
     const [videoCodec = '', audioCodec = ''] = String(verified.codec || '').split('/');
     const filter = assetId ? { _id: assetId, movieId: id } : { movieId: id, sourceIdentity };
     const asset = await HeroMediaAsset.findOneAndUpdate(
@@ -136,6 +204,7 @@ export const recordVerifiedHeroMediaAsset = async ({
                 status: 'ready',
                 cloudinaryPublicId: verified.publicId,
                 secureUrl: verified.url,
+                posterUrl: verified.posterUrl,
                 mimeType: verified.mimeType,
                 format: String(verified.mimeType || '').split('/')[1] || '',
                 duration: verified.duration,
@@ -144,6 +213,8 @@ export const recordVerifiedHeroMediaAsset = async ({
                 bytes: verified.bytes,
                 videoCodec,
                 audioCodec,
+                checksum: verified.checksum || '',
+                attribution: verified.attribution || '',
                 verificationStatus: 'verified',
                 verificationReasons: [],
                 verifiedAt: verified.verifiedAt || new Date(),
@@ -153,17 +224,7 @@ export const recordVerifiedHeroMediaAsset = async ({
         { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true, runValidators: true },
     ).lean();
     if (updateMovie) {
-        const movie = await Movie.findOneAndUpdate(
-            { _id: id },
-            { $set: movieFieldsFromVerifiedAsset({ ...verified, movieId: id }) },
-            { returnDocument: 'after' },
-        );
-        if (!movie) {
-            const error = new Error('Movie not found.');
-            error.code = 'HERO_MOVIE_NOT_FOUND';
-            error.status = 404;
-            throw error;
-        }
+        await syncMovieFromReadyHeroMediaAsset(asset);
     }
     return asset;
 };

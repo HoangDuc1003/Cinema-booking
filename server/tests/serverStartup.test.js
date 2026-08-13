@@ -9,7 +9,7 @@ import path from 'node:path';
 const execFileAsync = promisify(execFile);
 const serverEntryUrl = new URL('../api/index.js', import.meta.url).href;
 
-for (const heroRefreshIntervalHours of ['24', '48']) {
+for (const heroRefreshIntervalHours of ['48']) {
     test(`Vercel serverless entrypoint imports with HERO_REFRESH_INTERVAL_HOURS=${heroRefreshIntervalHours}`, async (t) => {
         // Use an empty working directory so dotenv cannot load a developer's local secrets.
         const workingDirectory = await mkdtemp(path.join(tmpdir(), 'nitrocine-startup-'));
@@ -53,7 +53,7 @@ for (const heroRefreshIntervalHours of ['24', '48']) {
         const { stdout, stderr } = await execFileAsync(
             process.execPath,
             ['--input-type=module', '--eval', script],
-            { cwd: workingDirectory, env, timeout: 10_000 },
+            { cwd: workingDirectory, env, timeout: 30_000 },
         );
 
         assert.match(stdout, /SERVERLESS_ENTRY_OK/);

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import mongoose from 'mongoose';
 import CatalogBatch from '../models/CatalogBatch.js';
+import HeroMediaAsset from '../models/HeroMediaAsset.js';
 import HeroRotationBatch from '../models/HeroRotationBatch.js';
 import Movie from '../models/Movie.js';
 import SiteConfig from '../models/SiteConfig.js';
@@ -61,6 +62,7 @@ export const heroRotationRuntime = {
     verifyFencedLock,
     buildPool: (...args) => buildHeroPoolFromCatalog(...args),
     getPublicRotation: (...args) => getPublicHeroRotation(...args),
+    loadReadyMediaAssets: (...args) => loadReadyHeroMediaAssets(...args),
 };
 
 const MOVIE_PUBLIC_SELECT = [
@@ -77,6 +79,8 @@ const MOVIE_PUBLIC_SELECT = [
     'runtime',
     'genres',
     'heroVideoId',
+    'heroVideoPublicId',
+    'heroVideoStorageId',
     'heroVideoMovieId',
     'heroVideoUrl',
     'heroVideoMimeType',
@@ -94,6 +98,26 @@ const MOVIE_PUBLIC_SELECT = [
 ].join(' ');
 
 const SUPPORTED_VIDEO_MIME_TYPES = new Set(['video/mp4', 'video/webm']);
+const ACTIVATABLE_MEDIA_RIGHTS = new Set(['AUTHORIZED', 'USER_OWNED', 'LICENSED']);
+const HERO_MEDIA_ACTIVATION_SELECT = [
+    'movieId',
+    'source',
+    'rights',
+    'status',
+    'sourceStatus',
+    'cloudinaryPublicId',
+    'secureUrl',
+    'posterUrl',
+    'mimeType',
+    'duration',
+    'width',
+    'height',
+    'bytes',
+    'videoCodec',
+    'audioCodec',
+    'verificationStatus',
+    'verifiedAt',
+].join(' ');
 
 export class HeroRotationError extends Error {
     constructor(code, message, { status = 409, transient = false, details, cause } = {}) {
@@ -361,9 +385,98 @@ export const validateNativeHeroMovie = (
     };
 };
 
+export const validateRegisteredHeroMediaAsset = ({ movie, asset } = {}) => {
+    const movieId = String(movie?._id || movie?.id || '');
+    const reasons = [];
+    if (!asset) return { valid: false, movieId, reasons: ['registry-asset-not-found'], asset: null };
+    if (String(asset.movieId || '') !== movieId) reasons.push('registry-movie-binding-mismatch');
+    if (asset.status !== 'ready') reasons.push('registry-status-not-ready');
+    if (asset.sourceStatus !== 'ready_for_ingestion') reasons.push('registry-source-not-approved');
+    if (asset.verificationStatus !== 'verified' || !asset.verifiedAt) {
+        reasons.push('registry-not-verified');
+    }
+    if (!ACTIVATABLE_MEDIA_RIGHTS.has(String(asset.rights?.status || ''))) {
+        reasons.push('registry-rights-not-approved');
+    }
+    const moviePublicId = String(
+        movie?.heroVideoPublicId
+        || movie?.heroVideoStorageId
+        || movie?.heroVideoId
+        || '',
+    );
+    if (!moviePublicId || String(asset.cloudinaryPublicId || '') !== moviePublicId) {
+        reasons.push('registry-public-id-mismatch');
+    }
+    if (!asset.secureUrl || String(asset.secureUrl) !== String(movie?.heroVideoUrl || '')) {
+        reasons.push('registry-url-mismatch');
+    }
+    if (!asset.posterUrl || String(asset.posterUrl) !== String(movie?.heroVideoPosterUrl || '')) {
+        reasons.push('registry-poster-mismatch');
+    }
+    if (String(asset.mimeType || '').toLowerCase() !== String(movie?.heroVideoMimeType || '').toLowerCase()) {
+        reasons.push('registry-mime-mismatch');
+    }
+    const numericFields = [
+        ['duration', 'heroVideoDuration'],
+        ['width', 'heroVideoWidth'],
+        ['height', 'heroVideoHeight'],
+        ['bytes', 'heroVideoBytes'],
+    ];
+    for (const [assetField, movieField] of numericFields) {
+        if (Number(asset[assetField]) !== Number(movie?.[movieField])) {
+            reasons.push(`registry-${assetField}-mismatch`);
+        }
+    }
+    const assetCodec = [asset.videoCodec, asset.audioCodec]
+        .filter(Boolean)
+        .join('/')
+        .toLowerCase();
+    if (!assetCodec || assetCodec !== String(movie?.heroVideoCodec || '').toLowerCase()) {
+        reasons.push('registry-codec-mismatch');
+    }
+    return { valid: reasons.length === 0, movieId, reasons, asset };
+};
+
+export const loadReadyHeroMediaAssets = async (movieIds, { session } = {}) => {
+    const ids = normalizeIds(movieIds);
+    if (!ids.length) return [];
+    let query = HeroMediaAsset.find({
+        movieId: { $in: ids },
+        status: 'ready',
+    })
+        .select(HERO_MEDIA_ACTIVATION_SELECT)
+        .sort({ verifiedAt: -1, updatedAt: -1 });
+    if (session) query = query.session(session);
+    return query.lean();
+};
+
+const getRegisteredAssetValidations = ({ movies, expectedMovieIds, mediaAssets }) => {
+    const byId = new Map(
+        (Array.isArray(movies) ? movies : [])
+            .map((movie) => [String(movie?._id || movie?.id || ''), movie])
+            .filter(([id]) => id),
+    );
+    const assetsByMovieId = new Map();
+    for (const asset of Array.isArray(mediaAssets) ? mediaAssets : []) {
+        const movieId = String(asset?.movieId || '');
+        if (!assetsByMovieId.has(movieId)) assetsByMovieId.set(movieId, []);
+        assetsByMovieId.get(movieId).push(asset);
+    }
+    return normalizeIds(expectedMovieIds).map((movieId) => {
+        const movie = byId.get(movieId);
+        if (!movie) return { valid: false, movieId, reasons: ['movie-not-found'], asset: null };
+        const candidates = assetsByMovieId.get(movieId) || [];
+        const validations = candidates.map((asset) => validateRegisteredHeroMediaAsset({ movie, asset }));
+        return validations.find((item) => item.valid)
+            || validations[0]
+            || validateRegisteredHeroMediaAsset({ movie, asset: null });
+    });
+};
+
 export const assertHeroPoolAssetsReady = ({
     movies,
     expectedMovieIds,
+    mediaAssets,
 }) => {
     const expectedIds = normalizeIds(expectedMovieIds);
     const expectedSet = new Set(expectedIds);
@@ -378,7 +491,25 @@ export const assertHeroPoolAssetsReady = ({
             ? validateNativeHeroMovie(movie)
             : { valid: false, movieId, reasons: ['movie-not-found'] };
     });
-    const urls = expectedIds.map((movieId) => String(byId.get(movieId)?.heroVideoUrl || ''));
+    const registeredValidations = Array.isArray(mediaAssets)
+        ? getRegisteredAssetValidations({ movies, expectedMovieIds: expectedIds, mediaAssets })
+        : null;
+    const combinedValidations = validations.map((validation, index) => {
+        const registered = registeredValidations?.[index];
+        return !registered || registered.valid
+            ? validation
+            : {
+                ...validation,
+                valid: false,
+                reasons: [...validation.reasons, ...registered.reasons],
+            };
+    });
+    const urls = registeredValidations
+        ? registeredValidations.map((item) => String(item.asset?.secureUrl || ''))
+        : expectedIds.map((movieId) => String(byId.get(movieId)?.heroVideoUrl || ''));
+    const publicIds = registeredValidations
+        ? registeredValidations.map((item) => String(item.asset?.cloudinaryPublicId || ''))
+        : expectedIds.map((movieId) => String(byId.get(movieId)?.heroVideoId || ''));
     const duplicateUrls = urls.filter((url, index) => (
         url && urls.indexOf(url) !== index
     ));
@@ -386,8 +517,9 @@ export const assertHeroPoolAssetsReady = ({
         expectedIds.length !== HERO_POOL_SIZE
         || expectedSet.size !== HERO_POOL_SIZE
         || byId.size < HERO_POOL_SIZE
-        || validations.some((validation) => !validation.valid)
+        || combinedValidations.some((validation) => !validation.valid)
         || new Set(urls).size !== HERO_POOL_SIZE
+        || new Set(publicIds).size !== HERO_POOL_SIZE
     ) {
         throw new HeroRotationError(
             'HERO_POOL_ASSETS_CHANGED',
@@ -398,7 +530,7 @@ export const assertHeroPoolAssetsReady = ({
                     expectedMovieCount: expectedIds.length,
                     resolvedMovieCount: expectedIds.filter((id) => byId.has(id)).length,
                     duplicateUrls: [...new Set(duplicateUrls)],
-                    invalid: validations
+                    invalid: combinedValidations
                         .filter((validation) => !validation.valid)
                         .map(({ movieId, reasons }) => ({ movieId, reasons })),
                 },
@@ -411,6 +543,7 @@ export const assertHeroPoolAssetsReady = ({
 export const assertHeroActiveAssetsReady = ({
     movies,
     expectedMovieIds,
+    mediaAssets,
 }) => {
     const expectedIds = normalizeIds(expectedMovieIds);
     const byId = new Map(
@@ -424,13 +557,32 @@ export const assertHeroActiveAssetsReady = ({
             ? validateNativeHeroMovie(movie)
             : { valid: false, movieId, reasons: ['movie-not-found'] };
     });
-    const urls = expectedIds.map((movieId) => String(byId.get(movieId)?.heroVideoUrl || ''));
+    const registeredValidations = Array.isArray(mediaAssets)
+        ? getRegisteredAssetValidations({ movies, expectedMovieIds: expectedIds, mediaAssets })
+        : null;
+    const combinedValidations = validations.map((validation, index) => {
+        const registered = registeredValidations?.[index];
+        return !registered || registered.valid
+            ? validation
+            : {
+                ...validation,
+                valid: false,
+                reasons: [...validation.reasons, ...registered.reasons],
+            };
+    });
+    const urls = registeredValidations
+        ? registeredValidations.map((item) => String(item.asset?.secureUrl || ''))
+        : expectedIds.map((movieId) => String(byId.get(movieId)?.heroVideoUrl || ''));
+    const publicIds = registeredValidations
+        ? registeredValidations.map((item) => String(item.asset?.cloudinaryPublicId || ''))
+        : expectedIds.map((movieId) => String(byId.get(movieId)?.heroVideoId || ''));
     if (
         expectedIds.length !== HERO_ACTIVE_SIZE
         || new Set(expectedIds).size !== HERO_ACTIVE_SIZE
         || byId.size < HERO_ACTIVE_SIZE
-        || validations.some((validation) => !validation.valid)
+        || combinedValidations.some((validation) => !validation.valid)
         || new Set(urls).size !== HERO_ACTIVE_SIZE
+        || new Set(publicIds).size !== HERO_ACTIVE_SIZE
     ) {
         throw new HeroRotationError(
             'HERO_ACTIVE_ASSETS_CHANGED',
@@ -440,7 +592,7 @@ export const assertHeroActiveAssetsReady = ({
                 details: {
                     expectedMovieCount: expectedIds.length,
                     resolvedMovieCount: expectedIds.filter((id) => byId.has(id)).length,
-                    invalid: validations
+                    invalid: combinedValidations
                         .filter((validation) => !validation.valid)
                         .map(({ movieId, reasons }) => ({ movieId, reasons })),
                 },
@@ -533,25 +685,15 @@ const getHeroSettings = async () => {
 
 const toPublicPayload = async (batch, { cache = 'miss', cacheGeneration = 0 } = {}) => {
     const settings = await getHeroSettings();
-    const rawMovies = await loadOrderedMovies(batch.activeHeroMovieIds);
-    const validations = rawMovies.map((movie) => validateNativeHeroMovie(movie));
-    const urls = rawMovies.map((movie) => String(movie.heroVideoUrl || ''));
-    if (
-        rawMovies.length !== HERO_ACTIVE_SIZE
-        || validations.some((result) => !result.valid)
-        || new Set(urls).size !== HERO_ACTIVE_SIZE
-    ) {
-        throw new HeroRotationError(
-            'HERO_ACTIVE_ASSETS_INVALID',
-            'The active Hero batch does not resolve to five unique verified native trailers.',
-            {
-                details: validations.map((result) => ({
-                    movieId: result.movieId,
-                    reasons: result.reasons,
-                })),
-            },
-        );
-    }
+    const [rawMovies, mediaAssets] = await Promise.all([
+        loadOrderedMovies(batch.activeHeroMovieIds),
+        heroRotationRuntime.loadReadyMediaAssets(batch.activeHeroMovieIds),
+    ]);
+    assertHeroActiveAssetsReady({
+        movies: rawMovies,
+        expectedMovieIds: batch.activeHeroMovieIds,
+        mediaAssets,
+    });
     const dateKey = getHeroLocalDateKey(
         batch.generatedAt || batch.createdAt || new Date(),
     );
@@ -595,7 +737,15 @@ const toPublicPayload = async (batch, { cache = 'miss', cacheGeneration = 0 } = 
 };
 
 export const loadManualPayload = async (settings, now = new Date()) => {
-    const rawMovies = await loadOrderedMovies(settings.movieIds);
+    const [rawMovies, mediaAssets] = await Promise.all([
+        loadOrderedMovies(settings.movieIds),
+        heroRotationRuntime.loadReadyMediaAssets(settings.movieIds),
+    ]);
+    assertHeroActiveAssetsReady({
+        movies: rawMovies,
+        expectedMovieIds: settings.movieIds,
+        mediaAssets,
+    });
     const window = getHeroRefreshWindow(now);
     const dateKey = getHeroLocalDateKey(now);
     const config = await SiteConfig.findOne({ key: 'heroRotation' })
@@ -819,8 +969,21 @@ export const buildHeroPoolFromCatalog = async ({
     const previousPool = new Set(normalizeIds(previousBatch?.movieIds));
     const byId = new Map(candidates.map((movie) => [String(movie._id), movie]));
     const eligibleCandidates = candidates.filter(isEligibleHeroCandidate);
+    const mediaAssets = requireNative
+        ? await heroRotationRuntime.loadReadyMediaAssets(
+            eligibleCandidates.map((movie) => String(movie._id)),
+        )
+        : null;
+    const registeredByMovie = requireNative
+        ? new Map(getRegisteredAssetValidations({
+            movies: eligibleCandidates,
+            expectedMovieIds: eligibleCandidates.map((movie) => String(movie._id)),
+            mediaAssets,
+        }).map((item) => [item.movieId, item]))
+        : null;
     const nativeCandidates = eligibleCandidates.filter((movie) => (
         validateNativeHeroMovie(movie).valid
+        && (!requireNative || registeredByMovie.get(String(movie._id))?.valid === true)
     ));
     const validById = new Map(nativeCandidates.map((movie) => [String(movie._id), movie]));
     const nativeUrls = new Map();
@@ -884,7 +1047,10 @@ export const buildHeroPoolFromCatalog = async ({
             .filter((movie) => !validById.has(String(movie._id)))
             .map((movie) => ({
                 movieId: String(movie._id),
-                reasons: validateNativeHeroMovie(movie).reasons,
+                reasons: [
+                    ...validateNativeHeroMovie(movie).reasons,
+                    ...(registeredByMovie?.get(String(movie._id))?.reasons || []),
+                ],
             }));
         throw new HeroRotationError(
             requireNative ? 'HERO_NATIVE_ASSETS_INSUFFICIENT' : 'HERO_POOL_CANDIDATES_INSUFFICIENT',
@@ -914,6 +1080,7 @@ export const buildHeroPoolFromCatalog = async ({
         assertHeroPoolAssetsReady({
             movies: movieIds.map((id) => usableById.get(id)),
             expectedMovieIds: movieIds,
+            mediaAssets,
         });
     }
     return {
@@ -997,7 +1164,7 @@ export const buildHeroCandidateReserveFromCatalog = async ({
     };
 };
 
-export const getHeroPoolReadiness = ({ pool, movies }) => {
+export const getHeroPoolReadiness = ({ pool, movies, mediaAssets }) => {
     const groups = {
         newest: normalizeIds(pool?.newestMovieIds),
         hot: normalizeIds(pool?.hotMovieIds),
@@ -1015,8 +1182,26 @@ export const getHeroPoolReadiness = ({ pool, movies }) => {
             ? validateNativeHeroMovie(movie)
             : { valid: false, movieId, reasons: ['movie-not-found'] };
     });
-    const validIds = new Set(validations.filter((item) => item.valid).map((item) => item.movieId));
-    const urls = allIds.map((movieId) => String(byId.get(movieId)?.heroVideoUrl || ''));
+    const registeredValidations = Array.isArray(mediaAssets)
+        ? getRegisteredAssetValidations({ movies, expectedMovieIds: allIds, mediaAssets })
+        : null;
+    const combinedValidations = validations.map((validation, index) => {
+        const registered = registeredValidations?.[index];
+        return !registered || registered.valid
+            ? validation
+            : {
+                ...validation,
+                valid: false,
+                reasons: [...validation.reasons, ...registered.reasons],
+            };
+    });
+    const validIds = new Set(combinedValidations.filter((item) => item.valid).map((item) => item.movieId));
+    const urls = registeredValidations
+        ? registeredValidations.map((item) => String(item.asset?.secureUrl || ''))
+        : allIds.map((movieId) => String(byId.get(movieId)?.heroVideoUrl || ''));
+    const publicIds = registeredValidations
+        ? registeredValidations.map((item) => String(item.asset?.cloudinaryPublicId || ''))
+        : allIds.map((movieId) => String(byId.get(movieId)?.heroVideoId || ''));
     const duplicateUrls = urls.filter((url, index) => url && urls.indexOf(url) !== index);
     const categoryCounts = Object.fromEntries(
         Object.entries(groups).map(([category, ids]) => [
@@ -1026,19 +1211,24 @@ export const getHeroPoolReadiness = ({ pool, movies }) => {
     );
     const uniqueIds = new Set(allIds).size === HERO_POOL_SIZE;
     const uniqueUrls = urls.length === HERO_POOL_SIZE && new Set(urls).size === HERO_POOL_SIZE;
+    const uniquePublicIds = publicIds.length === HERO_POOL_SIZE
+        && new Set(publicIds).size === HERO_POOL_SIZE;
     const complete = allIds.length === HERO_POOL_SIZE
         && uniqueIds
         && uniqueUrls
-        && validations.every((item) => item.valid)
+        && uniquePublicIds
+        && combinedValidations.every((item) => item.valid)
         && Object.values(categoryCounts).every((count) => count === HERO_POOL_GROUP_SIZE);
     return {
         status: complete ? 'READY' : 'DEGRADED',
         complete,
         categoryCounts,
-        readyCount: validations.filter((item) => item.valid).length,
+        readyCount: combinedValidations.filter((item) => item.valid).length,
         totalCount: HERO_POOL_SIZE,
-        missingMovieIds: validations.filter((item) => !item.valid).map((item) => item.movieId),
-        invalid: validations.filter((item) => !item.valid).map(({ movieId, reasons }) => ({ movieId, reasons })),
+        missingMovieIds: combinedValidations.filter((item) => !item.valid).map((item) => item.movieId),
+        invalid: combinedValidations
+            .filter((item) => !item.valid)
+            .map(({ movieId, reasons }) => ({ movieId, reasons })),
         duplicateUrls: [...new Set(duplicateUrls)],
     };
 };
@@ -1236,11 +1426,16 @@ export const refreshHeroRotation = async ({
             return { skipped: true, reason: 'idempotent-after-lock', ...result };
         }
         if (lockedExisting && ['preparing', 'ready_to_activate'].includes(lockedExisting.status)) {
-            const readiness = getHeroPoolReadiness({
-                pool: lockedExisting,
-                movies: await Movie.find({ _id: { $in: lockedExisting.movieIds } })
+            const [movies, mediaAssets] = await Promise.all([
+                Movie.find({ _id: { $in: lockedExisting.movieIds } })
                     .select(MOVIE_PUBLIC_SELECT)
                     .lean(),
+                heroRotationRuntime.loadReadyMediaAssets(lockedExisting.movieIds),
+            ]);
+            const readiness = getHeroPoolReadiness({
+                pool: lockedExisting,
+                movies,
+                mediaAssets,
             });
             const result = {
                 ...serializeBatch(lockedExisting),
@@ -1320,10 +1515,17 @@ export const refreshHeroRotation = async ({
             console.warn('[HeroRotation] Candidate reserve unavailable:', error.code || error.message);
         }
         const nextRefreshAt = calculateNextHeroRefreshAt(now);
-        const candidateMovies = await Movie.find({ _id: { $in: pool.movieIds } })
-            .select(MOVIE_PUBLIC_SELECT)
-            .lean();
-        const readiness = getHeroPoolReadiness({ pool, movies: candidateMovies });
+        const [candidateMovies, candidateMediaAssets] = await Promise.all([
+            Movie.find({ _id: { $in: pool.movieIds } })
+                .select(MOVIE_PUBLIC_SELECT)
+                .lean(),
+            heroRotationRuntime.loadReadyMediaAssets(pool.movieIds),
+        ]);
+        const readiness = getHeroPoolReadiness({
+            pool,
+            movies: candidateMovies,
+            mediaAssets: candidateMediaAssets,
+        });
         if (!readiness.complete) {
             await assertHeroLease(lock, () => lost);
             Object.assign(buildingBatch, pool, {
@@ -1386,15 +1588,19 @@ export const refreshHeroRotation = async ({
                 if (!batch || batch.status !== 'building') {
                     throw new HeroRotationError('HERO_BATCH_NOT_BUILDING', 'Only a building Hero batch can be activated.');
                 }
-                const transactionalMovies = await Movie.find({
-                    _id: { $in: pool.movieIds },
-                })
+                // MongoDB does not support parallel operations within one transaction.
+                const transactionalMovies = await Movie.find({ _id: { $in: pool.movieIds } })
                     .select(MOVIE_PUBLIC_SELECT)
                     .session(session)
                     .lean();
+                const transactionalMediaAssets = await heroRotationRuntime.loadReadyMediaAssets(
+                    pool.movieIds,
+                    { session },
+                );
                 assertHeroPoolAssetsReady({
                     movies: transactionalMovies,
                     expectedMovieIds: pool.movieIds,
+                    mediaAssets: transactionalMediaAssets,
                 });
                 Object.assign(batch, pool);
                 batch.nextRefreshAt = nextRefreshAt;
@@ -1410,6 +1616,19 @@ export const refreshHeroRotation = async ({
                 await HeroRotationBatch.updateMany(
                     { status: 'active', _id: { $ne: batch._id } },
                     { $set: { status: 'retired', retiredAt: now } },
+                    { session },
+                );
+                await HeroRotationBatch.updateMany(
+                    {
+                        _id: { $ne: batch._id },
+                        status: { $in: ['building', 'preparing', 'ready_to_activate'] },
+                    },
+                    {
+                        $set: {
+                            status: 'failed',
+                            failureReason: 'SUPERSEDED_BY_ACTIVE_BATCH',
+                        },
+                    },
                     { session },
                 );
                 await batch.save({ session });
@@ -1524,6 +1743,48 @@ export const refreshHeroRotation = async ({
  * never retires the active batch until every one of the next batch's fifteen
  * assets still passes the native validation at commit time.
  */
+export const getHeroBatchActivationGuard = ({ batch, activeBatch, config } = {}) => {
+    const reasons = [];
+    const batchVersion = Number(batch?.version || 0);
+    const activeVersion = Number(activeBatch?.version || 0);
+    const batchFence = Number(batch?.fencingToken || 0);
+    const lastFence = Number(config?.heroRotation?.lastFencingToken || 0);
+    const previousBatchId = String(batch?.previousBatchId || '');
+    const activeBatchId = String(activeBatch?._id || '');
+    const configuredActiveBatchId = String(config?.heroRotation?.activeBatchId || '');
+    if (!Number.isSafeInteger(batchVersion) || batchVersion < 1) reasons.push('invalid-version');
+    if (!Number.isSafeInteger(batchFence) || batchFence < 1) reasons.push('invalid-fencing-token');
+    if (activeBatch) {
+        if (previousBatchId !== activeBatchId) reasons.push('previous-batch-mismatch');
+        if (batchVersion <= activeVersion) reasons.push('version-not-newer');
+    } else if (previousBatchId) {
+        reasons.push('unexpected-previous-batch');
+    }
+    if (configuredActiveBatchId !== activeBatchId) reasons.push('configured-active-mismatch');
+    if (batchFence <= lastFence) reasons.push('stale-fencing-token');
+    return { valid: reasons.length === 0, reasons };
+};
+
+const failStalePreparingBatch = async (batch, guard, now) => {
+    await HeroRotationBatch.updateOne(
+        { _id: batch._id, status: { $in: ['preparing', 'ready_to_activate'] } },
+        {
+            $set: {
+                status: 'failed',
+                failureReason: 'SUPERSEDED_PREPARING_BATCH',
+                'sourceMetadata.activationGuard': guard,
+                'sourceMetadata.lastReconciledAt': now,
+            },
+        },
+    );
+    return {
+        status: 'STALE_PREPARING_BATCH',
+        activated: false,
+        batch: serializeBatch(batch),
+        guard,
+    };
+};
+
 export const reconcilePreparingHeroBatches = async ({
     now = new Date(),
     source = 'pool-reconcile',
@@ -1531,16 +1792,23 @@ export const reconcilePreparingHeroBatches = async ({
     const preparingBatches = await HeroRotationBatch.find({
         status: { $in: ['preparing', 'ready_to_activate'] },
     })
-        .sort({ preparedAt: -1, createdAt: -1 })
+        .sort({ version: -1, preparedAt: -1, createdAt: -1 })
         .lean();
     if (!preparingBatches.length) {
         return { status: 'NO_PREPARING_BATCH', activated: false };
     }
     const batch = preparingBatches[0];
-    const movies = await Movie.find({ _id: { $in: batch.movieIds } })
-        .select(MOVIE_PUBLIC_SELECT)
-        .lean();
-    const readiness = getHeroPoolReadiness({ pool: batch, movies });
+    const [activeBatch, config, movies, mediaAssets] = await Promise.all([
+        HeroRotationBatch.findOne({ status: 'active' }).lean(),
+        SiteConfig.findOne({ key: 'heroRotation' }).select('heroRotation').lean(),
+        Movie.find({ _id: { $in: batch.movieIds } })
+            .select(MOVIE_PUBLIC_SELECT)
+            .lean(),
+        heroRotationRuntime.loadReadyMediaAssets(batch.movieIds),
+    ]);
+    const guard = getHeroBatchActivationGuard({ batch, activeBatch, config });
+    if (!guard.valid) return failStalePreparingBatch(batch, guard, now);
+    const readiness = getHeroPoolReadiness({ pool: batch, movies, mediaAssets });
     if (!readiness.complete) {
         await HeroRotationBatch.updateOne(
             { _id: batch._id, status: { $in: ['preparing', 'ready_to_activate'] } },
@@ -1560,7 +1828,12 @@ export const reconcilePreparingHeroBatches = async ({
         };
     }
     await HeroRotationBatch.updateOne(
-        { _id: batch._id, status: { $in: ['preparing', 'ready_to_activate'] } },
+        {
+            _id: batch._id,
+            version: batch.version,
+            fencingToken: batch.fencingToken,
+            status: { $in: ['preparing', 'ready_to_activate'] },
+        },
         {
             $set: {
                 status: 'ready_to_activate',
@@ -1576,6 +1849,8 @@ export const reconcilePreparingHeroBatches = async ({
         await session.withTransaction(async () => {
             const transactionalBatch = await HeroRotationBatch.findOne({
                 _id: batch._id,
+                version: batch.version,
+                fencingToken: batch.fencingToken,
                 status: 'ready_to_activate',
             }).session(session);
             if (!transactionalBatch) {
@@ -1583,15 +1858,45 @@ export const reconcilePreparingHeroBatches = async ({
                     transient: true,
                 });
             }
+            await SiteConfig.updateOne(
+                { key: 'heroRotation' },
+                { $setOnInsert: { key: 'heroRotation' } },
+                { upsert: true, session },
+            );
+            // Keep all operations using this session sequential inside the transaction.
+            const transactionalActiveBatch = await HeroRotationBatch.findOne({ status: 'active' })
+                .session(session)
+                .lean();
+            const transactionalConfig = await SiteConfig.findOne({ key: 'heroRotation' })
+                .select('heroRotation')
+                .session(session)
+                .lean();
+            const transactionalGuard = getHeroBatchActivationGuard({
+                batch: transactionalBatch,
+                activeBatch: transactionalActiveBatch,
+                config: transactionalConfig,
+            });
+            if (!transactionalGuard.valid) {
+                throw new HeroRotationError(
+                    'HERO_PREPARING_BATCH_STALE',
+                    'A newer Hero batch or fencing token superseded this preparation.',
+                    { transient: false, details: transactionalGuard },
+                );
+            }
             const transactionalMovies = await Movie.find({
                 _id: { $in: transactionalBatch.movieIds },
             })
                 .select(MOVIE_PUBLIC_SELECT)
                 .session(session)
                 .lean();
+            const transactionalMediaAssets = await heroRotationRuntime.loadReadyMediaAssets(
+                transactionalBatch.movieIds,
+                { session },
+            );
             assertHeroPoolAssetsReady({
                 movies: transactionalMovies,
                 expectedMovieIds: transactionalBatch.movieIds,
+                mediaAssets: transactionalMediaAssets,
             });
             transactionalBatch.status = 'active';
             transactionalBatch.activatedAt = now;
@@ -1601,26 +1906,71 @@ export const reconcilePreparingHeroBatches = async ({
                 nextPoolReadiness: readiness,
                 activationSource: source,
             };
+            if (transactionalActiveBatch) {
+                await HeroRotationBatch.updateOne(
+                    {
+                        _id: transactionalActiveBatch._id,
+                        status: 'active',
+                        version: transactionalActiveBatch.version,
+                    },
+                    { $set: { status: 'retired', retiredAt: now } },
+                    { session },
+                );
+            }
             await HeroRotationBatch.updateMany(
-                { status: 'active', _id: { $ne: transactionalBatch._id } },
-                { $set: { status: 'retired', retiredAt: now } },
+                {
+                    _id: { $ne: transactionalBatch._id },
+                    status: { $in: ['building', 'preparing', 'ready_to_activate'] },
+                },
+                {
+                    $set: {
+                        status: 'failed',
+                        failureReason: 'SUPERSEDED_BY_ACTIVE_BATCH',
+                    },
+                },
                 { session },
             );
             await transactionalBatch.save({ session });
-            await SiteConfig.findOneAndUpdate(
-                { key: 'heroRotation' },
+            const expectedActiveFilter = transactionalActiveBatch
+                ? { 'heroRotation.activeBatchId': transactionalActiveBatch._id }
+                : {
+                    $or: [
+                        { 'heroRotation.activeBatchId': null },
+                        { 'heroRotation.activeBatchId': { $exists: false } },
+                    ],
+                };
+            const updatedConfig = await SiteConfig.findOneAndUpdate(
                 {
-                    $setOnInsert: { key: 'heroRotation' },
+                    key: 'heroRotation',
+                    $and: [
+                        expectedActiveFilter,
+                        {
+                            $or: [
+                                { 'heroRotation.lastFencingToken': { $lt: transactionalBatch.fencingToken } },
+                                { 'heroRotation.lastFencingToken': { $exists: false } },
+                            ],
+                        },
+                    ],
+                },
+                {
                     $set: {
                         'heroRotation.activeBatchId': transactionalBatch._id,
                         'heroRotation.lastSuccessfulRefreshAt': now,
                         'heroRotation.nextRefreshAt': transactionalBatch.nextRefreshAt,
+                        'heroRotation.lastFencingToken': transactionalBatch.fencingToken,
                         'heroRotation.refreshing': false,
                     },
                     $inc: { 'heroRotation.cacheGeneration': 1 },
                 },
-                { upsert: true, returnDocument: 'after', session },
+                { returnDocument: 'after', session },
             );
+            if (!updatedConfig) {
+                throw new HeroRotationError(
+                    'HERO_STALE_FENCE',
+                    'A newer Hero refresh already completed.',
+                    { transient: true },
+                );
+            }
             activatedBatch = transactionalBatch.toObject();
         });
     } finally {
@@ -1686,7 +2036,14 @@ export const rerandomizeActiveHero = async ({
                 .select(MOVIE_PUBLIC_SELECT)
                 .session(session)
                 .lean();
-            assertHeroActiveAssetsReady({ movies: selectedMovies, expectedMovieIds: nextIds });
+            const selectedMediaAssets = await heroRotationRuntime.loadReadyMediaAssets(nextIds, {
+                session,
+            });
+            assertHeroActiveAssetsReady({
+                movies: selectedMovies,
+                expectedMovieIds: nextIds,
+                mediaAssets: selectedMediaAssets,
+            });
             updated = await HeroRotationBatch.findOneAndUpdate(
                 {
                     _id: batch._id,
@@ -1809,8 +2166,16 @@ export const getAdminHeroRotation = async () => {
     };
     const prepareBatchState = async (batch) => {
         if (!batch?.movieIds?.length) return null;
-        const movies = await loadOrderedMovies(batch.movieIds);
-        const mediaStates = await getHeroMediaStates(batch.movieIds);
+        const [movies, mediaStates, mediaAssets] = await Promise.all([
+            loadOrderedMovies(batch.movieIds),
+            getHeroMediaStates(batch.movieIds),
+            heroRotationRuntime.loadReadyMediaAssets(batch.movieIds),
+        ]);
+        const registryByMovie = new Map(getRegisteredAssetValidations({
+            movies,
+            expectedMovieIds: batch.movieIds,
+            mediaAssets,
+        }).map((item) => [item.movieId, item]));
         const categories = new Map([
             ...normalizeIds(batch.newestMovieIds).map((id) => [id, 'newest']),
             ...normalizeIds(batch.hotMovieIds).map((id) => [id, 'hot']),
@@ -1818,12 +2183,17 @@ export const getAdminHeroRotation = async () => {
         ]);
         const pool = movies.map((movie) => {
             const validation = validateNativeHeroMovie(movie);
+            const registryValidation = registryByMovie.get(String(movie._id));
+            const nativeVideoValid = validation.valid && registryValidation?.valid === true;
             return {
-                ...normalizeHeroMovie(movie, { posterOnly: !validation.valid }),
+                ...normalizeHeroMovie(movie, { posterOnly: !nativeVideoValid }),
                 category: categories.get(String(movie._id)) || null,
                 active: false,
-                nativeVideoValid: validation.valid,
-                nativeVideoIssues: validation.reasons,
+                nativeVideoValid,
+                nativeVideoIssues: [
+                    ...validation.reasons,
+                    ...(registryValidation?.reasons || []),
+                ],
                 media: mediaStates.get(String(movie._id)) || {
                     sourceStatus: 'needs_authorized_source',
                     rightsStatus: 'UNKNOWN',
@@ -1832,7 +2202,7 @@ export const getAdminHeroRotation = async () => {
         });
         return {
             ...serializeBatch(batch),
-            readiness: getHeroPoolReadiness({ pool: batch, movies }),
+            readiness: getHeroPoolReadiness({ pool: batch, movies, mediaAssets }),
             pool,
         };
     };
@@ -1862,9 +2232,16 @@ export const getAdminHeroRotation = async () => {
         const pendingIds = pendingPool?.movieIds?.length === HERO_POOL_SIZE
             ? pendingPool.movieIds
             : (catalog?.movieIds || []).slice(0, HERO_POOL_SIZE);
-        const candidateMovies = pendingIds.length
-            ? await loadOrderedMovies(pendingIds)
-            : catalogMovies;
+        const [candidateMovies, candidateMediaStates, candidateMediaAssets] = await Promise.all([
+            pendingIds.length ? loadOrderedMovies(pendingIds) : catalogMovies,
+            getHeroMediaStates(pendingIds),
+            heroRotationRuntime.loadReadyMediaAssets(pendingIds),
+        ]);
+        const candidateRegistryByMovie = new Map(getRegisteredAssetValidations({
+            movies: candidateMovies,
+            expectedMovieIds: pendingIds,
+            mediaAssets: candidateMediaAssets,
+        }).map((item) => [item.movieId, item]));
         const pendingCategories = new Map([
             ...normalizeIds(pendingPool?.newestMovieIds).map((id) => [id, 'newest']),
             ...normalizeIds(pendingPool?.hotMovieIds).map((id) => [id, 'hot']),
@@ -1872,12 +2249,21 @@ export const getAdminHeroRotation = async () => {
         ]);
         const candidateState = candidateMovies.map((movie) => {
             const validation = validateNativeHeroMovie(movie);
+            const registryValidation = candidateRegistryByMovie.get(String(movie._id));
+            const nativeVideoValid = validation.valid && registryValidation?.valid === true;
             return {
-                ...normalizeHeroMovie(movie, { posterOnly: !validation.valid }),
+                ...normalizeHeroMovie(movie, { posterOnly: !nativeVideoValid }),
                 category: pendingCategories.get(String(movie._id)) || null,
                 active: false,
-                nativeVideoValid: validation.valid,
-                nativeVideoIssues: validation.reasons,
+                nativeVideoValid,
+                nativeVideoIssues: [
+                    ...validation.reasons,
+                    ...(registryValidation?.reasons || []),
+                ],
+                media: candidateMediaStates.get(String(movie._id)) || {
+                    sourceStatus: 'needs_authorized_source',
+                    rightsStatus: 'UNKNOWN',
+                },
             };
         });
         const latestFailed = recentBatches.find((batch) => batch.status === 'failed');
@@ -1907,7 +2293,16 @@ export const getAdminHeroRotation = async () => {
             recentBatches: recentBatches.map((batch) => serializeBatch(batch)),
         };
     }
-    const movies = await loadOrderedMovies(activeBatch.movieIds);
+    const [movies, activeMediaStates, activeMediaAssets] = await Promise.all([
+        loadOrderedMovies(activeBatch.movieIds),
+        getHeroMediaStates(activeBatch.movieIds),
+        heroRotationRuntime.loadReadyMediaAssets(activeBatch.movieIds),
+    ]);
+    const activeRegistryByMovie = new Map(getRegisteredAssetValidations({
+        movies,
+        expectedMovieIds: activeBatch.movieIds,
+        mediaAssets: activeMediaAssets,
+    }).map((item) => [item.movieId, item]));
     const activeSet = new Set(normalizeIds(activeBatch.activeHeroMovieIds));
     const categories = new Map([
         ...normalizeIds(activeBatch.newestMovieIds).map((id) => [id, 'newest']),
@@ -1916,12 +2311,21 @@ export const getAdminHeroRotation = async () => {
     ]);
     const pool = movies.map((movie) => {
         const validation = validateNativeHeroMovie(movie);
+        const registryValidation = activeRegistryByMovie.get(String(movie._id));
+        const nativeVideoValid = validation.valid && registryValidation?.valid === true;
         return {
-            ...normalizeHeroMovie(movie, { posterOnly: !validation.valid }),
+            ...normalizeHeroMovie(movie, { posterOnly: !nativeVideoValid }),
             category: categories.get(String(movie._id)),
             active: activeSet.has(String(movie._id)),
-            nativeVideoValid: validation.valid,
-            nativeVideoIssues: validation.reasons,
+            nativeVideoValid,
+            nativeVideoIssues: [
+                ...validation.reasons,
+                ...(registryValidation?.reasons || []),
+            ],
+            media: activeMediaStates.get(String(movie._id)) || {
+                sourceStatus: 'needs_authorized_source',
+                rightsStatus: 'UNKNOWN',
+            },
         };
     });
     const poolById = new Map(pool.map((movie) => [String(movie.id || movie._id), movie]));

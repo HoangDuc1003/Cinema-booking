@@ -57,6 +57,7 @@ const heroMediaAssetSchema = new mongoose.Schema({
     },
     cloudinaryPublicId: { type: String, trim: true, default: '' },
     secureUrl: { type: String, trim: true, default: '' },
+    posterUrl: { type: String, trim: true, default: '' },
     mimeType: { type: String, trim: true, default: '' },
     format: { type: String, trim: true, default: '' },
     duration: { type: Number, min: 0, default: 0 },
@@ -65,6 +66,8 @@ const heroMediaAssetSchema = new mongoose.Schema({
     bytes: { type: Number, min: 0, default: 0 },
     videoCodec: { type: String, trim: true, default: '' },
     audioCodec: { type: String, trim: true, default: '' },
+    checksum: { type: String, trim: true, default: '' },
+    attribution: { type: String, trim: true, default: '' },
     verificationStatus: {
         type: String,
         enum: ['unverified', 'processing', 'verified', 'failed'],

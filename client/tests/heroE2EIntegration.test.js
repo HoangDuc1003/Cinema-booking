@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { updateHomeHero } from '../../server/services/heroService.js';
-import { getPublicHeroRotation } from '../../server/services/heroRotationService.js';
+import { getPublicHeroRotation, heroRotationRuntime } from '../../server/services/heroRotationService.js';
 import SiteConfig from '../../server/models/SiteConfig.js';
 import HeroRotationBatch from '../../server/models/HeroRotationBatch.js';
 import Movie from '../../server/models/Movie.js';
+import { registeredHeroAssetsForMovies } from '../../server/tests/heroMediaTestFixtures.js';
 
 const chain = (value) => ({
     select() { return this; },
@@ -55,6 +56,7 @@ test('M3 E2E Integration: Admin manual 5-movie save, public hero GET order, meta
         batchFindOne: HeroRotationBatch.findOne,
         movieCountDocuments: Movie.countDocuments,
         movieFind: Movie.find,
+        loadReadyMediaAssets: heroRotationRuntime.loadReadyMediaAssets,
     };
 
     let storedConfig = {
@@ -87,6 +89,9 @@ test('M3 E2E Integration: Admin manual 5-movie save, public hero GET order, meta
     HeroRotationBatch.findOne = () => chain(null);
     Movie.countDocuments = async () => savedMovieIds.length;
     Movie.find = () => chain(mockMovies);
+    heroRotationRuntime.loadReadyMediaAssets = async (movieIds) => (
+        registeredHeroAssetsForMovies(mockMovies, movieIds)
+    );
 
     try {
         // Step 1: Admin saves 5 movies in Manual mode (PUT /api/admin/hero)
@@ -145,6 +150,7 @@ test('M3 E2E Integration: Admin manual 5-movie save, public hero GET order, meta
         HeroRotationBatch.findOne = originals.batchFindOne;
         Movie.countDocuments = originals.movieCountDocuments;
         Movie.find = originals.movieFind;
+        heroRotationRuntime.loadReadyMediaAssets = originals.loadReadyMediaAssets;
     }
 });
 

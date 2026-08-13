@@ -24,7 +24,7 @@ The alternative admin-only endpoint is `POST /api/show/sync-now-playing`. It mus
 ## Release and rollback
 
 1. Deploy server and client with the same release commit.
-2. Check `/api/health/ready`, then call the home Now Showing endpoint and verify `success: true`, `X-Data-Source: bookable-shows`, and future VN shows.
+2. Check `/api/health/ready`, then call `/api/show/tmdb/home-now-showing?limit=10` and verify `success: true`, `X-Data-Source: tmdb-now-playing`, region `VN`, and ten popularity-ranked discovery cards. Validate bookable schedules separately on movie details.
 3. Verify Clerk uses live keys, the hero has no iframe, and a booking rejects closed/started shows.
 4. If the release is unhealthy, roll back the Vercel deployment. Do not delete Shows or Movies; the sync is idempotent and preserves occupied seats, bookings, prices, and document IDs.
 

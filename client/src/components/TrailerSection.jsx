@@ -7,6 +7,7 @@ import { fetchHomeTrailers } from '../services/tmdb';
 import { useMediaQuery } from './hero/useHeroEnvironment';
 
 const MAX_TRAILER_CANDIDATES = 10;
+const EMPTY_MOVIES = Object.freeze([]);
 
 const movieIdFor = (movie) => {
   const value = String(movie?._id || movie?.id || '').trim();
@@ -73,7 +74,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'home-trailer-sectio
     error: null,
   });
 
-  const heroMovies = Array.isArray(hero?.movies) ? hero.movies : [];
+  const heroMovies = Array.isArray(hero?.movies) ? hero.movies : EMPTY_MOVIES;
   const candidates = useMemo(() => mergeCandidateMovies({
     featuredMovie,
     heroMovies,

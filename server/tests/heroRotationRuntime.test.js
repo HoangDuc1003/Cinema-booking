@@ -12,6 +12,7 @@ import {
     rerandomizeActiveHero,
     refreshHeroRotation,
 } from '../services/heroRotationService.js';
+import { registeredHeroAssetsForMovies } from './heroMediaTestFixtures.js';
 
 const nativeMovie = (id) => ({
     _id: id,
@@ -65,6 +66,7 @@ const installPublicCacheHarness = (t) => {
         movieFind: Movie.find,
         getJson: heroRotationRuntime.getJson,
         setJson: heroRotationRuntime.setJson,
+        loadReadyMediaAssets: heroRotationRuntime.loadReadyMediaAssets,
     };
     const cache = new Map();
     const batch = {
@@ -101,6 +103,9 @@ const installPublicCacheHarness = (t) => {
         cache.set(key, structuredClone(value));
         return true;
     };
+    heroRotationRuntime.loadReadyMediaAssets = async (movieIds) => (
+        registeredHeroAssetsForMovies(movies, movieIds)
+    );
     t.after(() => {
         SiteConfig.findOne = originals.configFindOne;
         SiteConfig.findOneAndUpdate = originals.configFindOneAndUpdate;
@@ -109,6 +114,7 @@ const installPublicCacheHarness = (t) => {
         Movie.find = originals.movieFind;
         heroRotationRuntime.getJson = originals.getJson;
         heroRotationRuntime.setJson = originals.setJson;
+        heroRotationRuntime.loadReadyMediaAssets = originals.loadReadyMediaAssets;
     });
     return {
         batch,
@@ -162,6 +168,7 @@ const installRefreshHarness = (t, { warmFailures = 0 } = {}) => {
         deleteByPattern: heroRotationRuntime.deleteByPattern,
         buildPool: heroRotationRuntime.buildPool,
         getPublicRotation: heroRotationRuntime.getPublicRotation,
+        loadReadyMediaAssets: heroRotationRuntime.loadReadyMediaAssets,
     };
     const movies = [
         ...Array.from({ length: 5 }, (_, index) => nativeMovie(`new-${index}`)),
@@ -336,6 +343,9 @@ const installRefreshHarness = (t, { warmFailures = 0 } = {}) => {
             movies: active ? pool.activeHeroMovieIds.map((id) => ({ id })) : [],
         };
     };
+    heroRotationRuntime.loadReadyMediaAssets = async (movieIds) => (
+        registeredHeroAssetsForMovies(movies, movieIds)
+    );
     t.after(() => {
         SiteConfig.findOne = originals.configFindOne;
         SiteConfig.findOneAndUpdate = originals.configFindOneAndUpdate;
@@ -358,6 +368,7 @@ const installRefreshHarness = (t, { warmFailures = 0 } = {}) => {
         heroRotationRuntime.deleteByPattern = originals.deleteByPattern;
         heroRotationRuntime.buildPool = originals.buildPool;
         heroRotationRuntime.getPublicRotation = originals.getPublicRotation;
+        heroRotationRuntime.loadReadyMediaAssets = originals.loadReadyMediaAssets;
     });
     return {
         batches,

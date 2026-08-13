@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import HeroMediaAsset from '../models/HeroMediaAsset.js';
 import HeroRotationBatch from '../models/HeroRotationBatch.js';
 import Movie from '../models/Movie.js';
@@ -20,6 +21,7 @@ import {
     heroRotationRuntime,
     reconcilePreparingHeroBatches,
 } from '../services/heroRotationService.js';
+import { registeredHeroAssetsForMovies } from './heroMediaTestFixtures.js';
 
 // The application reads this allowlist only from server environment, never
 // from an Admin request body. The test value is a public fixture hostname.
@@ -67,6 +69,55 @@ const pool = () => ({
     discoveryMovieIds: Array.from({ length: 5 }, (_, index) => `discovery-${index}`),
 });
 
+const createHttpsRequestStub = (responses, calls = []) => {
+    const queue = [...responses];
+    return (target, options, onResponse) => {
+        const request = new EventEmitter();
+        request.setTimeout = () => request;
+        request.destroy = (error) => {
+            if (error) queueMicrotask(() => request.emit('error', error));
+            return request;
+        };
+        request.end = () => {
+            const parsed = new URL(target);
+            options.lookup(parsed.hostname, { all: false }, (error, address, family) => {
+                if (error) {
+                    request.emit('error', error);
+                    return;
+                }
+                const response = queue.shift();
+                if (!response) {
+                    const unexpected = new Error('Unexpected HTTPS probe request.');
+                    unexpected.code = 'UNEXPECTED_TEST_REQUEST';
+                    request.emit('error', unexpected);
+                    return;
+                }
+                calls.push({
+                    url: parsed.toString(),
+                    method: options.method,
+                    address,
+                    family,
+                    servername: options.servername,
+                    host: options.headers.Host,
+                    range: options.headers.Range,
+                    agent: options.agent,
+                    rejectUnauthorized: options.rejectUnauthorized,
+                });
+                queueMicrotask(() => {
+                    const incoming = new EventEmitter();
+                    incoming.statusCode = response.status;
+                    incoming.headers = response.headers || {};
+                    incoming.resume = () => incoming;
+                    incoming.destroy = () => incoming;
+                    onResponse(incoming);
+                });
+            });
+            return request;
+        };
+        return request;
+    };
+};
+
 test('source policy accepts an approved public HTTPS media URL and refuses unknown or YouTube-only sources', () => {
     const approved = resolveMediaSource({
         movieId: 'movie-1',
@@ -100,44 +151,209 @@ test('source policy accepts an approved public HTTPS media URL and refuses unkno
     assert.throws(() => assertMediaSourceMayIngest(unknown), /Only explicitly authorized/);
 });
 
-test('remote source network safety rejects private DNS answers and redirects before Cloudinary can fetch them', async () => {
+test('remote source network safety rejects every tested non-global IPv4 and IPv6 class', async () => {
     const input = 'https://media.example.test/trailers/movie-1.mp4';
+    const unsafeAddresses = [
+        '0.0.0.1',
+        '10.0.0.1',
+        '100.64.0.1',
+        '127.0.0.1',
+        '169.254.1.1',
+        '172.16.0.1',
+        '192.0.0.1',
+        '192.0.2.1',
+        '192.168.0.1',
+        '198.18.0.1',
+        '198.51.100.1',
+        '203.0.113.1',
+        '224.0.0.1',
+        '240.0.0.1',
+        '255.255.255.255',
+        '::',
+        '::1',
+        '::ffff:127.0.0.1',
+        '::ffff:7f00:1',
+        '::ffff:93.184.216.34',
+        '64:ff9b::192.0.2.1',
+        '100::1',
+        '2001::1',
+        '2001:2::1',
+        '2001:db8::1',
+        '2002:c000:201::1',
+        '3fff::1',
+        '4000::1',
+        '5f00::1',
+        'fc00::1',
+        'fe80::1',
+        'fe90::1',
+        'fec0::1',
+        'ff02::1',
+    ];
+    let probeRequests = 0;
+    for (const address of unsafeAddresses) {
+        await assert.rejects(
+            assertAuthorizedRemoteSourceNetworkSafe(input, {
+                authorizedSourceHosts: ['media.example.test'],
+                lookupFn: async () => [{ address, family: address.includes(':') ? 6 : 4 }],
+                httpsRequestFn: () => {
+                    probeRequests += 1;
+                    assert.fail(`unsafe address ${address} must not be requested`);
+                },
+            }),
+            (error) => error.code === 'HERO_MEDIA_SOURCE_NETWORK_UNSAFE',
+            address,
+        );
+    }
+    assert.equal(probeRequests, 0);
+
     await assert.rejects(
         assertAuthorizedRemoteSourceNetworkSafe(input, {
             authorizedSourceHosts: ['media.example.test'],
-            lookupFn: async () => [{ address: '127.0.0.1', family: 4 }],
-            fetchFn: async () => assert.fail('unsafe DNS must not be fetched'),
+            lookupFn: async () => [
+                { address: '93.184.216.34', family: 4 },
+                { address: '127.0.0.1', family: 4 },
+            ],
+            httpsRequestFn: () => assert.fail('a mixed unsafe DNS answer must not be requested'),
         }),
         (error) => error.code === 'HERO_MEDIA_SOURCE_NETWORK_UNSAFE',
     );
-    await assert.rejects(
-        assertAuthorizedRemoteSourceNetworkSafe(input, {
+
+    for (const address of ['93.184.216.34', '2606:4700:4700::1111']) {
+        const calls = [];
+        const safe = await assertAuthorizedRemoteSourceNetworkSafe(input, {
             authorizedSourceHosts: ['media.example.test'],
-            lookupFn: async () => [{ address: '203.0.113.7', family: 4 }],
-            fetchFn: async () => ({ status: 302 }),
-        }),
-        (error) => error.code === 'HERO_MEDIA_SOURCE_REDIRECT_REJECTED',
-    );
-    const probeRequests = [];
-    await assert.rejects(
-        assertAuthorizedRemoteSourceNetworkSafe(input, {
-            authorizedSourceHosts: ['media.example.test'],
-            lookupFn: async () => [{ address: '203.0.113.7', family: 4 }],
-            fetchFn: async (_url, options) => {
-                probeRequests.push(options);
-                return { status: probeRequests.length === 1 ? 405 : 302 };
-            },
-        }),
-        (error) => error.code === 'HERO_MEDIA_SOURCE_REDIRECT_REJECTED',
-    );
-    assert.deepEqual(probeRequests.map((request) => request.method), ['HEAD', 'GET']);
-    assert.equal(probeRequests[1].headers.Range, 'bytes=0-0');
+            lookupFn: async () => [{ address, family: address.includes(':') ? 6 : 4 }],
+            httpsRequestFn: createHttpsRequestStub([{ status: 200 }], calls),
+        });
+        assert.equal(safe, input);
+        assert.equal(calls[0].address, address);
+    }
+});
+
+test('remote source probe pins each validated address while preserving HTTPS host and SNI across redirects', async () => {
+    const input = 'https://media.example.test/trailers/movie-1.mp4';
+    const finalUrl = 'https://cdn.example.test/final/movie-1.mp4';
+    const dnsCalls = [];
+    const requestCalls = [];
+    const result = await assertAuthorizedRemoteSourceNetworkSafe(input, {
+        authorizedSourceHosts: ['media.example.test', 'cdn.example.test'],
+        lookupFn: async (hostname) => {
+            dnsCalls.push(hostname);
+            return [{
+                address: hostname === 'media.example.test' ? '93.184.216.34' : '1.1.1.1',
+                family: 4,
+            }];
+        },
+        httpsRequestFn: createHttpsRequestStub([
+            { status: 302, headers: { location: finalUrl } },
+            { status: 200 },
+        ], requestCalls),
+    });
+
+    assert.equal(result, finalUrl);
+    assert.deepEqual(dnsCalls, ['media.example.test', 'cdn.example.test']);
+    assert.deepEqual(requestCalls.map((call) => ({
+        address: call.address,
+        servername: call.servername,
+        host: call.host,
+        agent: call.agent,
+        rejectUnauthorized: call.rejectUnauthorized,
+    })), [
+        {
+            address: '93.184.216.34',
+            servername: 'media.example.test',
+            host: 'media.example.test',
+            agent: false,
+            rejectUnauthorized: true,
+        },
+        {
+            address: '1.1.1.1',
+            servername: 'cdn.example.test',
+            host: 'cdn.example.test',
+            agent: false,
+            rejectUnauthorized: true,
+        },
+    ]);
+});
+
+test('remote source probe revalidates DNS for GET fallback and rejects unsafe or unauthorized redirect hops', async () => {
+    const input = 'https://media.example.test/trailers/movie-1.mp4';
+    const fallbackCalls = [];
+    let fallbackDnsCalls = 0;
     const safe = await assertAuthorizedRemoteSourceNetworkSafe(input, {
         authorizedSourceHosts: ['media.example.test'],
-        lookupFn: async () => [{ address: '203.0.113.7', family: 4 }],
-        fetchFn: async () => ({ status: 200 }),
+        lookupFn: async () => {
+            fallbackDnsCalls += 1;
+            return [{ address: '93.184.216.34', family: 4 }];
+        },
+        httpsRequestFn: createHttpsRequestStub([
+            { status: 405 },
+            { status: 200 },
+        ], fallbackCalls),
     });
     assert.equal(safe, input);
+    assert.equal(fallbackDnsCalls, 2);
+    assert.deepEqual(fallbackCalls.map((request) => request.method), ['HEAD', 'GET']);
+    assert.equal(fallbackCalls[1].range, 'bytes=0-0');
+
+    const reboundCalls = [];
+    let reboundDnsCalls = 0;
+    await assert.rejects(
+        assertAuthorizedRemoteSourceNetworkSafe(input, {
+            authorizedSourceHosts: ['media.example.test'],
+            lookupFn: async () => {
+                reboundDnsCalls += 1;
+                return [{
+                    address: reboundDnsCalls === 1 ? '93.184.216.34' : '127.0.0.1',
+                    family: 4,
+                }];
+            },
+            httpsRequestFn: createHttpsRequestStub([{ status: 405 }], reboundCalls),
+        }),
+        (error) => error.code === 'HERO_MEDIA_SOURCE_NETWORK_UNSAFE',
+    );
+    assert.equal(reboundDnsCalls, 2);
+    assert.equal(reboundCalls.length, 1);
+
+    const privateRedirectCalls = [];
+    await assert.rejects(
+        assertAuthorizedRemoteSourceNetworkSafe(input, {
+            authorizedSourceHosts: ['media.example.test', 'cdn.example.test'],
+            lookupFn: async (hostname) => [{
+                address: hostname === 'media.example.test' ? '93.184.216.34' : '169.254.169.254',
+                family: 4,
+            }],
+            httpsRequestFn: createHttpsRequestStub([{
+                status: 302,
+                headers: { location: 'https://cdn.example.test/private-target.mp4' },
+            }], privateRedirectCalls),
+        }),
+        (error) => error.code === 'HERO_MEDIA_SOURCE_NETWORK_UNSAFE',
+    );
+    assert.equal(privateRedirectCalls.length, 1);
+
+    const unauthorizedRedirectCalls = [];
+    await assert.rejects(
+        assertAuthorizedRemoteSourceNetworkSafe(input, {
+            authorizedSourceHosts: ['media.example.test'],
+            lookupFn: async () => [{ address: '93.184.216.34', family: 4 }],
+            httpsRequestFn: createHttpsRequestStub([{
+                status: 302,
+                headers: { location: 'https://unapproved.example.test/movie-1.mp4' },
+            }], unauthorizedRedirectCalls),
+        }),
+        (error) => error.code === 'HERO_MEDIA_SOURCE_REDIRECT_REJECTED',
+    );
+    assert.equal(unauthorizedRedirectCalls.length, 1);
+
+    await assert.rejects(
+        assertAuthorizedRemoteSourceNetworkSafe(input, {
+            authorizedSourceHosts: ['media.example.test'],
+            lookupFn: async () => [{ address: '93.184.216.34', family: 4 }],
+            httpsRequestFn: createHttpsRequestStub([{ status: 302, headers: {} }]),
+        }),
+        (error) => error.code === 'HERO_MEDIA_SOURCE_REDIRECT_REJECTED',
+    );
 });
 
 test('HeroMediaAsset declares idempotent source and queue indexes without exposing an original URL by default', () => {
@@ -330,8 +546,11 @@ test('pool readiness reports 5/5/5 and leaves a healthy active batch untouched w
 
     const originals = {
         batchFind: HeroRotationBatch.find,
+        batchFindOne: HeroRotationBatch.findOne,
         batchUpdateOne: HeroRotationBatch.updateOne,
         movieFind: Movie.find,
+        configFindOne: SiteConfig.findOne,
+        loadReadyMediaAssets: heroRotationRuntime.loadReadyMediaAssets,
         startSession: heroRotationRuntime.startSession,
     };
     const preparing = {
@@ -339,6 +558,8 @@ test('pool readiness reports 5/5/5 and leaves a healthy active batch untouched w
         status: 'preparing',
         batchKey: 'hero-next',
         version: 2,
+        fencingToken: 2,
+        previousBatchId: 'active-1',
         ...groups,
         movieIds,
         activeHeroMovieIds: movieIds.slice(0, 5),
@@ -348,18 +569,28 @@ test('pool readiness reports 5/5/5 and leaves a healthy active batch untouched w
     ));
     const updates = [];
     HeroRotationBatch.find = () => chain([preparing]);
+    HeroRotationBatch.findOne = () => chain({ _id: 'active-1', status: 'active', version: 1 });
     HeroRotationBatch.updateOne = async (...args) => {
         updates.push(args);
         return { modifiedCount: 1 };
     };
     Movie.find = () => chain(incompleteMovies);
+    SiteConfig.findOne = () => chain({
+        heroRotation: { activeBatchId: 'active-1', lastFencingToken: 1 },
+    });
+    heroRotationRuntime.loadReadyMediaAssets = async (ids) => (
+        registeredHeroAssetsForMovies(movies, ids)
+    );
     heroRotationRuntime.startSession = async () => {
         assert.fail('An incomplete preparing batch must not enter an activation transaction.');
     };
     t.after(() => {
         HeroRotationBatch.find = originals.batchFind;
+        HeroRotationBatch.findOne = originals.batchFindOne;
         HeroRotationBatch.updateOne = originals.batchUpdateOne;
         Movie.find = originals.movieFind;
+        SiteConfig.findOne = originals.configFindOne;
+        heroRotationRuntime.loadReadyMediaAssets = originals.loadReadyMediaAssets;
         heroRotationRuntime.startSession = originals.startSession;
     });
     const result = await reconcilePreparingHeroBatches({ now: new Date('2026-08-08T00:00:00Z') });
@@ -379,7 +610,10 @@ test('a 15/15 preparing pool atomically retires the old batch only after preflig
         batchUpdateOne: HeroRotationBatch.updateOne,
         batchUpdateMany: HeroRotationBatch.updateMany,
         movieFind: Movie.find,
+        configFindOne: SiteConfig.findOne,
+        configUpdateOne: SiteConfig.updateOne,
         configFindOneAndUpdate: SiteConfig.findOneAndUpdate,
+        loadReadyMediaAssets: heroRotationRuntime.loadReadyMediaAssets,
         startSession: heroRotationRuntime.startSession,
         deleteByPattern: heroRotationRuntime.deleteByPattern,
         deleteKeys: heroRotationRuntime.deleteKeys,
@@ -389,6 +623,8 @@ test('a 15/15 preparing pool atomically retires the old batch only after preflig
         status: 'preparing',
         batchKey: 'hero-next',
         version: 2,
+        fencingToken: 2,
+        previousBatchId: 'active-1',
         nextRefreshAt: new Date('2026-08-10T00:00:00Z'),
         ...groups,
         movieIds,
@@ -401,16 +637,34 @@ test('a 15/15 preparing pool atomically retires the old batch only after preflig
         toObject() { return { ...this }; },
         async save() {},
     };
-    const retireCalls = [];
+    const activeBatch = { _id: 'active-1', status: 'active', version: 1 };
+    const updateOneCalls = [];
+    const updateManyCalls = [];
     HeroRotationBatch.find = () => chain([preparing]);
-    HeroRotationBatch.updateOne = async () => ({ modifiedCount: 1 });
-    HeroRotationBatch.findOne = () => ({ session: () => transactionalBatch });
+    HeroRotationBatch.updateOne = async (...args) => {
+        updateOneCalls.push(args);
+        return { modifiedCount: 1 };
+    };
+    HeroRotationBatch.findOne = (filter) => (
+        filter?._id === preparing._id
+            ? { session: () => transactionalBatch }
+            : chain(activeBatch)
+    );
     HeroRotationBatch.updateMany = async (...args) => {
-        retireCalls.push(args);
+        updateManyCalls.push(args);
         return { modifiedCount: 1 };
     };
     Movie.find = () => chain(movies);
-    SiteConfig.findOneAndUpdate = async () => ({ acknowledged: true });
+    SiteConfig.findOne = () => chain({
+        heroRotation: { activeBatchId: 'active-1', lastFencingToken: 1 },
+    });
+    SiteConfig.updateOne = async () => ({ acknowledged: true });
+    SiteConfig.findOneAndUpdate = async () => ({
+        heroRotation: { activeBatchId: preparing._id, lastFencingToken: 2 },
+    });
+    heroRotationRuntime.loadReadyMediaAssets = async (ids) => (
+        registeredHeroAssetsForMovies(movies, ids)
+    );
     heroRotationRuntime.startSession = async () => ({
         withTransaction: async (work) => work(),
         endSession: async () => undefined,
@@ -423,7 +677,10 @@ test('a 15/15 preparing pool atomically retires the old batch only after preflig
         HeroRotationBatch.updateOne = originals.batchUpdateOne;
         HeroRotationBatch.updateMany = originals.batchUpdateMany;
         Movie.find = originals.movieFind;
+        SiteConfig.findOne = originals.configFindOne;
+        SiteConfig.updateOne = originals.configUpdateOne;
         SiteConfig.findOneAndUpdate = originals.configFindOneAndUpdate;
+        heroRotationRuntime.loadReadyMediaAssets = originals.loadReadyMediaAssets;
         heroRotationRuntime.startSession = originals.startSession;
         heroRotationRuntime.deleteByPattern = originals.deleteByPattern;
         heroRotationRuntime.deleteKeys = originals.deleteKeys;
@@ -432,6 +689,7 @@ test('a 15/15 preparing pool atomically retires the old batch only after preflig
     assert.equal(result.status, 'ACTIVE');
     assert.equal(result.activated, true);
     assert.equal(transactionalBatch.status, 'active');
-    assert.equal(retireCalls.length, 1);
-    assert.deepEqual(retireCalls[0][0], { status: 'active', _id: { $ne: 'preparing-1' } });
+    assert.ok(updateOneCalls.some(([filter]) => filter._id === 'active-1' && filter.status === 'active'));
+    assert.equal(updateManyCalls.length, 1);
+    assert.deepEqual(updateManyCalls[0][0].status.$in, ['building', 'preparing', 'ready_to_activate']);
 });

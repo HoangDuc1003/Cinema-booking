@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { getOrComputeDailyOrder, applyDailyOrder } from '../src/utils/heroDailyShuffle.js';
 
 test('M3: Admin UI initialization extracts selectedIds strictly from settings.movieIds/manualSelection and liveMovies from hero.liveMovies', () => {
   const mockHeroResponse = {
@@ -129,32 +128,14 @@ test('M3: HeroSettings.jsx source code verification for 3 labeled sections, 422 
   assert.match(heroSettingsSource, /setLiveMovies/);
 });
 
-test('M3: Exact Manual Order preservation [A, B, C, D, E] across reloads and viewer IDs', () => {
-  const movies = [
-    { _id: 'movie-A', title: 'Movie A' },
-    { _id: 'movie-B', title: 'Movie B' },
-    { _id: 'movie-C', title: 'Movie C' },
-    { _id: 'movie-D', title: 'Movie D' },
-    { _id: 'movie-E', title: 'Movie E' },
-  ];
+test('M3: Exact server order is independent of mode, date, and viewer identity', async () => {
+  const heroSectionSource = await readFile(
+    new URL('../src/components/HeroSection.jsx', import.meta.url),
+    'utf8',
+  );
 
-  // Viewer 1
-  const order1 = getOrComputeDailyOrder({
-    movies,
-    meta: { mode: 'manual', dateKey: '2026-08-03' },
-    viewerKey: 'viewer-user-1',
-  });
-  assert.deepEqual(order1, ['movie-A', 'movie-B', 'movie-C', 'movie-D', 'movie-E']);
-
-  // Viewer 2 (different session/id)
-  const order2 = getOrComputeDailyOrder({
-    movies,
-    meta: { effectiveMode: 'manual', source: 'manual-selection', dateKey: '2026-08-03' },
-    viewerKey: 'viewer-user-2-different',
-  });
-  assert.deepEqual(order2, ['movie-A', 'movie-B', 'movie-C', 'movie-D', 'movie-E']);
-
-  // Apply order to movies
-  const resultMovies = applyDailyOrder(movies, order1);
-  assert.deepEqual(resultMovies.map(m => m._id), ['movie-A', 'movie-B', 'movie-C', 'movie-D', 'movie-E']);
+  assert.doesNotMatch(heroSectionSource, /viewerKey|dailyOrderIds|shuffledMovies/);
+  assert.doesNotMatch(heroSectionSource, /settings\.mode\s*===\s*'manual'/);
+  assert.match(heroSectionSource, /saveHeroMoviesCache\(preparedMovies,/);
+  assert.match(heroSectionSource, /setMovies\(preparedMovies\)/);
 });

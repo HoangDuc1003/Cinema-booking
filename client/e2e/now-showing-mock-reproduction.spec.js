@@ -12,18 +12,23 @@ const serverMovies = Array.from({ length: 10 }, (_, index) => ({
   runtime: 120,
 }));
 
-const installHeroRoute = async (page) => {
+const installHomeSupportRoutes = async (page) => {
   await page.route('**/api/show/hero**', (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
     body: JSON.stringify({ success: true, movies: serverMovies.slice(0, 5) }),
+  }));
+  await page.route('**/api/show/tmdb/trailers**', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, data: { results: [] } }),
   }));
 };
 
 test('a six-second home catalog response renders server movies without dummyShowsData', async ({ page }) => {
   test.setTimeout(15_000);
 
-  await installHeroRoute(page);
+  await installHomeSupportRoutes(page);
 
   await page.route('**/api/show/tmdb/home-now-showing**', async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 6_000));
@@ -34,12 +39,6 @@ test('a six-second home catalog response renders server movies without dummyShow
     });
   });
 
-  await page.route('**/api/show/tmdb/trailers**', (route) => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({ success: true, data: [] }),
-  }));
-
   await page.goto('/');
   await page.locator('#home-now-showing-title').scrollIntoViewIfNeeded();
   const section = page.locator('.home-now-showing');
@@ -49,10 +48,10 @@ test('a six-second home catalog response renders server movies without dummyShow
 
 test('production 503 with no server cache shows retryable error instead of mock movies', async ({ page }) => {
   let attempts = 0;
-  await installHeroRoute(page);
+  await installHomeSupportRoutes(page);
   await page.route('**/api/show/tmdb/home-now-showing**', (route) => {
     attempts += 1;
-    if (attempts < 3) {
+    if (attempts < 2) {
       return route.fulfill({
         status: 503,
         contentType: 'application/json',
@@ -74,20 +73,20 @@ test('production 503 with no server cache shows retryable error instead of mock 
 
   await section.getByRole('button', { name: 'Retry' }).click();
   await expect(section.getByRole('link', { name: 'View details for Server Movie 1', exact: true })).toBeVisible();
-  expect(attempts).toBe(3);
+  expect(attempts).toBe(2);
 });
 
 test('production 503 with a last-known-good cache renders stale server data only', async ({ page }) => {
   await page.addInitScript((cachedMovies) => {
-    localStorage.setItem('nitrocine:home-now-showing-cache-v1', JSON.stringify({
-      schemaVersion: 1,
+    localStorage.setItem('nitrocine:home-now-showing-cache-v2', JSON.stringify({
+      schemaVersion: 2,
       source: 'server',
       savedAt: new Date().toISOString(),
       meta: { version: 7, slot: 3 },
       movies: cachedMovies,
     }));
   }, [serverMovies[0]]);
-  await installHeroRoute(page);
+  await installHomeSupportRoutes(page);
   await page.route('**/api/show/tmdb/home-now-showing**', (route) => route.fulfill({
     status: 503,
     contentType: 'application/json',
@@ -103,7 +102,7 @@ test('production 503 with a last-known-good cache renders stale server data only
 });
 
 test('production success with empty results is unavailable and never becomes mock data', async ({ page }) => {
-  await installHeroRoute(page);
+  await installHomeSupportRoutes(page);
   await page.route('**/api/show/tmdb/home-now-showing**', (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -118,7 +117,7 @@ test('production success with empty results is unavailable and never becomes moc
 });
 
 test('production invalid JSON is an error state and never becomes mock data', async ({ page }) => {
-  await installHeroRoute(page);
+  await installHomeSupportRoutes(page);
   await page.route('**/api/show/tmdb/home-now-showing**', (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -141,7 +140,7 @@ test('unmount aborts a pending home catalog request without updating the old com
   page.on('requestfailed', (request) => {
     if (request.url().includes('/api/show/tmdb/home-now-showing')) requestFailed = true;
   });
-  await installHeroRoute(page);
+  await installHomeSupportRoutes(page);
   await page.route('**/api/show/tmdb/home-now-showing**', async (route) => {
     requestStarted();
     await new Promise((resolve) => setTimeout(resolve, 2_000));

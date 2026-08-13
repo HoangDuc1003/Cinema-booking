@@ -33,6 +33,16 @@ const serializeHeroVideoState = (movie) => ({
     heroVideoVerifiedAt: movie?.heroVideoVerifiedAt || null,
 });
 
+const getHeroMediaRequestEventId = (asset) => {
+    const updatedAt = new Date(asset?.updatedAt || 0).getTime();
+    return [
+        'hero-media-requested',
+        String(asset?.id || ''),
+        Number.isFinite(updatedAt) ? updatedAt : 0,
+        Number(asset?.ingestionAttempts || 0),
+    ].join(':');
+};
+
 export const isAdmin = async (req,res) => {
     res.json({success:true, isAdmin:true})
 }
@@ -244,7 +254,7 @@ export const requestHeroMediaSourceAction = async (req, res) => {
         });
         if (result.shouldEnqueue) {
             await inngest.send({
-                id: randomUUID(),
+                id: getHeroMediaRequestEventId(result.asset),
                 name: 'hero/media.requested',
                 data: { assetId: result.asset.id, requestedBy },
             });
@@ -275,7 +285,7 @@ export const retryHeroMediaSourceAction = async (req, res) => {
         }
         const asset = await retryHeroMediaSource({ assetId: req.params.assetId });
         await inngest.send({
-            id: randomUUID(),
+            id: getHeroMediaRequestEventId(asset),
             name: 'hero/media.requested',
             data: { assetId: asset.id, requestedBy: req.auth()?.userId || 'admin' },
         });

@@ -5,7 +5,7 @@ import Loading from '../../components/Loading';
 import Title from '../../components/admin/Title';
 import { useAppContext } from '../../context/AppContext';
 import apiClient from '../../lib/apiClient';
-import HeroVideoUploader from './HeroVideoUploader';
+import HeroVideoUploader, { HeroVideoReadiness } from './HeroVideoUploader';
 
 const MAX_HERO_MOVIES = 5;
 const CATALOG_JOB_STORAGE_KEY = 'nitrocine_catalog_refresh_job';
@@ -38,9 +38,7 @@ const HeroPoolGrid = ({ movies, onUpdated }) => (
             {movie.active && <span className="rounded bg-primary px-1.5 py-0.5 text-[10px] uppercase">Active</span>}
           </div>
           <p className="mt-1 text-xs uppercase tracking-wide text-gray-500">{movie.category}</p>
-          <p className={`mt-1 text-xs ${movie.nativeVideoValid ? 'text-green-400' : 'text-amber-400'}`}>
-            {movie.nativeVideoValid ? 'Verified native trailer' : (movie.nativeVideoIssues || []).join(', ') || 'Trailer missing'}
-          </p>
+          <HeroVideoReadiness movie={movie} className="mt-1 text-xs" />
           <HeroVideoUploader movie={movie} onUpdated={onUpdated} />
         </div>
       </div>
@@ -263,7 +261,6 @@ const HeroSettings = () => {
 
   useEffect(() => {
     if (user) fetchHeroSettings();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   const toggleMovie = (movieId) => {
@@ -483,9 +480,7 @@ const HeroSettings = () => {
                   <div className="mt-2 min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-white">{movie.title}</p>
                     <p className="text-xs text-gray-400">{movie.release_date?.slice(0, 4) || 'N/A'}</p>
-                    <p className={`mt-1 text-[11px] ${movie.nativeVideoValid || movie.heroVideoStatus === 'ready' ? 'text-green-400' : 'text-amber-400'}`}>
-                      {movie.nativeVideoValid || movie.heroVideoStatus === 'ready' ? '✓ Verified native trailer' : (movie.nativeVideoIssues || []).join(', ') || 'Trailer missing'}
-                    </p>
+                    <HeroVideoReadiness movie={movie} className="mt-1 text-[11px]" />
                   </div>
                 </div>
               ))}
@@ -539,11 +534,10 @@ const HeroSettings = () => {
                 </div>
               ) : (
                 selectedMovies.map((movie, index) => {
-                  const isVerified = movie.nativeVideoValid || movie.heroVideoStatus === 'ready';
                   return (
                     <div
                       key={movie._id || movie.id}
-                      className={`flex flex-col gap-2 p-2 rounded-lg bg-black/30 border ${isVerified ? 'border-white/10' : 'border-amber-500/40'}`}
+                      className="flex flex-col gap-2 rounded-lg border border-white/10 bg-black/30 p-2"
                     >
                       <div className="flex items-center gap-3">
                         <img
@@ -556,9 +550,7 @@ const HeroSettings = () => {
                         <div className="min-w-0 flex-1">
                           <p className="font-medium text-sm truncate">{index + 1}. {movie.title}</p>
                           <p className="text-xs text-gray-500">{movie.release_date?.slice(0, 4) || 'N/A'}</p>
-                          <p className={`mt-0.5 text-[11px] ${isVerified ? 'text-green-400' : 'text-amber-400'}`}>
-                            {isVerified ? '✓ Verified native trailer' : (movie.nativeVideoIssues || []).join(', ') || 'Trailer missing/unverified'}
-                          </p>
+                          <HeroVideoReadiness movie={movie} className="mt-0.5 text-[11px]" />
                         </div>
                         <div className="flex items-center gap-1">
                           <button

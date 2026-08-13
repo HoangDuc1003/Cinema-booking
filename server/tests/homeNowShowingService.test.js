@@ -113,6 +113,79 @@ test('empty Show storage cannot make Home fail when TMDB now-playing has ten val
     assert.equal(fetchCalls.every((call) => call.path === '/movie/now_playing'), true);
 });
 
+test('fresh Home cache returns requested movies without any TMDB request or cache rewrite', async () => {
+    const cached = {
+        results: Array.from({ length: 12 }, (_, index) => movie(index + 1, 100 - index)),
+        generatedAt: '2026-08-08T00:00:00.000Z',
+        fetchedPages: 2,
+    };
+    const cache = createMemoryCache([
+        [redisKeys.homeTmdbNowPlaying('VN'), cached],
+    ]);
+    let fetches = 0;
+    const loadHome = createHomeNowShowingService({
+        ...cache,
+        fetchJson: async () => {
+            fetches += 1;
+            throw new Error('fresh cache must prevent this request');
+        },
+    });
+
+    const result = await loadHome({ limit: 10, now: new Date('2026-08-09T00:00:00.000Z') });
+
+    assert.equal(result.cache, 'hit');
+    assert.equal(result.value.results.length, 10);
+    assert.equal(result.value.meta.source, 'tmdb-now-playing');
+    assert.equal(result.value.meta.stale, false);
+    assert.equal(fetches, 0);
+    assert.equal(cache.writes.length, 0);
+});
+
+test('page-one failure cannot promote successful page-two results over Home last-good', async () => {
+    const cached = {
+        results: Array.from({ length: 10 }, (_, index) => movie(index + 1, 100 - index)),
+        generatedAt: '2026-08-08T00:00:00.000Z',
+        fetchedPages: 2,
+    };
+    const cache = createMemoryCache([
+        [redisKeys.homeTmdbNowPlayingLastGood('VN'), cached],
+    ]);
+    const fetchCalls = [];
+    const loadHome = createHomeNowShowingService({
+        ...cache,
+        fetchJson: async (_path, params) => {
+            fetchCalls.push(params.page);
+            if (params.page === 1) throw new Error('page one unavailable');
+            return { results: Array.from({ length: 10 }, (_, index) => movie(100 + index, 1000 - index)) };
+        },
+    });
+
+    const result = await loadHome({ limit: 10, now: new Date('2026-08-09T00:00:00.000Z') });
+
+    assert.deepEqual(fetchCalls, [1, 2]);
+    assert.equal(result.cache, 'stale');
+    assert.equal(result.value.meta.stale, true);
+    assert.deepEqual(result.value.results.map((entry) => entry.id), cached.results.map((entry) => entry.id));
+    assert.equal(cache.writes.length, 0);
+});
+
+test('page-one failure with successful page two and no last-good remains unavailable', async () => {
+    const cache = createMemoryCache();
+    const loadHome = createHomeNowShowingService({
+        ...cache,
+        fetchJson: async (_path, params) => {
+            if (params.page === 1) throw new Error('page one unavailable');
+            return { results: Array.from({ length: 10 }, (_, index) => movie(100 + index, 1000 - index)) };
+        },
+    });
+
+    await assert.rejects(
+        loadHome({ limit: 10 }),
+        (error) => error.code === 'TMDB_UNAVAILABLE' && error.statusCode === 503,
+    );
+    assert.equal(cache.writes.length, 0);
+});
+
 test('TMDB failure falls back to the separate Home last-good cache', async () => {
     const now = new Date('2026-08-09T00:00:00.000Z');
     const cached = {

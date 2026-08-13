@@ -1,3 +1,4 @@
+import { RetryAfterError } from 'inngest';
 import connectDB from '../../configs/db.js';
 import HeroMediaAsset from '../../models/HeroMediaAsset.js';
 import {
@@ -44,7 +45,7 @@ export const createHeroMediaIngestFunction = (inngestClient) => inngestClient.cr
     {
         id: 'hero-media-ingest',
         retries: 3,
-        concurrency: { limit: 2, key: 'event.data.assetId', scope: 'env' },
+        concurrency: { limit: 1, key: 'event.data.assetId', scope: 'env' },
         triggers: [{ event: 'hero/media.ingest' }],
     },
     async ({ event, step }) => {
@@ -54,6 +55,9 @@ export const createHeroMediaIngestFunction = (inngestClient) => inngestClient.cr
         try {
             result = await step.run('cloudinary-remote-upload', () => heroMediaPipelineRuntime.ingest({ assetId }));
         } catch (error) {
+            if (error?.retryAfter) {
+                throw new RetryAfterError(error.message, error.retryAfter, { cause: error });
+            }
             if (error?.transient) throw error;
             return { success: false, code: error?.code || 'HERO_MEDIA_INGEST_FAILED' };
         }

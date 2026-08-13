@@ -16,14 +16,25 @@ test('Hero has no legacy poster warmup contract', async () => {
     assert.doesNotMatch(source, /posterWarmupMs|posterWarmupComplete|introComplete|onDataLoaded/);
 });
 
-test('Home Hero and Now Showing do not use client session caches that can cross a slot boundary', async () => {
-    const source = await read('../src/services/tmdb.js');
-    assert.doesNotMatch(source, /HERO_CACHE_KEY|HOME_NOW_SHOWING_CACHE_KEY/);
+test('Home Now Showing uses a versioned discovery cache and still revalidates from the server', async () => {
+    const [provider, cache] = await Promise.all([
+        read('../src/context/HomeDataContext.jsx'),
+        read('../src/services/homeNowShowingCache.js'),
+    ]);
+    assert.match(provider, /readHomeNowShowingCache/);
+    assert.match(provider, /fetchHomeNowShowing/);
+    assert.match(cache, /home-now-showing-cache-v2/);
+    assert.match(cache, /HOME_NOW_SHOWING_CACHE_SCHEMA_VERSION = 2/);
 });
 
-test('Trailer candidate loading resolves only the active and immediate next movie', async () => {
-    const source = await read('../src/components/TrailerSection.jsx');
-    assert.match(source, /fetchLatestTrailers/);
-    assert.match(source, /const nextIndex = \(currentIndex \+ 1\) % trailers\.length/);
-    assert.doesNotMatch(source, /Promise\.all\(.*fetchMovieTrailers/s);
+test('Trailer candidates come from Now Showing then Hero and resolve in one bounded batch', async () => {
+    const [section, service] = await Promise.all([
+        read('../src/components/TrailerSection.jsx'),
+        read('../src/services/tmdb.js'),
+    ]);
+    assert.match(section, /\[\.\.\.nowShowingMovies, \.\.\.heroMovies\]/);
+    assert.match(section, /MAX_TRAILER_CANDIDATES = 10/);
+    assert.match(section, /fetchHomeTrailers/);
+    assert.match(service, /home-trailers:/);
+    assert.doesNotMatch(section, /fetchMovieTrailers|fetchLatestTrailers/);
 });

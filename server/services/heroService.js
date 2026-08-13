@@ -6,12 +6,14 @@ import {
     bumpHeroCacheGeneration,
     getAdminHeroRotation,
     getPublicHeroRotation,
+    heroRotationRuntime,
     invalidateHeroCaches,
     loadManualPayload,
     normalizeHeroMovie,
     rerandomizeActiveHero,
     updateHeroSoundSettings,
     validateNativeHeroMovie,
+    validateRegisteredHeroMediaAsset,
 } from './heroRotationService.js';
 
 const HERO_CONFIG_KEY = 'homeHero';
@@ -192,6 +194,13 @@ export const updateHomeHero = async ({
 
         const loadedMovies = await Movie.find({ _id: { $in: ids } }).select(MOVIE_SELECT).lean();
         const byId = new Map(loadedMovies.map((movie) => [String(movie._id), movie]));
+        const readyMediaAssets = await heroRotationRuntime.loadReadyMediaAssets(ids);
+        const mediaAssetsByMovieId = new Map();
+        for (const asset of readyMediaAssets) {
+            const movieId = String(asset?.movieId || '');
+            if (!mediaAssetsByMovieId.has(movieId)) mediaAssetsByMovieId.set(movieId, []);
+            mediaAssetsByMovieId.get(movieId).push(asset);
+        }
 
         ids.forEach((id) => {
             const movie = byId.get(id);
@@ -203,11 +212,22 @@ export const updateHomeHero = async ({
                 });
             } else {
                 const validation = validateNativeHeroMovie(movie);
-                if (!validation.valid) {
+                const registryCandidates = mediaAssetsByMovieId.get(id) || [];
+                const registryValidations = registryCandidates.map((asset) => (
+                    validateRegisteredHeroMediaAsset({ movie, asset })
+                ));
+                const activationValidation = registryValidations.find((item) => item.valid)
+                    || registryValidations[0]
+                    || validateRegisteredHeroMediaAsset({ movie, asset: null });
+                const reasons = [
+                    ...validation.reasons,
+                    ...(activationValidation?.reasons || []),
+                ];
+                if (reasons.length) {
                     invalidMovies.push({
                         movieId: id,
                         title: movie.title || 'Untitled',
-                        reasons: validation.reasons,
+                        reasons: [...new Set(reasons)],
                     });
                 }
             }
@@ -317,4 +337,3 @@ export default {
     randomizeHomeHero,
     updateHeroSoundSettings,
 };
-

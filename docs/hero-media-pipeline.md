@@ -24,9 +24,10 @@ credentials, local hosts, and private IP literals are rejected. `UNKNOWN`,
 
 Direct remote ingestion is disabled until
 `HERO_MEDIA_AUTHORIZED_SOURCE_HOSTS` contains the exact authorized CDN hostnames.
-Before Cloudinary receives a URL, the server resolves the host, rejects private
-network answers, and rejects redirects. Configure Cloudinary's allowed-fetch
-domains with the same hostnames as a second control.
+Before Cloudinary receives a URL, the server resolves and pins the public host,
+rejects non-global network answers, and revalidates every redirect hop against
+the same host allowlist. Configure Cloudinary's allowed-fetch domains with the
+same hostnames as a second control.
 
 The original URL is `select: false` and is not returned by admin APIs.
 

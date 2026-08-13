@@ -50,6 +50,7 @@ test('Hero media Inngest chain sends requested -> ingest -> verify -> reconcile 
     const reconcile = inngest.functions.get('hero-pool-reconcile');
     assert.deepEqual(requested.opts.triggers, [{ event: 'hero/media.requested' }]);
     assert.deepEqual(ingest.opts.triggers, [{ event: 'hero/media.ingest' }]);
+    assert.equal(ingest.opts.concurrency.limit, 1);
     assert.deepEqual(verify.opts.triggers, [{ event: 'hero/media.verify' }]);
     assert.deepEqual(reconcile.opts.triggers, [{ event: 'hero/pool.reconcile' }]);
 
@@ -81,4 +82,31 @@ test('Hero media Inngest chain sends requested -> ingest -> verify -> reconcile 
     });
     assert.deepEqual(reconcileResult, { source: 'media-verification', promoted: 2 });
     assert.equal(calls.filter((call) => call === 'connect').length, 4);
+});
+
+test('a live ingestion lease asks Inngest to retry after the lease expires', async (t) => {
+    const originalRuntime = { ...heroMediaPipelineRuntime };
+    t.after(() => Object.assign(heroMediaPipelineRuntime, originalRuntime));
+    const retryAfter = new Date('2026-08-08T12:05:00Z');
+    Object.assign(heroMediaPipelineRuntime, {
+        connectDB: async () => undefined,
+        ingest: async () => {
+            const error = new Error('already ingesting');
+            error.code = 'HERO_MEDIA_INGESTION_LEASED';
+            error.transient = true;
+            error.retryAfter = retryAfter;
+            throw error;
+        },
+    });
+    const inngest = createFakeInngest();
+    createHeroMediaIngestFunction(inngest);
+
+    await assert.rejects(
+        inngest.functions.get('hero-media-ingest').handler({
+            event: { data: { assetId: 'asset-1' } },
+            step: createStep([]),
+        }),
+        (error) => error.name === 'RetryAfterError'
+            && Number.isFinite(Date.parse(error.retryAfter)),
+    );
 });

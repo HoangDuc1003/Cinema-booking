@@ -13,7 +13,10 @@ export const normalizeTrailerMovieIds = (movieIds, limit = MAX_TRAILER_MOVIES) =
     const normalized = [];
     for (const candidate of movieIds) {
         const movieId = String(candidate || '').trim();
-        if (!/^\d+$/.test(movieId) || seen.has(movieId)) continue;
+        const numericId = Number(movieId);
+        if (!/^[1-9]\d*$/.test(movieId)
+            || !Number.isSafeInteger(numericId)
+            || seen.has(movieId)) continue;
         seen.add(movieId);
         normalized.push(movieId);
         if (normalized.length >= limit) break;
@@ -126,7 +129,7 @@ export const createTmdbTrailerService = ({
                 ...normalizeSelectedTrailer(movieId, null),
                 cache: 'bypass',
                 status: 'error',
-                errorCode: error?.code || error?.name || 'TMDB_VIDEO_UNAVAILABLE',
+                errorCode: 'TMDB_VIDEO_UNAVAILABLE',
             };
         }
     };

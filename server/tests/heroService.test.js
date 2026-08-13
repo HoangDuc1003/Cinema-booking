@@ -6,7 +6,8 @@ import Movie from '../models/Movie.js';
 import Show from '../models/Show.js';
 import SiteConfig from '../models/SiteConfig.js';
 import { getPublicHomeHero } from '../services/heroService.js';
-import { createHeroEtag } from '../services/heroRotationService.js';
+import { createHeroEtag, heroRotationRuntime } from '../services/heroRotationService.js';
+import { registeredHeroAssetsForMovies } from './heroMediaTestFixtures.js';
 
 const nativeMovie = (id) => ({
     _id: id,
@@ -60,6 +61,7 @@ test('active Hero batch is server-authoritative in auto mode, preserves order, a
         batchFindById: HeroRotationBatch.findById,
         batchFindOne: HeroRotationBatch.findOne,
         movieFind: Movie.find,
+        loadReadyMediaAssets: heroRotationRuntime.loadReadyMediaAssets,
     };
     const ids = ['new-1', 'hot-1', 'discovery-1', 'hot-2', 'new-2'];
     const movies = ids.map(nativeMovie).reverse();
@@ -86,6 +88,9 @@ test('active Hero batch is server-authoritative in auto mode, preserves order, a
     });
     HeroRotationBatch.findOne = () => chain(null);
     Movie.find = () => chain(movies);
+    heroRotationRuntime.loadReadyMediaAssets = async (movieIds) => (
+        registeredHeroAssetsForMovies(movies, movieIds)
+    );
     try {
         const first = await getPublicHomeHero({ heroOffset: 1 });
         const second = await getPublicHomeHero({ heroOffset: 999 });
@@ -107,6 +112,7 @@ test('active Hero batch is server-authoritative in auto mode, preserves order, a
         HeroRotationBatch.findById = originals.batchFindById;
         HeroRotationBatch.findOne = originals.batchFindOne;
         Movie.find = originals.movieFind;
+        heroRotationRuntime.loadReadyMediaAssets = originals.loadReadyMediaAssets;
     }
 });
 
@@ -117,6 +123,7 @@ test('R2: manual mode is authoritative, returns exact 5 saved movies in order, r
         batchFindById: HeroRotationBatch.findById,
         batchFindOne: HeroRotationBatch.findOne,
         movieFind: Movie.find,
+        loadReadyMediaAssets: heroRotationRuntime.loadReadyMediaAssets,
     };
     const manualIds = ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'];
     const movies = manualIds.map(nativeMovie).reverse();
@@ -138,6 +145,9 @@ test('R2: manual mode is authoritative, returns exact 5 saved movies in order, r
         activeHeroMovieIds: ['auto-1', 'auto-2', 'auto-3', 'auto-4', 'auto-5'],
     });
     Movie.find = () => chain(movies);
+    heroRotationRuntime.loadReadyMediaAssets = async (movieIds) => (
+        registeredHeroAssetsForMovies(movies, movieIds)
+    );
     try {
         const payload = await getPublicHomeHero();
         assert.equal(payload.settings.configuredMode, 'manual');
@@ -153,6 +163,7 @@ test('R2: manual mode is authoritative, returns exact 5 saved movies in order, r
         SiteConfig.findOneAndUpdate = originals.configFindOneAndUpdate;
         HeroRotationBatch.findById = originals.batchFindById;
         Movie.find = originals.movieFind;
+        heroRotationRuntime.loadReadyMediaAssets = originals.loadReadyMediaAssets;
     }
 });
 
@@ -232,6 +243,7 @@ test('R2: getAdminHomeHero populates selectedMovies using saved settings.movieId
         catalogFindOne: CatalogBatch.findOne,
         movieFind: Movie.find,
         showFind: Show.find,
+        loadReadyMediaAssets: heroRotationRuntime.loadReadyMediaAssets,
     };
     const savedIds = ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'];
     const movies = savedIds.map(nativeMovie);
@@ -250,6 +262,9 @@ test('R2: getAdminHomeHero populates selectedMovies using saved settings.movieId
     CatalogBatch.findOne = () => chain(null);
     Show.find = () => chain([]);
     Movie.find = () => chain(movies);
+    heroRotationRuntime.loadReadyMediaAssets = async (movieIds) => (
+        registeredHeroAssetsForMovies(movies, movieIds)
+    );
     try {
         const { getAdminHomeHero } = await import('../services/heroService.js');
         const adminHero = await getAdminHomeHero();
@@ -264,6 +279,7 @@ test('R2: getAdminHomeHero populates selectedMovies using saved settings.movieId
         CatalogBatch.findOne = originals.catalogFindOne;
         Show.find = originals.showFind;
         Movie.find = originals.movieFind;
+        heroRotationRuntime.loadReadyMediaAssets = originals.loadReadyMediaAssets;
     }
 });
 
@@ -274,6 +290,7 @@ test('R3: updateHomeHero in manual mode enforces 5 unique native-ready movies wi
         configUpdateOne: SiteConfig.updateOne,
         batchFindById: HeroRotationBatch.findById,
         movieFind: Movie.find,
+        loadReadyMediaAssets: heroRotationRuntime.loadReadyMediaAssets,
     };
     let updateCalled = false;
     SiteConfig.findOneAndUpdate = () => {
@@ -300,6 +317,9 @@ test('R3: updateHomeHero in manual mode enforces 5 unique native-ready movies wi
 
     const validMovies = ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'].map(nativeMovie);
     Movie.find = () => chain(validMovies);
+    heroRotationRuntime.loadReadyMediaAssets = async (movieIds) => (
+        registeredHeroAssetsForMovies(validMovies, movieIds)
+    );
 
     try {
         const { updateHomeHero } = await import('../services/heroService.js');
@@ -339,9 +359,26 @@ test('R3: updateHomeHero in manual mode enforces 5 unique native-ready movies wi
         );
         assert.equal(updateCalled, false, 'SiteConfig must remain untouched when validation fails');
 
-        // Test 5: Valid manual selection succeeds, calls SiteConfig update, pre-warms cache, and returns effective payload
+        // Test 5: Legacy Movie fields alone cannot bypass the durable registry.
         updateCalled = false;
         Movie.find = () => chain(validMovies);
+        heroRotationRuntime.loadReadyMediaAssets = async () => (
+            registeredHeroAssetsForMovies(validMovies).slice(0, 4)
+        );
+        await assert.rejects(
+            updateHomeHero({ mode: 'manual', movieIds: ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'] }),
+            (error) => error.code === 'MANUAL_HERO_INVALID'
+                && error.invalidMovies.some((item) => (
+                    item.movieId === 'm-5' && item.reasons.includes('registry-asset-not-found')
+                )),
+        );
+        assert.equal(updateCalled, false, 'SiteConfig must remain untouched without a registry asset');
+
+        // Test 6: Valid manual selection succeeds, calls SiteConfig update, pre-warms cache, and returns effective payload
+        updateCalled = false;
+        heroRotationRuntime.loadReadyMediaAssets = async (movieIds) => (
+            registeredHeroAssetsForMovies(validMovies, movieIds)
+        );
         const result = await updateHomeHero({ mode: 'manual', movieIds: ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'] });
         assert.equal(updateCalled, true, 'SiteConfig should be updated on valid manual selection');
         assert.equal(result.mode, 'manual');
@@ -355,6 +392,7 @@ test('R3: updateHomeHero in manual mode enforces 5 unique native-ready movies wi
         SiteConfig.updateOne = originals.configUpdateOne;
         HeroRotationBatch.findById = originals.batchFindById;
         Movie.find = originals.movieFind;
+        heroRotationRuntime.loadReadyMediaAssets = originals.loadReadyMediaAssets;
     }
 });
 
@@ -367,6 +405,7 @@ test('R3/R4: getAdminHomeHero returns liveMovies and manualSelection in response
         catalogFindOne: CatalogBatch.findOne,
         movieFind: Movie.find,
         showFind: Show.find,
+        loadReadyMediaAssets: heroRotationRuntime.loadReadyMediaAssets,
     };
     const savedIds = ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'];
     const movies = savedIds.map(nativeMovie);
@@ -385,6 +424,9 @@ test('R3/R4: getAdminHomeHero returns liveMovies and manualSelection in response
     CatalogBatch.findOne = () => chain(null);
     Show.find = () => chain([]);
     Movie.find = () => chain(movies);
+    heroRotationRuntime.loadReadyMediaAssets = async (movieIds) => (
+        registeredHeroAssetsForMovies(movies, movieIds)
+    );
 
     try {
         const { getAdminHomeHero } = await import('../services/heroService.js');
@@ -406,6 +448,7 @@ test('R3/R4: getAdminHomeHero returns liveMovies and manualSelection in response
         CatalogBatch.findOne = originals.catalogFindOne;
         Show.find = originals.showFind;
         Movie.find = originals.movieFind;
+        heroRotationRuntime.loadReadyMediaAssets = originals.loadReadyMediaAssets;
     }
 });
 
@@ -413,6 +456,7 @@ test('updateHomeHero throws HTTP 422 with MANUAL_HERO_INVALID and invalidMovies 
     const originals = {
         configFindOneAndUpdate: SiteConfig.findOneAndUpdate,
         movieFind: Movie.find,
+        loadReadyMediaAssets: heroRotationRuntime.loadReadyMediaAssets,
     };
     const validMovies = ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'].map(nativeMovie);
     const flawedMovies = validMovies.map((m, idx) => {
@@ -422,6 +466,9 @@ test('updateHomeHero throws HTTP 422 with MANUAL_HERO_INVALID and invalidMovies 
     });
 
     Movie.find = () => chain(flawedMovies);
+    heroRotationRuntime.loadReadyMediaAssets = async (movieIds) => (
+        registeredHeroAssetsForMovies(flawedMovies, movieIds)
+    );
     SiteConfig.findOneAndUpdate = () => {
         assert.fail('SiteConfig.findOneAndUpdate should not be called when validation fails');
     };
@@ -446,6 +493,7 @@ test('updateHomeHero throws HTTP 422 with MANUAL_HERO_INVALID and invalidMovies 
     } finally {
         SiteConfig.findOneAndUpdate = originals.configFindOneAndUpdate;
         Movie.find = originals.movieFind;
+        heroRotationRuntime.loadReadyMediaAssets = originals.loadReadyMediaAssets;
     }
 });
 
@@ -458,6 +506,7 @@ test('getAdminHomeHero includes safe meta with buildSha, deploymentId, and envir
         catalogFindOne: CatalogBatch.findOne,
         movieFind: Movie.find,
         showFind: Show.find,
+        loadReadyMediaAssets: heroRotationRuntime.loadReadyMediaAssets,
     };
     const savedIds = ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'];
     const movies = savedIds.map(nativeMovie);
@@ -476,6 +525,9 @@ test('getAdminHomeHero includes safe meta with buildSha, deploymentId, and envir
     CatalogBatch.findOne = () => chain(null);
     Show.find = () => chain([]);
     Movie.find = () => chain(movies);
+    heroRotationRuntime.loadReadyMediaAssets = async (movieIds) => (
+        registeredHeroAssetsForMovies(movies, movieIds)
+    );
 
     try {
         const { getAdminHomeHero } = await import('../services/heroService.js');
@@ -494,6 +546,6 @@ test('getAdminHomeHero includes safe meta with buildSha, deploymentId, and envir
         CatalogBatch.findOne = originals.catalogFindOne;
         Show.find = originals.showFind;
         Movie.find = originals.movieFind;
+        heroRotationRuntime.loadReadyMediaAssets = originals.loadReadyMediaAssets;
     }
 });
-

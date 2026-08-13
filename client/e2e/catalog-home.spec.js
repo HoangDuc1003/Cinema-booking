@@ -44,7 +44,7 @@ test('Home renders immediately and Hero performs no client-side TMDB video looku
   await page.route('**/api/show/tmdb/trailers**', (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
-    body: JSON.stringify({ success: true, data: candidates }),
+    body: JSON.stringify({ success: true, data: { results: [] } }),
   }));
   await page.route('**/api/show/all', (route) => route.fulfill({
     status: 200,
@@ -67,6 +67,11 @@ test('Home renders immediately and Hero performs no client-side TMDB video looku
     });
   });
   await page.route('https://www.youtube.com/**', (route) => route.abort());
+  await page.route('https://www.youtube-nocookie.com/**', (route) => route.fulfill({
+    status: 200,
+    contentType: 'text/html',
+    body: '<!doctype html><html><body></body></html>',
+  }));
 
   await page.goto('/');
   await expect(page.locator('.hero-section')).toBeVisible();
@@ -96,6 +101,11 @@ test('Hero never renders mock data while the server response is pending', async 
       body: JSON.stringify({ success: true, movies: candidates, settings: { mode: 'manual' } }),
     });
   });
+  await page.route('**/api/show/tmdb/home-now-showing**', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, data: { results: candidates } }),
+  }));
   await page.route('**/api/show/tmdb/movie/*/videos', (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -123,13 +133,18 @@ test('Hero shows retry on failure and preserves the five server movies in order'
   }));
   await page.route(/\/api\/show\/hero(?:\?|$)/, (route) => {
     attempts += 1;
-    if (attempts <= 2) return route.fulfill({ status: 503, body: 'Unavailable' });
+    if (attempts === 1) return route.fulfill({ status: 503, body: 'Unavailable' });
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({ success: true, movies: candidates, settings: { mode: 'manual' } }),
     });
   });
+  await page.route('**/api/show/tmdb/home-now-showing**', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, data: { results: candidates } }),
+  }));
   await page.route('**/api/show/tmdb/movie/*/videos', (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -139,13 +154,13 @@ test('Hero shows retry on failure and preserves the five server movies in order'
   await page.goto('/');
   const hero = page.locator('.hero-section');
   await expect(page.getByRole('heading', { name: 'Unable to load featured movies' })).toBeVisible();
-  expect(attempts).toBe(2);
+  expect(attempts).toBe(1);
   await expect(hero.getByText('In the Lost Lands', { exact: true })).toHaveCount(0);
   await expect(hero.locator('iframe, video')).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Try again' }).click();
   await expect(hero).toHaveAttribute('data-catalog-source', 'server');
-  expect(attempts).toBe(3);
+  expect(attempts).toBe(2);
   const railTitles = await hero.locator('.hero-poster-thumb span').allTextContents();
   expect(railTitles).toEqual(candidates.map((movie) => movie.title));
 });

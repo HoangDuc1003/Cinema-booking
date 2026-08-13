@@ -93,3 +93,23 @@ test('empty home now-showing responses are unavailable and are never publicly ca
     assert.equal(response.headers.ETag, undefined);
     assert.equal(response.body.success, false);
 });
+
+test('TMDB Home failure returns a controlled 503 without exposing internal details', async (t) => {
+    t.mock.method(console, 'error', () => {});
+    const handler = createGetHomeNowShowingHandler({
+        loadHome: async () => {
+            throw Object.assign(new Error('Bearer must-not-escape'), {
+                code: 'TMDB_UNAVAILABLE',
+            });
+        },
+    });
+    const response = createResponse();
+
+    await handler({ query: {}, get: () => undefined }, response);
+
+    assert.equal(response.statusCode, 503);
+    assert.equal(response.headers['Cache-Control'], 'private, no-store');
+    assert.equal(response.body.success, false);
+    assert.equal(response.body.code, 'TMDB_UNAVAILABLE');
+    assert.doesNotMatch(JSON.stringify(response.body), /must-not-escape|Bearer/i);
+});

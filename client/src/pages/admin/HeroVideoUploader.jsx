@@ -38,6 +38,76 @@ const inspectVideoFile = (file) => new Promise((resolve, reject) => {
   video.src = objectUrl;
 });
 
+const normalizeStatus = (value) => String(value || '').trim().toLowerCase();
+
+const resolveHeroVideoReadiness = (movie = {}) => {
+  const mediaStatus = normalizeStatus(movie.media?.status);
+  const heroVideoStatus = normalizeStatus(movie.heroVideoStatus);
+  const sourceStatus = normalizeStatus(movie.media?.sourceStatus);
+  const verificationStatus = normalizeStatus(movie.media?.verificationStatus);
+  const nativeValidationProvided = typeof movie.nativeVideoValid === 'boolean';
+  const ready = nativeValidationProvided
+    ? movie.nativeVideoValid
+    : heroVideoStatus === 'ready' || mediaStatus === 'ready';
+
+  if (ready) return { ready: true, status: 'ready', label: 'Verified native trailer' };
+
+  const issues = Array.isArray(movie.nativeVideoIssues)
+    ? movie.nativeVideoIssues.filter(Boolean).join(', ')
+    : '';
+  if (mediaStatus === 'failed' || heroVideoStatus === 'failed' || sourceStatus === 'rejected' || verificationStatus === 'failed') {
+    const detail = movie.media?.failureCode || issues;
+    return { ready: false, status: 'failed', label: detail ? `Failed: ${detail}` : 'Failed' };
+  }
+  if (mediaStatus === 'processing' || heroVideoStatus === 'processing' || verificationStatus === 'processing') {
+    return { ready: false, status: 'processing', label: 'Processing native trailer' };
+  }
+  if (mediaStatus === 'ingesting' || heroVideoStatus === 'ingesting') {
+    return { ready: false, status: 'ingesting', label: 'Ingesting native trailer' };
+  }
+  if (mediaStatus === 'pending' || heroVideoStatus === 'pending' || sourceStatus === 'ready_for_ingestion') {
+    return { ready: false, status: 'pending', label: 'Pending ingestion' };
+  }
+  if (mediaStatus === 'retired') {
+    return { ready: false, status: 'retired', label: 'Retired media asset' };
+  }
+  if (nativeValidationProvided) {
+    return {
+      ready: false,
+      status: 'invalid',
+      label: issues || 'Native trailer failed verification',
+    };
+  }
+  if (sourceStatus === 'needs_authorized_source') {
+    return { ready: false, status: 'missing', label: 'Authorized source required' };
+  }
+  return { ready: false, status: 'missing', label: issues || 'Trailer missing' };
+};
+
+const READINESS_TONES = Object.freeze({
+  ready: 'text-green-400',
+  pending: 'text-blue-300',
+  ingesting: 'text-blue-300',
+  processing: 'text-blue-300',
+  failed: 'text-red-300',
+  invalid: 'text-amber-300',
+  retired: 'text-amber-300',
+  missing: 'text-amber-300',
+});
+
+export const HeroVideoReadiness = ({ movie, className = '' }) => {
+  const readiness = resolveHeroVideoReadiness(movie);
+  return (
+    <span
+      data-hero-media-status={readiness.status}
+      className={`inline-flex items-center gap-1 ${READINESS_TONES[readiness.status]} ${className}`.trim()}
+    >
+      {readiness.ready && <FileVideoIcon className="h-3.5 w-3.5" aria-hidden="true" />}
+      {readiness.label}
+    </span>
+  );
+};
+
 const HeroVideoUploader = ({ movie, onUpdated }) => {
   const fileInputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
@@ -46,7 +116,8 @@ const HeroVideoUploader = ({ movie, onUpdated }) => {
   const videoWidth = Number(videoMetadata.width ?? movie.heroVideoWidth);
   const videoHeight = Number(videoMetadata.height ?? movie.heroVideoHeight);
   const [progress, setProgress] = useState(0);
-  const isVerifiedReady = movie.nativeVideoValid === true;
+  const mediaReadiness = resolveHeroVideoReadiness(movie);
+  const isVerifiedReady = mediaReadiness.ready;
   const movieId = movie._id || movie.id;
   const [sourceUrl, setSourceUrl] = useState('');
   const [rightsConfirmed, setRightsConfirmed] = useState(false);
@@ -207,10 +278,7 @@ const HeroVideoUploader = ({ movie, onUpdated }) => {
     <div className="mt-2 text-sm">
       {isVerifiedReady ? (
         <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-1 text-green-400">
-             <FileVideoIcon className="w-4 h-4" />
-             Ready
-          </div>
+          <HeroVideoReadiness movie={movie} />
           {videoDuration > 0 && (
             <span className="text-xs text-gray-500">
               {Math.round(videoDuration)}s
@@ -239,7 +307,7 @@ const HeroVideoUploader = ({ movie, onUpdated }) => {
         </div>
       ) : (
         <div className="flex flex-wrap items-center gap-2">
-          <p className="text-xs text-amber-300">{movie.media?.failureCode || movie.media?.sourceStatus || 'NEEDS_AUTHORIZED_SOURCE'}</p>
+          <HeroVideoReadiness movie={movie} className="text-xs" />
           {!showReplacement && (
             <button
               type="button"
@@ -249,7 +317,7 @@ const HeroVideoUploader = ({ movie, onUpdated }) => {
               Provide source
             </button>
           )}
-          {movie.media?.status === 'failed' && movie.media?.id && (
+          {mediaReadiness.status === 'failed' && movie.media?.id && (
             <button
               type="button"
               onClick={handleRetry}

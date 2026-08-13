@@ -31,12 +31,7 @@ import {
   useSaveData,
   useSlowNetwork,
 } from './hero/useHeroEnvironment';
-import {
-  getOrCreateAnonymousViewerId,
-  getOrComputeDailyOrder,
-  applyDailyOrder,
-  getVietnamDateKey,
-} from '../utils/heroDailyShuffle';
+import { getVietnamDateKey } from '../utils/heroDailyShuffle';
 import './hero/hero.css';
 import { useHomeData } from '../context/HomeDataContext';
 
@@ -422,38 +417,7 @@ const HeroSection = ({ autoPreview = false, onTrailerRequest = null }) => {
       throw new Error('Hero returned a movie without usable artwork.');
     }
 
-    // Per-user deterministic daily shuffle (bypassed in manual mode)
-    const viewerKey = getOrCreateAnonymousViewerId();
-    const meta = data.meta || data;
-    const settings = data.settings || {};
-    const isManualMode = settings.mode === 'manual'
-      || settings.configuredMode === 'manual'
-      || settings.effectiveMode === 'manual'
-      || meta.mode === 'manual'
-      || meta.configuredMode === 'manual'
-      || meta.effectiveMode === 'manual'
-      || meta.source === 'manual-selection';
-
-    const dailyOrderIds = !isManualMode
-      ? getOrComputeDailyOrder({
-          movies: preparedMovies,
-          meta: {
-            dateKey: meta.dateKey || '',
-            rotationVersion: String(meta.version ?? ''),
-            dailyEntropy: meta.dailyEntropy || '',
-            mode: meta.mode || settings.mode,
-            configuredMode: meta.configuredMode || settings.configuredMode,
-            effectiveMode: meta.effectiveMode || settings.effectiveMode,
-            source: meta.source || settings.source,
-          },
-          viewerKey,
-        })
-      : [];
-    const shuffledMovies = dailyOrderIds.length > 0
-      ? applyDailyOrder(preparedMovies, dailyOrderIds)
-      : preparedMovies;
-
-    saveHeroMoviesCache(shuffledMovies, {
+    saveHeroMoviesCache(preparedMovies, {
       source: 'server',
       meta: data.meta || data,
       settings: data.settings,
@@ -467,19 +431,19 @@ const HeroSection = ({ autoPreview = false, onTrailerRequest = null }) => {
     ));
     setCatalogSource('server');
 
-    if (isSameMovieOrder(moviesRef.current, shuffledMovies)) {
-      moviesRef.current = shuffledMovies;
-      setMovies(shuffledMovies);
+    if (isSameMovieOrder(moviesRef.current, preparedMovies)) {
+      moviesRef.current = preparedMovies;
+      setMovies(preparedMovies);
       return;
     }
 
     stopPlayback();
     currentIndexRef.current = 0;
-    moviesRef.current = shuffledMovies;
+    moviesRef.current = preparedMovies;
     failedMovieKeysRef.current.clear();
     autoAttemptedKeysRef.current.clear();
     setCurrentIndex(0);
-    setMovies(shuffledMovies);
+    setMovies(preparedMovies);
   }, [stopPlayback]);
 
   useEffect(() => {

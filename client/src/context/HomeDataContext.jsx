@@ -70,7 +70,7 @@ export const HomeDataProvider = ({ children }) => {
       setState((previous) => ({
         ...previous,
         nowShowing: result.movies || [],
-        nowShowingStatus: result.source === 'stale-server-cache' ? 'stale' : 'success',
+        nowShowingStatus: result.source === 'stale-server-cache' || result.meta?.stale === true ? 'stale' : 'success',
         nowShowingSource: result.meta?.source || result.source || null,
         nowShowingError: result.error || null,
       }));
