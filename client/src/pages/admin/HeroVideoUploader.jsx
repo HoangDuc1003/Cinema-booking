@@ -7,6 +7,16 @@ const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 const MAX_VIDEO_DURATION_SECONDS = 180;
 const MIN_VIDEO_WIDTH = 640;
 const MIN_VIDEO_HEIGHT = 360;
+
+const getHeroUploadErrorMessage = (error) => {
+  const data = error?.response?.data;
+  if (data?.code === 'HERO_VIDEO_CODEC_INVALID') {
+    const videoCodec = data.details?.videoCodec || 'unknown';
+    const audioCodec = data.details?.audioCodec || 'unknown';
+    return `${data.message || 'Hero video codec is not compatible.'} Detected ${videoCodec}/${audioCodec}; retry the upload or use MP4 H.264 + AAC.`;
+  }
+  return data?.message || error?.message || 'Upload failed.';
+};
 const ALLOWED_VIDEO_TYPES = new Set(['video/mp4', 'video/webm']);
 
 const inspectVideoFile = (file) => new Promise((resolve, reject) => {
@@ -216,6 +226,9 @@ const HeroVideoUploader = ({ movie, onUpdated }) => {
       formData.append('signature', signature);
       formData.append('folder', folder);
       if (context) formData.append('context', context);
+      if (sigData.signatureData.transformation) {
+        formData.append('transformation', sigData.signatureData.transformation);
+      }
 
       const cloudinaryUrl = `https://api.cloudinary.com/v1_1/${cloudName}/video/upload`;
       
@@ -248,7 +261,7 @@ const HeroVideoUploader = ({ movie, onUpdated }) => {
       });
 
     } catch (error) {
-      toast.error(error.response?.data?.message || error.message || 'Upload failed.');
+      toast.error(getHeroUploadErrorMessage(error));
     } finally {
       setUploading(false);
       setProgress(0);

@@ -24,6 +24,10 @@ import {
 } from './heroMediaAssetService.js';
 
 const SUPPORTED_FORMATS = new Set(['mp4', 'webm']);
+// Normalize browser-hostile uploads before Cloudinary stores the Hero asset.
+// The signed value is also sent by the browser upload so the signature cannot
+// be changed by a client-side caller.
+export const HERO_UPLOAD_INCOMING_TRANSFORMATION = 'f_mp4,vc_h264,ac_aac';
 
 export const heroVideoRuntime = {
     acquireFencedLock,
@@ -100,8 +104,9 @@ export const getUploadSignature = async (movieId) => {
     const timestamp = Math.round(Date.now() / 1000);
     const folder = movieFolder(id);
     const context = `movie_id=${id}`;
+    const transformation = HERO_UPLOAD_INCOMING_TRANSFORMATION;
     const signature = cloudinary.utils.api_sign_request(
-        { timestamp, folder, context },
+        { timestamp, folder, context, transformation },
         process.env.CLOUDINARY_SECRET_KEY,
     );
     return {
@@ -111,6 +116,7 @@ export const getUploadSignature = async (movieId) => {
         apiKey: process.env.CLOUDINARY_API_KEY,
         folder,
         context,
+        transformation,
         acceptedFormats: [...SUPPORTED_FORMATS],
     };
 };

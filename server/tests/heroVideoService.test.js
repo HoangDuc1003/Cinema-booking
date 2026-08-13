@@ -8,6 +8,7 @@ import {
     commitHeroVideo,
     heroVideoRuntime,
     HeroVideoError,
+    getUploadSignature,
     reconcileHeroAssets,
     removeHeroVideo,
     verifyUploadedHeroVideo,
@@ -27,6 +28,33 @@ const validAsset = (overrides = {}) => ({
     context: { custom: { movie_id: '42', attribution: 'Licensed test fixture' } },
     etag: 'asset-etag',
     ...overrides,
+});
+
+test('signed browser uploads request Cloudinary native Hero normalization', async (t) => {
+    const original = {
+        exists: Movie.exists,
+        name: process.env.CLOUDINARY_NAME,
+        key: process.env.CLOUDINARY_API_KEY,
+        secret: process.env.CLOUDINARY_SECRET_KEY,
+    };
+    process.env.CLOUDINARY_NAME = 'demo';
+    process.env.CLOUDINARY_API_KEY = 'test-key';
+    process.env.CLOUDINARY_SECRET_KEY = 'test-secret';
+    Movie.exists = async () => true;
+    t.after(() => {
+        Movie.exists = original.exists;
+        if (original.name === undefined) delete process.env.CLOUDINARY_NAME;
+        else process.env.CLOUDINARY_NAME = original.name;
+        if (original.key === undefined) delete process.env.CLOUDINARY_API_KEY;
+        else process.env.CLOUDINARY_API_KEY = original.key;
+        if (original.secret === undefined) delete process.env.CLOUDINARY_SECRET_KEY;
+        else process.env.CLOUDINARY_SECRET_KEY = original.secret;
+    });
+
+    const result = await getUploadSignature('42');
+    assert.equal(result.transformation, 'f_mp4,vc_h264,ac_aac');
+    assert.equal(result.acceptedFormats.join(','), 'mp4,webm');
+    assert.ok(result.signature);
 });
 
 test('Cloudinary verification accepts only a decoded, movie-bound native asset', async () => {

@@ -23,6 +23,16 @@ test('admin rows preserve in-flight and failed media states with a retry action'
   assert.match(uploader, /Retry ingestion/);
 });
 
+test('manual Hero uploads request native Cloudinary normalization and expose codec details', async () => {
+  const uploader = await read('../src/pages/admin/HeroVideoUploader.jsx');
+
+  assert.match(uploader, /formData.append\('transformation', sigData\.signatureData\.transformation\)/);
+  assert.match(uploader, /HERO_VIDEO_CODEC_INVALID/);
+  assert.match(uploader, /details\?\.videoCodec/);
+  assert.match(uploader, /details\?\.audioCodec/);
+  assert.match(uploader, /MP4 H\.264 \+ AAC/);
+});
+
 test('live, active-pool, manual, and library rows share the same readiness presentation', async () => {
   const settings = await read('../src/pages/admin/HeroSettings.jsx');
 

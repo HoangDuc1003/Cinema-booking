@@ -57,6 +57,15 @@ export const apiClient = axios.create({
   baseURL: API_BASE_URL,
 });
 
+const RETRYABLE_READ_METHODS = new Set(['get', 'head', 'options']);
+const RETRYABLE_STATUS_CODES = new Set([502, 503, 504]);
+const API_RETRY_DELAY_MS = 250;
+
+const wait = (delayMs) => new Promise((resolve) => {
+  const timer = setTimeout(resolve, delayMs);
+  timer.unref?.();
+});
+
 apiClient.interceptors.request.use((config) => {
   if (config.url) {
     let url = String(config.url).trim();
@@ -65,6 +74,28 @@ apiClient.interceptors.request.use((config) => {
     }
   }
   return config;
+});
+
+// A Vercel/Mongo cold start can briefly return 503 while the next invocation
+// is already able to connect. Retry one read only; never replay mutations.
+apiClient.interceptors.response.use(undefined, async (error) => {
+  const config = error?.config;
+  const method = String(config?.method || 'get').toLowerCase();
+  const status = Number(error?.response?.status);
+  if (
+    !config
+    || config._nitroRetry
+    || !RETRYABLE_READ_METHODS.has(method)
+    || !RETRYABLE_STATUS_CODES.has(status)
+    || config.signal?.aborted
+  ) {
+    throw error;
+  }
+
+  config._nitroRetry = true;
+  await wait(API_RETRY_DELAY_MS);
+  if (config.signal?.aborted) throw error;
+  return apiClient.request(config);
 });
 
 /**

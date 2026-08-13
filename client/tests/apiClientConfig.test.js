@@ -39,6 +39,39 @@ test('apiClient exports configured Axios instance and fetch wrapper', () => {
   assert.equal(apiClient.defaults.baseURL, API_BASE_URL);
 });
 
+test('apiClient retries one transient read but never replays a mutation', async () => {
+  const originalAdapter = apiClient.defaults.adapter;
+  let attempts = 0;
+  apiClient.defaults.adapter = async (config) => {
+    attempts += 1;
+    if (attempts === 1) {
+      const error = new Error('database warming up');
+      error.config = config;
+      error.response = { status: 503, config, data: { code: 'DATABASE_UNAVAILABLE' } };
+      throw error;
+    }
+    return { data: { success: true }, status: 200, statusText: 'OK', headers: {}, config };
+  };
+  try {
+    const response = await apiClient.get('/api/health');
+    assert.equal(response.status, 200);
+    assert.equal(attempts, 2);
+
+    attempts = 0;
+    apiClient.defaults.adapter = async (config) => {
+      attempts += 1;
+      const error = new Error('database unavailable');
+      error.config = config;
+      error.response = { status: 503, config, data: { code: 'DATABASE_UNAVAILABLE' } };
+      throw error;
+    };
+    await assert.rejects(apiClient.post('/api/admin/hero/refresh'), /database unavailable/);
+    assert.equal(attempts, 1);
+  } finally {
+    apiClient.defaults.adapter = originalAdapter;
+  }
+});
+
 test('tmdb.js consumes lib/apiClient.js', async () => {
   const tmdbSource = await readSource('services/tmdb.js');
   assert.match(tmdbSource, /import\s+.*from\s+['"]\.\.\/lib\/apiClient\.js['"]/);
