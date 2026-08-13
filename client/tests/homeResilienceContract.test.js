@@ -35,11 +35,11 @@ test('Hero and Now Showing own independent provider effects, errors, and retry f
   assert.match(featureSource, /retryNowShowing/);
 });
 
-test('deterministic 503 responses do not trigger a second client retry attempt', async () => {
+test('503 responses use one bounded client retry and do not create a retry storm', async () => {
   const source = await read('../src/services/tmdb.js');
 
-  assert.match(source, /\[408, 429, 500, 502, 504\]\.includes\(error\.status\)/);
-  assert.doesNotMatch(source, /\[408, 429, 500, 502, 503, 504\]/);
+  assert.match(source, /\[408, 429, 500, 502, 503, 504\]\.includes\(error\.status\)/);
+  assert.match(source, /for \(let attempt = 0; attempt < 2; attempt \+= 1\)/);
 });
 
 test('Home discovery cards route to details instead of promising an unverified booking', async () => {
