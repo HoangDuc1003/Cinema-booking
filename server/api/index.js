@@ -1,6 +1,5 @@
 import express from 'express';
 import 'dotenv/config';
-import { randomUUID } from 'node:crypto';
 import { clerkMiddleware } from '@clerk/express';
 import connectDB from '../configs/db.js';
 import { connectRedis, getRedisHealth } from '../configs/redis.js';
@@ -16,8 +15,8 @@ import {
     validateClerkConfig,
 } from '../configs/runtimeConfig.js';
 import { connectCloudinary, getCloudinaryConfigStatus } from '../configs/cloudinary.js';
-import { HERO_RUNTIME_CONFIG } from '../configs/heroRotation.js';
 import { createCorsMiddleware, handleCorsError } from '../middleware/corsPolicy.js';
+import { requestContext } from '../middleware/requestContext.js';
 
 connectCloudinary();
 
@@ -32,16 +31,7 @@ process.on('uncaughtException', (error) => {
 
 const app = express();
 
-const requestIdFor = (req) => {
-    const candidate = req.get?.('x-request-id');
-    return /^[A-Za-z0-9._:-]{1,100}$/.test(String(candidate || '')) ? String(candidate) : randomUUID();
-};
-
-app.use((req, res, next) => {
-    req.requestId = requestIdFor(req);
-    res.set('X-Request-Id', req.requestId);
-    next();
-});
+app.use(requestContext);
 
 try {
     const clerkValidation = validateClerkConfig();
@@ -102,12 +92,7 @@ app.get('/api/health/ready', async (req, res) => {
             tmdb: { configured: Boolean(process.env.TMDB_API_KEY) },
             clientUrl,
             cloudinary: cloudinaryConfig,
-            hero: {
-                refreshIntervalHours: HERO_RUNTIME_CONFIG.refreshIntervalHours,
-                refreshTimezone: HERO_RUNTIME_CONFIG.refreshTimezone,
-                requireNativeVideo: HERO_RUNTIME_CONFIG.requireNativeVideo,
-                videoAllowedHosts: HERO_RUNTIME_CONFIG.videoAllowedHosts,
-            },
+            hero: { mode: 'daily-poster-rotation', timezone: 'Asia/Ho_Chi_Minh' },
         },
     });
 });

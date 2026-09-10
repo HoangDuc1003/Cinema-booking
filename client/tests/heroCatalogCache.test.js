@@ -24,10 +24,6 @@ const movies = Array.from({ length: 5 }, (_, index) => ({
   id: String(42 + index),
   title: `Server title ${index}`,
   backdrop_path: `/server-${index}.jpg`,
-  heroVideoStatus: 'ready',
-  heroVideoUrl: `https://cdn.test/server-${index}.mp4`,
-  heroVideoMimeType: 'video/mp4',
-  heroVideoVersion: 2,
 }));
 
 test('Hero cache admits only fresh server-authoritative payloads and preserves their order', () => {
@@ -42,10 +38,7 @@ test('Hero cache admits only fresh server-authoritative payloads and preserves t
         nextRefreshAt: '2026-08-01T17:00:00.000Z',
         timezone: 'Asia/Ho_Chi_Minh',
       },
-      settings: {
-        heroSoundDefaultEnabled: true,
-        heroDefaultVolume: 0.35,
-      },
+      settings: { mode: 'auto' },
     });
     assert.equal(saved, true);
 
@@ -54,7 +47,7 @@ test('Hero cache admits only fresh server-authoritative payloads and preserves t
     assert.equal(payload.meta.batchId, 'batch-2');
     assert.equal(payload.meta.version, '2');
     assert.equal(payload.meta.timezone, 'Asia/Ho_Chi_Minh');
-    assert.equal(payload.settings.heroDefaultVolume, 0.35);
+    assert.equal(payload.settings.mode, 'auto');
 
     const fallbackSaved = saveHeroMoviesCache(movies, {
       source: 'server',

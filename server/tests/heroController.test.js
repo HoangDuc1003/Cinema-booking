@@ -2,8 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import adminRouter from '../routes/adminRoutes.js';
 import { createGetHomeHeroHandler } from '../controllers/showController.js';
-import { heroRotationRuntime } from '../services/heroRotationService.js';
-import { registeredHeroAssetsForMovies } from './heroMediaTestFixtures.js';
 
 const createResponse = () => ({
     headers: {},
@@ -29,26 +27,22 @@ const createResponse = () => ({
 });
 
 const payload = {
-    version: 4,
-    batchId: 'batch-4',
-    batchKey: 'hero-2026-07-29',
+    version: 'auto:2026-07-29:initial',
+    batchId: 'poster-2026-07-29',
+    batchKey: '2026-07-29',
     generatedAt: '2026-07-29T00:00:00.000Z',
-    nextRefreshAt: '2026-07-31T17:00:00.000Z',
+    nextRefreshAt: '2026-07-29T17:00:00.000Z',
     timezone: 'Asia/Ho_Chi_Minh',
-    settings: {
-        heroSoundDefaultEnabled: false,
-        heroDefaultVolume: 0.35,
-    },
+    dateKey: '2026-07-29',
+    settings: { mode: 'auto', configuredMode: 'auto', effectiveMode: 'auto', movieIds: [] },
     movies: Array.from({ length: 5 }, (_, index) => ({ id: String(index + 1) })),
-    rotation: { poolSize: 15, batchSize: 5 },
+    rotation: { type: 'daily-poster', dateKey: '2026-07-29', seed: 'hero:2026-07-29:default' },
     meta: {
         configuredMode: 'auto',
         effectiveMode: 'auto',
-        source: 'auto-rotation',
-        version: 4,
-        buildSha: 'dev-local',
-        deploymentId: 'local-dev',
-        environment: 'development',
+        source: 'daily-poster-rotation',
+        dateKey: '2026-07-29',
+        seed: 'hero:2026-07-29:default',
     },
     cache: 'hit',
 };
@@ -71,9 +65,7 @@ test('Home Hero controller returns cache headers, stable metadata, meta identity
     assert.deepEqual(res.body.movies, payload.movies);
     assert.equal(res.body.nextRefreshAt, payload.nextRefreshAt);
     assert.deepEqual(res.body.meta, payload.meta);
-    assert.equal(res.body.meta.configuredMode, 'auto');
-    assert.equal(res.body.meta.effectiveMode, 'auto');
-    assert.equal(res.body.meta.source, 'auto-rotation');
+    assert.equal(res.body.meta.source, 'daily-poster-rotation');
 });
 
 test('Home Hero controller returns 304 without a response body for a matching ETag', async () => {
@@ -94,17 +86,19 @@ test('Home Hero controller returns 304 without a response body for a matching ET
 
 test('every Hero admin route applies protectAdmin before its action handler', () => {
     const heroLayers = adminRouter.stack.filter((layer) => layer.route?.path?.startsWith('/hero'));
-    assert.equal(heroLayers.length, 10);
+    // GET /hero, PUT /hero, POST /hero/randomize — the poster-only surface.
+    assert.equal(heroLayers.length, 3);
     for (const layer of heroLayers) {
         assert.equal(layer.route.stack[0]?.handle?.name, 'protectAdmin', layer.route.path);
         assert.ok(layer.route.stack.length >= 2, layer.route.path);
     }
 });
 
-test('updateHeroSettings controller action returns settings, liveHero, and meta on success', async () => {
+test('updateHeroSettings returns settings, liveHero, and meta on success', async () => {
     const { updateHeroSettings } = await import('../controllers/adminController.js');
     const SiteConfig = (await import('../models/SiteConfig.js')).default;
     const Movie = (await import('../models/Movie.js')).default;
+    const Show = (await import('../models/Show.js')).default;
     const chain = (value) => ({
         select: () => chain(value),
         populate: () => chain(value),
@@ -112,73 +106,54 @@ test('updateHeroSettings controller action returns settings, liveHero, and meta 
         limit: () => chain(value),
         lean: async () => value,
     });
-    const originals = {
-        configFindOneAndUpdate: SiteConfig.findOneAndUpdate,
-        configFindOne: SiteConfig.findOne,
-        configUpdateOne: SiteConfig.updateOne,
-        movieFind: Movie.find,
-        loadReadyMediaAssets: heroRotationRuntime.loadReadyMediaAssets,
-    };
-    const validMovies = ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'].map((id) => ({
+    const movieIds = ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'];
+    const movies = movieIds.map((id) => ({
         _id: id,
         title: `Movie ${id}`,
         poster_path: `/p-${id}.jpg`,
         backdrop_path: `/b-${id}.jpg`,
         release_date: '2026-07-01',
         vote_average: 8,
-        vote_count: 100,
-        popularity: 50,
-        heroVideoId: `hero_trailers/${id}/official`,
-        heroVideoMovieId: id,
-        heroVideoUrl: `https://res.cloudinary.com/test/video/upload/hero_trailers/${id}/official.mp4`,
-        heroVideoMimeType: 'video/mp4',
-        heroVideoPosterUrl: `https://res.cloudinary.com/test/image/upload/poster-${id}.jpg`,
-        heroVideoStatus: 'ready',
-        heroVideoVersion: '1',
-        heroVideoDuration: 90,
-        heroVideoWidth: 1920,
-        heroVideoHeight: 1080,
-        heroVideoBytes: 5_000_000,
-        heroVideoCodec: 'h264/aac',
-        heroVideoVerifiedAt: new Date('2026-07-01T00:00:00Z'),
+        runtime: 100,
+        genres: [{ id: 28, name: 'Action' }],
     }));
-    SiteConfig.findOneAndUpdate = () => chain({
-        homeHero: {
-            mode: 'manual',
-            movieIds: ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'],
-            heroSoundDefaultEnabled: false,
-            heroDefaultVolume: 0.35,
-        },
+    const storedConfig = {
+        homeHero: { mode: 'manual', movieIds },
         updatedAt: new Date('2026-07-01T00:00:00Z'),
-    });
-    SiteConfig.findOne = () => chain(null);
-    SiteConfig.updateOne = async () => ({ modifiedCount: 1 });
-    Movie.find = () => chain(validMovies);
-    heroRotationRuntime.loadReadyMediaAssets = async (movieIds) => (
-        registeredHeroAssetsForMovies(validMovies, movieIds)
-    );
+    };
+    const originals = {
+        configFindOne: SiteConfig.findOne,
+        configFindOneAndUpdate: SiteConfig.findOneAndUpdate,
+        movieFind: Movie.find,
+        showFind: Show.find,
+    };
+    // getHomeHeroConfig reads before it writes, so both paths need a stub.
+    SiteConfig.findOne = () => chain(storedConfig);
+    SiteConfig.findOneAndUpdate = () => chain(storedConfig);
+    Movie.find = () => chain(movies);
+    Show.find = () => chain([]);
 
     try {
-        const req = { body: { mode: 'manual', movieIds: ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'] } };
+        const req = { body: { mode: 'manual', movieIds } };
         const res = createResponse();
         await updateHeroSettings(req, res);
         assert.equal(res.statusCode, 200);
         assert.equal(res.body.success, true);
-        assert.equal(res.body.message, 'Hero updated successfully.');
         assert.ok(res.body.settings);
         assert.ok(res.body.liveHero);
         assert.ok(res.body.meta);
         assert.equal(res.body.settings.configuredMode, 'manual');
+        assert.equal(res.body.liveHero.movies.length, 5);
+        assert.deepEqual(res.body.liveHero.movies.map((movie) => movie.id), movieIds);
     } finally {
-        SiteConfig.findOneAndUpdate = originals.configFindOneAndUpdate;
         SiteConfig.findOne = originals.configFindOne;
-        SiteConfig.updateOne = originals.configUpdateOne;
+        SiteConfig.findOneAndUpdate = originals.configFindOneAndUpdate;
         Movie.find = originals.movieFind;
-        heroRotationRuntime.loadReadyMediaAssets = originals.loadReadyMediaAssets;
+        Show.find = originals.showFind;
     }
 });
 
-test('updateHeroSettings controller action returns 422 with code MANUAL_HERO_INVALID and invalidMovies on failure', async () => {
+test('updateHeroSettings returns 400 MANUAL_HERO_INVALID and never writes SiteConfig on validation failure', async () => {
     const { updateHeroSettings } = await import('../controllers/adminController.js');
     const SiteConfig = (await import('../models/SiteConfig.js')).default;
     const Movie = (await import('../models/Movie.js')).default;
@@ -192,26 +167,23 @@ test('updateHeroSettings controller action returns 422 with code MANUAL_HERO_INV
     const originals = {
         configFindOneAndUpdate: SiteConfig.findOneAndUpdate,
         movieFind: Movie.find,
-        loadReadyMediaAssets: heroRotationRuntime.loadReadyMediaAssets,
     };
     SiteConfig.findOneAndUpdate = () => {
-        assert.fail('SiteConfig should not be updated on validation error');
+        assert.fail('SiteConfig must not be updated when the selection is invalid');
     };
+    // No stored movie matches the requested IDs.
     Movie.find = () => chain([]);
-    heroRotationRuntime.loadReadyMediaAssets = async () => [];
 
     try {
         const req = { body: { mode: 'manual', movieIds: ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'] } };
         const res = createResponse();
         await updateHeroSettings(req, res);
-        assert.equal(res.statusCode, 422);
+        assert.equal(res.statusCode, 400);
         assert.equal(res.body.success, false);
         assert.equal(res.body.code, 'MANUAL_HERO_INVALID');
-        assert.equal(res.body.message, 'All five Manual Hero movies require verified native trailers.');
-        assert.ok(Array.isArray(res.body.invalidMovies));
+        assert.deepEqual(res.body.invalidMovies, ['m-1', 'm-2', 'm-3', 'm-4', 'm-5']);
     } finally {
         SiteConfig.findOneAndUpdate = originals.configFindOneAndUpdate;
         Movie.find = originals.movieFind;
-        heroRotationRuntime.loadReadyMediaAssets = originals.loadReadyMediaAssets;
     }
 });

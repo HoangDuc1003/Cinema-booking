@@ -1,5 +1,4 @@
 import { clerkClient } from "@clerk/express";
-import Booking from "../models/Booking.js";
 import Movies from "../models/Movie.js";
 import {
     createDefaultProfile,
@@ -11,6 +10,14 @@ import {
 } from "../services/userProfileService.js";
 
 const PROFILE_METADATA_KEY = 'nitrocineProfiles';
+const MAX_FAVORITES = 200;
+const isValidMovieId = (value) => /^\d{1,12}$/.test(String(value ?? ''));
+
+const failUserRequest = (res, event, error, message, status = 500) => {
+    // Client responses must not carry internal failure details (server/AGENTS.md).
+    console.error(JSON.stringify({ event, errorCode: error?.code || error?.name || 'UNKNOWN' }));
+    return res.status(status).json({ success: false, message });
+};
 
 const requireUserId = (req) => {
     const { userId } = req.auth();
@@ -113,56 +120,46 @@ export const resolveFavoriteMovies = async (
     return findMovies(favorites);
 };
 
-// GET /api/user/bookings - Get user bookings
-export const getUserBookings = async (req, res) => {
-    try {
-        const { userId } = req.auth();
-        if (!userId) {
-            return res.status(401).json({ success: false, message: "Not authorized" });
-        }
-        const bookings = await Booking.find({ user: userId }).populate({
-            path: 'show',
-            populate: { path: "movie" }
-        }).sort({ createdAt: -1 }).lean();
-
-        // Filter out bookings with deleted shows/movies
-        const validBookings = bookings.filter(b => b.show && b.show.movie);
-        res.json({ success: true, bookings: validBookings });
-    } catch (error) {
-        console.log('[getUserBookings Error]:', error.message);
-        return res.status(500).json({ success: false, message: error.message });
-    }
-}
+// GET /api/user/bookings - Legacy alias for GET /api/booking/my-bookings.
+// Re-exported so both routes share one implementation instead of drifting apart.
+export { getUserBookings } from './bookingController.js';
 
 // POST /api/user/update-favorite - Toggle favorite movie
 export const updateFavorite = async (req, res) => {
     try {
-        const { movieId } = req.body;
         const { userId } = req.auth();
         if (!userId) {
             return res.status(401).json({ success: false, message: "Not authorized" });
         }
+        // Favorites are persisted verbatim into Clerk metadata, so only accept
+        // TMDB-shaped IDs instead of arbitrary client strings.
+        const movieId = String(req.body?.movieId ?? '');
+        if (!isValidMovieId(movieId)) {
+            return res.status(400).json({ success: false, message: "A valid movie ID is required." });
+        }
 
         const user = await clerkClient.users.getUser(userId);
-        const favorites = user.privateMetadata?.favorites || [];
-
-        let newFavorites;
-        if (favorites.includes(movieId)) {
-            newFavorites = favorites.filter(item => item !== movieId);
-        } else {
-            newFavorites = [...favorites, movieId];
+        const favorites = (user.privateMetadata?.favorites || []).map(String).filter(isValidMovieId);
+        const isFavorite = favorites.includes(movieId);
+        if (!isFavorite && favorites.length >= MAX_FAVORITES) {
+            return res.status(409).json({
+                success: false,
+                message: `You can save at most ${MAX_FAVORITES} favorite movies.`,
+            });
         }
+        const newFavorites = isFavorite
+            ? favorites.filter((item) => item !== movieId)
+            : [...favorites, movieId];
 
         await clerkClient.users.updateUserMetadata(userId, {
             privateMetadata: { ...user.privateMetadata, favorites: newFavorites }
         });
 
-        res.json({ success: true, message: "Favorite movies updated." });
+        return res.json({ success: true, message: "Favorite movies updated.", favorites: newFavorites });
     } catch (error) {
-        console.log('[updateFavorite Error]:', error.message);
-        return res.status(500).json({ success: false, message: error.message });
+        return failUserRequest(res, 'update-favorite-failed', error, 'Unable to update favorite movies.');
     }
-}
+};
 
 // GET /api/user/favorites - Get user's favorite movies
 export const getFavorites = async (req, res) => {
@@ -173,9 +170,8 @@ export const getFavorites = async (req, res) => {
         }
 
         const movies = await resolveFavoriteMovies(userId);
-        res.json({ success: true, movies });
+        return res.json({ success: true, movies });
     } catch (error) {
-        console.log('[getFavorites Error]:', error.message);
-        return res.status(500).json({ success: false, message: error.message });
+        return failUserRequest(res, 'get-favorites-failed', error, 'Unable to load favorite movies.');
     }
-}
+};

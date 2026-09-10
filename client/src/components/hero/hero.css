@@ -270,40 +270,6 @@
 .hero-poster.is-ready { opacity: 1; }
 .hero-poster.is-loading { opacity: 0; }
 
-.hero-video-shell {
-  position: absolute;
-  inset: -1px;
-  z-index: 1;
-  display: block;
-  overflow: hidden;
-  opacity: 0;
-  pointer-events: none;
-  transition: none;
-}
-
-.hero-video-frame {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  pointer-events: none;
-}
-
-.hero-video-shell.hero-native-video {
-  opacity: 0;
-  transition: opacity 180ms ease;
-  transform: translateZ(0);
-  backface-visibility: hidden;
-}
-
-.hero-video-shell.hero-native-video.is-visible {
-  opacity: 1;
-}
-
-.hero-native-video__mount {
-  user-select: none;
-  pointer-events: none;
-}
-
 .hero-media__breath,
 .hero-media__gradient {
   position: absolute;
@@ -557,13 +523,6 @@
   transition: max-height 650ms cubic-bezier(0.22, 1, 0.36, 1), margin 650ms cubic-bezier(0.22, 1, 0.36, 1), opacity 420ms ease, transform 650ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.hero-trailer-status {
-  max-width: 32rem;
-  margin: -0.55rem 0 0.9rem;
-  color: rgba(253, 164, 175, 0.9);
-  font-size: 0.75rem;
-}
-
 .hero-actions {
   display: flex;
   align-items: center;
@@ -622,83 +581,6 @@
 .hero-control--icon {
   width: 2.75rem;
   padding: 0;
-}
-
-.hero-volume-control {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-}
-
-.hero-volume-popover {
-  position: absolute;
-  z-index: 30;
-  left: 50%;
-  bottom: calc(100% + 0.65rem);
-  display: flex;
-  align-items: center;
-  gap: 0.48rem;
-  min-width: 11.5rem;
-  padding: 0.62rem 0.72rem;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 0.85rem;
-  background: rgba(8, 10, 16, 0.88);
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34);
-  backdrop-filter: blur(18px);
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-  transform: translate(-50%, 0.45rem) scale(0.96);
-  transform-origin: bottom center;
-  transition: opacity 180ms ease, visibility 180ms ease, transform 180ms ease;
-}
-
-.hero-volume-popover::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  bottom: -0.36rem;
-  width: 0.65rem;
-  height: 0.65rem;
-  border-right: 1px solid rgba(255, 255, 255, 0.18);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(8, 10, 16, 0.88);
-  transform: translateX(-50%) rotate(45deg);
-}
-
-.hero-volume-control:hover .hero-volume-popover,
-.hero-volume-control:focus-within .hero-volume-popover {
-  opacity: 1;
-  visibility: visible;
-  pointer-events: auto;
-  transform: translate(-50%, 0) scale(1);
-}
-
-.hero-volume-popover > svg {
-  width: 0.9rem;
-  height: 0.9rem;
-  flex: 0 0 auto;
-  color: rgba(255, 255, 255, 0.72);
-}
-
-.hero-volume-popover input[type='range'] {
-  width: 7rem;
-  height: 0.25rem;
-  accent-color: #f84565;
-  cursor: pointer;
-}
-
-.hero-volume-popover input[type='range']:focus-visible {
-  outline: 2px solid rgba(255, 255, 255, 0.92);
-  outline-offset: 0.25rem;
-}
-
-.hero-volume-value {
-  min-width: 2.25rem;
-  color: rgba(255, 255, 255, 0.86);
-  font-size: 0.7rem;
-  font-variant-numeric: tabular-nums;
-  text-align: right;
 }
 
 /* ─── Thumbnail Rail (`HeroPosterRail`) ─── */
@@ -828,24 +710,6 @@
   .hero-action--primary:hover { box-shadow: 0 16px 40px rgba(248, 69, 101, 0.4); }
 }
 
-@media (min-width: 1024px) {
-  .hero-media.is-video-visible .hero-video-frame {
-    filter: brightness(1.10) saturate(1.06) contrast(1.03);
-  }
-
-  .hero-media.is-video-visible .hero-media__breath {
-    opacity: 0 !important;
-  }
-
-  .hero-media.is-video-visible .hero-media__gradient--side {
-    opacity: 0.72;
-  }
-
-  .hero-media.is-video-visible .hero-media__gradient--bottom {
-    opacity: 0.88;
-  }
-}
-
 @media (max-width: 767px) {
   .hero-section {
     --hero-safe-top: 4.8rem;
@@ -957,8 +821,6 @@
   .hero-genres { display: none; }
   .hero-overview { display: none; }
   .hero-meta { gap: 0.75rem; margin-bottom: 0.55rem; font-size: 0.72rem; }
-  .hero-trailer-status { margin: 0 0 0.4rem; }
-
   .hero-actions { gap: 0.5rem; }
 
   .hero-action {
@@ -986,8 +848,6 @@
 @media (prefers-reduced-motion: reduce) {
   .hero-poster-shell,
   .hero-poster,
-  .hero-video-shell,
-  .hero-video-frame,
   .hero-media__breath,
   .hero-media__gradient,
   .hero-content-zone,

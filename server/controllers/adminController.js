@@ -1,301 +1,152 @@
-import Booking from "../models/Booking.js"
-import Show from "../models/Show.js"
-import User from "../models/User.js"
+import { randomUUID } from 'node:crypto';
+import Booking from '../models/Booking.js';
+import Show from '../models/Show.js';
+import User from '../models/User.js';
 import {
     getAdminHomeHero,
     randomizeHomeHero,
-    updateHeroSoundSettings,
     updateHomeHero,
-} from "../services/heroService.js"
-import { getUploadSignature, commitHeroVideo, removeHeroVideo } from "../services/heroVideoService.js"
-import {
-    requestHeroMediaSource,
-    retryHeroMediaSource,
-} from '../services/heroMediaIngestionService.js';
-import { refreshHeroRotation } from "../services/heroRotationService.js"
-import { randomUUID } from 'node:crypto';
+} from '../services/heroService.js';
 import { inngest } from '../inngest/index.js';
 import {
     failQueuedCatalogRefreshRun,
     getCatalogRefreshRun,
     queueCatalogRefreshRun,
-} from "../services/catalogRefreshService.js"
+} from '../services/catalogRefreshService.js';
 
-const serializeHeroVideoState = (movie) => ({
-    id: String(movie?._id || movie?.id || ''),
-    heroVideoStatus: movie?.heroVideoStatus || 'missing',
-    heroVideoMimeType: movie?.heroVideoMimeType || '',
-    heroVideoVersion: String(movie?.heroVideoVersion || ''),
-    heroVideoDuration: Number(movie?.heroVideoDuration) || 0,
-    heroVideoWidth: Number(movie?.heroVideoWidth) || 0,
-    heroVideoHeight: Number(movie?.heroVideoHeight) || 0,
-    heroVideoBytes: Number(movie?.heroVideoBytes) || 0,
-    heroVideoVerifiedAt: movie?.heroVideoVerifiedAt || null,
-});
-
-const getHeroMediaRequestEventId = (asset) => {
-    const updatedAt = new Date(asset?.updatedAt || 0).getTime();
-    return [
-        'hero-media-requested',
-        String(asset?.id || ''),
-        Number.isFinite(updatedAt) ? updatedAt : 0,
-        Number(asset?.ingestionAttempts || 0),
-    ].join(':');
+export const isAdmin = async (_req, res) => {
+    res.json({ success: true, isAdmin: true });
 };
 
-export const isAdmin = async (req,res) => {
-    res.json({success:true, isAdmin:true})
-}
+const ADMIN_LIST_LIMIT = 500;
+const SHOW_MOVIE_SELECT = 'title poster_path vote_average runtime release_date';
 
-//api to get dashboard database
-export const getDashboardData = async (req,res)=>{
+const failAdminRequest = (res, event, error, message) => {
+    // Admin responses must not carry internal failure details (server/AGENTS.md).
+    console.error(JSON.stringify({ event, errorCode: error?.code || error?.name || 'UNKNOWN' }));
+    return res.status(500).json({ success: false, message });
+};
+
+export const getDashboardData = async (_req, res) => {
     try {
-        const bookings = await Booking.find({isPaid:true})
-        const activeShows = await Show.find({showDateTime:{$gte:new Date()}}).populate('movie');
-
-        const totalUser = await User.countDocuments();
-        const dashboardData = {
-            totalBookings: bookings.length,
-            totalRevenue:bookings.reduce((acc,booking)=>acc+booking.amount,0),
-            activeShows,
-            totalUser
-        }
-        res.json({success:true,dashboardData});
+        // Totals are aggregated in MongoDB; loading every paid booking only to
+        // count and sum it grows unbounded with revenue.
+        const [[totals], activeShows, totalUser] = await Promise.all([
+            Booking.aggregate([
+                { $match: { isPaid: true } },
+                { $group: { _id: null, totalBookings: { $sum: 1 }, totalRevenue: { $sum: '$amount' } } },
+            ]),
+            Show.find({ showDateTime: { $gte: new Date() } })
+                .populate({ path: 'movie', select: SHOW_MOVIE_SELECT })
+                .sort({ showDateTime: 1 })
+                .limit(ADMIN_LIST_LIMIT)
+                .lean(),
+            User.countDocuments(),
+        ]);
+        return res.json({
+            success: true,
+            dashboardData: {
+                totalBookings: totals?.totalBookings || 0,
+                totalRevenue: totals?.totalRevenue || 0,
+                activeShows: activeShows.filter((show) => show.movie),
+                totalUser,
+            },
+        });
     } catch (error) {
-        console.log(error);
-        return res.status(500).json({ success: false, message: error.message });
+        return failAdminRequest(res, 'admin-dashboard-failed', error, 'Unable to load dashboard data.');
     }
-}
+};
 
-//api to get all shows
-export const getAllShows = async (req,res) =>{
+export const getAllShows = async (_req, res) => {
     try {
-        const shows = await Show.find({showDateTime:{$gte:new Date()}}).populate('movie').sort({showDateTime:1});
-        res.json({success:true,shows});
+        const shows = await Show.find({ showDateTime: { $gte: new Date() } })
+            .populate({ path: 'movie', select: SHOW_MOVIE_SELECT })
+            .sort({ showDateTime: 1 })
+            .limit(ADMIN_LIST_LIMIT)
+            .lean();
+        return res.json({ success: true, shows: shows.filter((show) => show.movie) });
     } catch (error) {
-        console.log(error);
-        return res.status(500).json({ success: false, message: error.message });
+        return failAdminRequest(res, 'admin-all-shows-failed', error, 'Unable to load shows.');
     }
-}
+};
 
-//api to get all booking 
-export const getAllBookings = async (req,res) =>{
+export const getAllBookings = async (_req, res) => {
     try {
-        const bookings = await Booking.find({}).populate('user').populate({
-            path:"show",
-            populate:{path:"movie"}
-        }).sort({createdAt:-1});
-        res.json({success:true,bookings});
+        const bookings = await Booking.find({})
+            // Only the display name is needed; populating the whole user exposes email and avatar.
+            .populate({ path: 'user', select: 'name' })
+            .populate({
+                path: 'show',
+                select: 'showDateTime hall showPrice movie',
+                populate: { path: 'movie', select: SHOW_MOVIE_SELECT },
+            })
+            .sort({ createdAt: -1 })
+            .limit(ADMIN_LIST_LIMIT)
+            .lean();
+        // A booking whose show or movie was deleted would crash the admin table renderer.
+        return res.json({
+            success: true,
+            bookings: bookings.filter((booking) => booking.user && booking.show?.movie),
+        });
     } catch (error) {
-        console.log(error);
-        return res.status(500).json({ success: false, message: error.message });
+        return failAdminRequest(res, 'admin-all-bookings-failed', error, 'Unable to load bookings.');
     }
-}
+};
 
-export const getHeroSettings = async (req,res) =>{
+export const getHeroSettings = async (_req, res) => {
     try {
         const hero = await getAdminHomeHero();
-        res.json({success:true,hero});
+        return res.json({ success: true, hero });
     } catch (error) {
-        console.log(error);
-        return res.status(500).json({ success: false, message: error.message });
+        const status = error.status || error.statusCode || 500;
+        console.error(JSON.stringify({
+            event: 'admin-hero-settings-failed',
+            errorCode: error?.code || error?.name || 'UNKNOWN',
+        }));
+        return res.status(status).json({
+            success: false,
+            message: status < 500 ? error.message : 'Unable to load hero settings.',
+        });
     }
-}
+};
+
+const failHeroAction = (res, event, error, fallbackMessage) => {
+    const status = error.status || error.statusCode || 500;
+    console.error(JSON.stringify({ event, errorCode: error?.code || error?.name || 'UNKNOWN' }));
+    return res.status(status).json({
+        success: false,
+        code: error.code || 'HERO_UPDATE_FAILED',
+        // Validation messages are written for the admin; 5xx details stay server-side.
+        message: status < 500 ? error.message : fallbackMessage,
+        ...(error.invalidMovies ? { invalidMovies: error.invalidMovies } : {}),
+    });
+};
 
 export const updateHeroSettings = async (req, res) => {
     try {
         const result = await updateHomeHero(req.body || {});
         return res.json({
             success: true,
-            message: "Hero updated successfully.",
+            message: 'Hero poster settings updated successfully.',
             settings: result.settings,
             liveHero: result.liveHero,
             meta: result.meta,
         });
     } catch (error) {
-        return res.status(error.status || error.statusCode || 500).json({
-            success: false,
-            code: error.code || 'HERO_UPDATE_FAILED',
-            message: error.message,
-            invalidMovies: error.invalidMovies || undefined,
-        });
+        return failHeroAction(res, 'admin-hero-update-failed', error, 'Unable to update hero settings.');
     }
 };
 
-export const randomizeHeroAction = async (req, res) => {
+export const randomizeHeroAction = async (_req, res) => {
     try {
-        const requestedBy = req.auth()?.userId || 'admin';
-        const hero = await randomizeHomeHero({
-            requestedBy,
-            selectionSeed: req.body?.selectionSeed,
-        });
-        res.json({ success: true, message: "Hero selection randomized within the active 15-movie pool.", hero });
-    } catch (error) {
-        return res.status(error.status || error.statusCode || 500).json({
-            success: false,
-            code: error.code,
-            message: error.message,
-        });
-    }
-}
-
-export const refreshHeroRotationAction = async (req, res) => {
-    try {
-        const requestedBy = req.auth()?.userId || 'admin';
-        const idempotencyKey = req.body?.idempotencyKey;
-        if (
-            idempotencyKey !== undefined
-            && !/^[a-zA-Z0-9:_-]{8,160}$/.test(String(idempotencyKey))
-        ) {
-            return res.status(400).json({
-                success: false,
-                code: 'HERO_IDEMPOTENCY_KEY_INVALID',
-                message: 'idempotencyKey must contain 8-160 safe characters.',
-            });
-        }
-        const result = await refreshHeroRotation({
-            source: 'admin',
-            requestedBy,
-            force: true,
-            runId: idempotencyKey,
-        });
-        return res.json({ success: true, result });
-    } catch (error) {
-        return res.status(error.status || error.statusCode || 500).json({
-            success: false,
-            code: error.code || 'HERO_REFRESH_FAILED',
-            message: error.message,
-            details: error.details || undefined,
-        });
-    }
-}
-
-export const updateHeroSoundAction = async (req, res) => {
-    try {
-        const settings = await updateHeroSoundSettings(req.body || {});
-        return res.json({ success: true, settings });
-    } catch (error) {
-        return res.status(error.status || error.statusCode || 500).json({
-            success: false,
-            code: error.code,
-            message: error.message,
-        });
-    }
-}
-
-export const getHeroVideoSignature = async (req, res) => {
-    try {
-        const { movieId } = req.query;
-        if (!movieId) throw new Error("Missing movieId");
-        const signatureData = await getUploadSignature(movieId);
-        res.json({ success: true, signatureData });
-    } catch (error) {
-        return res.status(error.status || error.statusCode || 500).json({
-            success: false,
-            code: error.code,
-            message: error.message,
-            details: error.details || undefined,
-        });
-    }
-}
-
-export const commitHeroVideoAction = async (req, res) => {
-    try {
-        const { movieId } = req.params;
-        const result = await commitHeroVideo(movieId, req.body || {});
-        res.json({
+        const hero = await randomizeHomeHero();
+        return res.json({
             success: true,
-            message: "Video committed successfully.",
-            movie: serializeHeroVideoState(result.movie || result),
-            activation: result.activation || null,
+            message: 'Hero posters were reshuffled with a fresh daily seed.',
+            hero,
         });
     } catch (error) {
-        return res.status(error.status || error.statusCode || 500).json({
-            success: false,
-            code: error.code,
-            message: error.message,
-            details: error.details || undefined,
-        });
-    }
-}
-
-export const removeHeroVideoAction = async (req, res) => {
-    try {
-        const { movieId } = req.params;
-        const movie = await removeHeroVideo(movieId);
-        res.json({
-            success: true,
-            message: "Video removed successfully.",
-            movie: serializeHeroVideoState(movie),
-        });
-    } catch (error) {
-        return res.status(error.status || error.statusCode || 500).json({
-            success: false,
-            code: error.code,
-            message: error.message,
-        });
-    }
-}
-
-export const requestHeroMediaSourceAction = async (req, res) => {
-    try {
-        if (typeof inngest?.send !== 'function') {
-            return res.status(503).json({
-                success: false,
-                code: 'HERO_MEDIA_QUEUE_UNAVAILABLE',
-                message: 'Hero media queue is unavailable.',
-            });
-        }
-        const requestedBy = req.auth()?.userId || 'admin';
-        const result = await requestHeroMediaSource({
-            movieId: req.params.movieId,
-            ...(req.body || {}),
-            approvedBy: requestedBy,
-        });
-        if (result.shouldEnqueue) {
-            await inngest.send({
-                id: getHeroMediaRequestEventId(result.asset),
-                name: 'hero/media.requested',
-                data: { assetId: result.asset.id, requestedBy },
-            });
-        }
-        return res.status(result.shouldEnqueue ? 202 : 200).json({
-            success: true,
-            asset: result.asset,
-            reused: result.reused,
-            status: result.shouldEnqueue ? 'queued' : result.asset.sourceStatus,
-        });
-    } catch (error) {
-        return res.status(error.status || error.statusCode || 500).json({
-            success: false,
-            code: error.code || 'HERO_MEDIA_SOURCE_REQUEST_FAILED',
-            message: error.message,
-        });
-    }
-};
-
-export const retryHeroMediaSourceAction = async (req, res) => {
-    try {
-        if (typeof inngest?.send !== 'function') {
-            return res.status(503).json({
-                success: false,
-                code: 'HERO_MEDIA_QUEUE_UNAVAILABLE',
-                message: 'Hero media queue is unavailable.',
-            });
-        }
-        const asset = await retryHeroMediaSource({ assetId: req.params.assetId });
-        await inngest.send({
-            id: getHeroMediaRequestEventId(asset),
-            name: 'hero/media.requested',
-            data: { assetId: asset.id, requestedBy: req.auth()?.userId || 'admin' },
-        });
-        return res.status(202).json({ success: true, asset, status: 'queued' });
-    } catch (error) {
-        return res.status(error.status || error.statusCode || 500).json({
-            success: false,
-            code: error.code || 'HERO_MEDIA_RETRY_FAILED',
-            message: error.message,
-        });
+        return failHeroAction(res, 'admin-hero-randomize-failed', error, 'Unable to randomize the hero.');
     }
 };
 
@@ -318,11 +169,15 @@ export const refreshCatalogAction = async (req, res) => {
         });
         return res.status(202).json({ success: true, jobId: runId, status: 'queued' });
     } catch (error) {
-        console.log(error);
+        console.error(JSON.stringify({
+            event: 'catalog-refresh-queue-failed',
+            runId,
+            errorCode: error?.code || error?.name || 'UNKNOWN',
+        }));
         await failQueuedCatalogRefreshRun(runId, error).catch(() => undefined);
         return res.status(503).json({ success: false, message: 'Unable to queue catalog refresh.' });
     }
-}
+};
 
 export const getCatalogRefreshStatusAction = async (req, res) => {
     try {
@@ -334,7 +189,10 @@ export const getCatalogRefreshStatusAction = async (req, res) => {
         if (!run) return res.status(404).json({ success: false, message: 'Catalog refresh job not found.' });
         return res.json({ success: true, job: run });
     } catch (error) {
-        console.log(error);
+        console.error(JSON.stringify({
+            event: 'catalog-refresh-status-failed',
+            errorCode: error?.code || error?.name || 'UNKNOWN',
+        }));
         return res.status(500).json({ success: false, message: 'Unable to read catalog refresh status.' });
     }
-}
+};

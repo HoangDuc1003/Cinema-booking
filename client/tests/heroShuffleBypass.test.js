@@ -8,10 +8,10 @@ test('HeroSection preserves the exact five-movie server order in every mode', as
     'utf8',
   );
 
-  assert.match(heroSectionSource, /validateMovieCandidates\(orderedMovies, signal\)/);
+  assert.match(heroSectionSource, /validateMovieCandidates\(orderedMovies, controller\.signal\)/);
   assert.match(heroSectionSource, /saveHeroMoviesCache\(preparedMovies,/);
   assert.match(heroSectionSource, /moviesRef\.current = preparedMovies/);
   assert.match(heroSectionSource, /setMovies\(preparedMovies\)/);
   assert.doesNotMatch(heroSectionSource, /getOrComputeDailyOrder|applyDailyOrder|getOrCreateAnonymousViewerId/);
-  assert.doesNotMatch(heroSectionSource, /isManualMode|dailyOrderIds|shuffledMovies/);
+  assert.doesNotMatch(heroSectionSource, /isManualMode|dailyOrderIds|shuffledMovies|heroVideoSource/);
 });

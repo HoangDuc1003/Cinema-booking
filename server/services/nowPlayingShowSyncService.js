@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import Movie from '../models/Movie.js';
 import Show from '../models/Show.js';
 import { invalidateMovieCatalog } from './cacheInvalidationService.js';
-import { getPublicHeroRotation } from './heroRotationService.js';
+import { getPublicHomeHero } from './heroService.js';
 import { withDistributedLock } from './lockService.js';
 import { redisKeys, redisTtl } from './redisKeys.js';
 import { parseCinemaShowDateTime } from './showtimeService.js';
@@ -451,7 +451,7 @@ export const syncNowPlayingShows = async ({
                 return { success: false, skipped: true, code: 'TMDB_NO_VALID_MOVIES', region: normalizedRegion };
             }
             let heroMovies = [];
-            const loadHeroMovies = getHeroMovies || (movieModel === Movie ? getPublicHeroRotation : null);
+            const loadHeroMovies = getHeroMovies || (movieModel === Movie ? getPublicHomeHero : null);
             if (loadHeroMovies) {
                 try {
                     const heroPayload = await loadHeroMovies({ now: nowDate });

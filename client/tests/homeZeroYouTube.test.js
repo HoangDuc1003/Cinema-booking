@@ -4,11 +4,11 @@ import { readFile } from 'node:fs/promises';
 
 const read = (path) => readFile(new URL(path, import.meta.url), 'utf8');
 
-test('Home mounts the YouTube TrailerSection independently of the native Hero player', async () => {
-  const [home, trailer, nativeVideo] = await Promise.all([
+test('Home keeps the YouTube TrailerSection outside the poster-only Hero', async () => {
+  const [home, trailer, hero] = await Promise.all([
     read('../src/pages/Home.jsx'),
     read('../src/components/TrailerSection.jsx'),
-    read('../src/components/hero/HeroNativeVideo.jsx'),
+    read('../src/components/HeroSection.jsx'),
   ]);
 
   assert.match(home, /import\('\.\.\/components\/TrailerSection'\)/);
@@ -17,8 +17,7 @@ test('Home mounts the YouTube TrailerSection independently of the native Hero pl
   assert.match(trailer, /youtube-nocookie\.com\/embed/);
   assert.match(trailer, /<iframe/);
   assert.doesNotMatch(trailer, /resolveConfiguredHeroVideoSource|HeroMediaAsset|<video/);
-  assert.match(nativeVideo, /<video/);
-  assert.doesNotMatch(nativeVideo, /iframe|youtube-nocookie/i);
+  assert.doesNotMatch(hero, /<video|<iframe|youtube-nocookie|HeroVideoRenderer/);
 });
 
 test('TrailerSection uses one batch lookup and validates the YouTube key before embedding', async () => {

@@ -4,7 +4,6 @@ import mongoose from 'mongoose';
 import connectDB from '../configs/db.js';
 import { connectRedis } from '../configs/redis.js';
 import { refreshWeeklyCatalog } from '../services/catalogRefreshService.js';
-import enrichCatalogHeroVideos from '../services/heroVideoEnrichmentService.js';
 
 async function main() {
     const dryRun = process.argv.includes('--dry-run');
@@ -20,11 +19,6 @@ async function main() {
             requestedBy: 'cli',
         });
         console.info('[catalog-seed]', JSON.stringify(result));
-        if (!dryRun) {
-            const enrichResult = await enrichCatalogHeroVideos();
-            console.info('[catalog-enrich]', JSON.stringify(enrichResult));
-        }
-
         await mongoose.disconnect();
         if (redis?.isReady) await redis.quit();
         process.exit(0);

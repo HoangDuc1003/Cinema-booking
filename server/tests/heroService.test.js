@@ -1,551 +1,259 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import CatalogBatch from '../models/CatalogBatch.js';
-import HeroRotationBatch from '../models/HeroRotationBatch.js';
 import Movie from '../models/Movie.js';
 import Show from '../models/Show.js';
 import SiteConfig from '../models/SiteConfig.js';
-import { getPublicHomeHero } from '../services/heroService.js';
-import { createHeroEtag, heroRotationRuntime } from '../services/heroRotationService.js';
-import { registeredHeroAssetsForMovies } from './heroMediaTestFixtures.js';
-
-const nativeMovie = (id) => ({
-    _id: id,
-    title: `Movie ${id}`,
-    overview: `Overview ${id}`,
-    poster_path: `/poster-${id}.jpg`,
-    backdrop_path: `/backdrop-${id}.jpg`,
-    release_date: '2026-07-01',
-    vote_average: 8,
-    vote_count: 1000,
-    popularity: 100,
-    adult: false,
-    runtime: 120,
-    genres: [{ id: 1, name: 'Action' }],
-    heroVideoId: `hero_trailers/${id}/official`,
-    heroVideoMovieId: id,
-    heroVideoUrl: `https://res.cloudinary.com/test/video/upload/hero_trailers/${id}/official.mp4`,
-    heroVideoMimeType: 'video/mp4',
-    heroVideoPosterUrl: `https://res.cloudinary.com/test/image/upload/poster-${id}.jpg`,
-    heroVideoStatus: 'ready',
-    heroVideoVersion: '1',
-    heroVideoDuration: 90,
-    heroVideoWidth: 1920,
-    heroVideoHeight: 1080,
-    heroVideoBytes: 5_000_000,
-    heroVideoCodec: 'h264/aac',
-    heroVideoVerifiedAt: new Date('2026-07-01T00:00:00Z'),
-    heroVideoSource: 'cloudinary',
-});
+import {
+    createHeroEtag,
+    getAdminHomeHero,
+    getHeroDailySeed,
+    getPublicHomeHero,
+    matchesHeroEtag,
+    normalizeHeroMovie,
+    selectDailyPosterMovies,
+    updateHomeHero,
+} from '../services/heroService.js';
 
 const chain = (value) => ({
-    select() {
-        return this;
-    },
-    populate() {
-        return this;
-    },
-    sort() {
-        return this;
-    },
-    limit() {
-        return this;
-    },
+    select: () => chain(value),
+    populate: () => chain(value),
+    sort: () => chain(value),
+    limit: () => chain(value),
     lean: async () => value,
 });
 
-test('active Hero batch is server-authoritative in auto mode, preserves order, and ignores heroOffset', async () => {
-    const originals = {
-        configFindOne: SiteConfig.findOne,
-        configFindOneAndUpdate: SiteConfig.findOneAndUpdate,
-        batchFindById: HeroRotationBatch.findById,
-        batchFindOne: HeroRotationBatch.findOne,
-        movieFind: Movie.find,
-        loadReadyMediaAssets: heroRotationRuntime.loadReadyMediaAssets,
-    };
-    const ids = ['new-1', 'hot-1', 'discovery-1', 'hot-2', 'new-2'];
-    const movies = ids.map(nativeMovie).reverse();
-    SiteConfig.findOne = () => chain({ heroRotation: { activeBatchId: 'batch-1' } });
-    SiteConfig.findOneAndUpdate = () => chain({
-        homeHero: {
-            mode: 'auto',
-            movieIds: ['legacy-1'],
-            heroSoundDefaultEnabled: true,
-            heroDefaultVolume: 0.35,
-        },
-        updatedAt: new Date('2026-07-01T00:00:00Z'),
-    });
-    HeroRotationBatch.findById = () => chain({
-        _id: 'batch-1',
-        status: 'active',
-        batchKey: 'hero-2026-07-01',
-        version: 3,
-        generatedAt: new Date('2026-07-01T00:00:00Z'),
-        activatedAt: new Date('2026-07-01T00:00:00Z'),
-        nextRefreshAt: new Date('2026-07-03T00:00:00Z'),
-        timezone: 'Asia/Ho_Chi_Minh',
-        activeHeroMovieIds: ids,
-    });
-    HeroRotationBatch.findOne = () => chain(null);
-    Movie.find = () => chain(movies);
-    heroRotationRuntime.loadReadyMediaAssets = async (movieIds) => (
-        registeredHeroAssetsForMovies(movies, movieIds)
-    );
-    try {
-        const first = await getPublicHomeHero({ heroOffset: 1 });
-        const second = await getPublicHomeHero({ heroOffset: 999 });
-        assert.equal(first.movies.length, 5);
-        assert.deepEqual(first.movies.map((movie) => movie.id), ids);
-        assert.deepEqual(second.movies.map((movie) => movie.id), ids);
-        assert.equal(first.settings.effectiveMode, 'auto');
-        assert.equal(first.settings.configuredMode, 'auto');
-        assert.equal(first.meta.configuredMode, 'auto');
-        assert.equal(first.meta.effectiveMode, 'auto');
-        assert.equal(first.settings.heroSoundDefaultEnabled, true);
-        assert.equal(first.batchId, 'batch-1');
-        assert.equal(first.version, 3);
-        assert.ok(first.movies.every((movie) => movie.heroVideoSources.length === 1));
-        assert.ok(first.movies.every((movie) => !('heroVideoId' in movie)));
-    } finally {
-        SiteConfig.findOne = originals.configFindOne;
-        SiteConfig.findOneAndUpdate = originals.configFindOneAndUpdate;
-        HeroRotationBatch.findById = originals.batchFindById;
-        HeroRotationBatch.findOne = originals.batchFindOne;
-        Movie.find = originals.movieFind;
-        heroRotationRuntime.loadReadyMediaAssets = originals.loadReadyMediaAssets;
-    }
+const buildMovie = (index) => ({
+    _id: `movie-${index}`,
+    title: `Movie ${index}`,
+    overview: `Overview ${index}`,
+    poster_path: `/poster-${index}.jpg`,
+    backdrop_path: `/backdrop-${index}.jpg`,
+    release_date: '2026-01-01',
+    vote_average: 7.5,
+    runtime: 110,
+    genres: [{ id: 28, name: 'Action' }],
 });
 
-test('R2: manual mode is authoritative, returns exact 5 saved movies in order, retaining native video metadata', async () => {
+const buildPool = (size) => Array.from({ length: size }, (_, index) => buildMovie(index + 1));
+
+const withStubs = async ({ movies = buildPool(20), config = null, onUpdate }, run) => {
     const originals = {
+        movieFind: Movie.find,
+        showFind: Show.find,
         configFindOne: SiteConfig.findOne,
         configFindOneAndUpdate: SiteConfig.findOneAndUpdate,
-        batchFindById: HeroRotationBatch.findById,
-        batchFindOne: HeroRotationBatch.findOne,
-        movieFind: Movie.find,
-        loadReadyMediaAssets: heroRotationRuntime.loadReadyMediaAssets,
     };
-    const manualIds = ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'];
-    const movies = manualIds.map(nativeMovie).reverse();
-    SiteConfig.findOne = () => chain({ heroRotation: { activeBatchId: 'batch-1' } });
-    SiteConfig.findOneAndUpdate = () => chain({
-        homeHero: {
-            mode: 'manual',
-            movieIds: manualIds,
-            heroSoundDefaultEnabled: true,
-            heroDefaultVolume: 0.35,
-        },
-        updatedAt: new Date('2026-07-01T00:00:00Z'),
-    });
-    HeroRotationBatch.findById = () => chain({
-        _id: 'batch-1',
-        status: 'active',
-        batchKey: 'hero-2026-07-01',
-        version: 3,
-        activeHeroMovieIds: ['auto-1', 'auto-2', 'auto-3', 'auto-4', 'auto-5'],
-    });
-    Movie.find = () => chain(movies);
-    heroRotationRuntime.loadReadyMediaAssets = async (movieIds) => (
-        registeredHeroAssetsForMovies(movies, movieIds)
-    );
+    Movie.find = (filter) => {
+        const ids = filter?._id?.$in;
+        if (!ids) return chain(movies);
+        const wanted = new Set(ids.map(String));
+        return chain(movies.filter((movie) => wanted.has(String(movie._id))));
+    };
+    Show.find = () => chain([]);
+    SiteConfig.findOne = () => chain(config);
+    SiteConfig.findOneAndUpdate = (...args) => {
+        onUpdate?.(...args);
+        return chain(config);
+    };
     try {
-        const payload = await getPublicHomeHero();
-        assert.equal(payload.settings.configuredMode, 'manual');
+        return await run();
+    } finally {
+        Movie.find = originals.movieFind;
+        Show.find = originals.showFind;
+        SiteConfig.findOne = originals.configFindOne;
+        SiteConfig.findOneAndUpdate = originals.configFindOneAndUpdate;
+    }
+};
+
+test('the Hero is poster-only and never projects a video field', () => {
+    const normalized = normalizeHeroMovie({
+        ...buildMovie(1),
+        heroVideoUrl: 'https://res.cloudinary.com/demo/video/upload/x.mp4',
+        heroVideoStatus: 'ready',
+        heroVideoMimeType: 'video/mp4',
+    });
+    for (const key of Object.keys(normalized)) {
+        assert.ok(!key.toLowerCase().includes('video'), `unexpected video field: ${key}`);
+    }
+    assert.equal(normalized.id, 'movie-1');
+    assert.equal(normalized.poster_path, '/poster-1.jpg');
+});
+
+test('the daily seed changes with the Vietnam calendar day, not with the clock', () => {
+    const morning = new Date('2026-03-10T02:00:00.000Z');
+    const evening = new Date('2026-03-10T15:00:00.000Z');
+    // 2026-03-10T17:00Z is already 2026-03-11 in Vietnam (UTC+7).
+    const nextDay = new Date('2026-03-10T17:30:00.000Z');
+
+    assert.equal(getHeroDailySeed(morning), getHeroDailySeed(evening));
+    assert.notEqual(getHeroDailySeed(morning), getHeroDailySeed(nextDay));
+});
+
+test('daily selection returns exactly five unique movies and is stable for the whole day', () => {
+    const pool = buildPool(20).map(normalizeHeroMovie);
+    const morning = new Date('2026-03-10T02:00:00.000Z');
+    const evening = new Date('2026-03-10T15:00:00.000Z');
+
+    const first = selectDailyPosterMovies(pool, morning);
+    const second = selectDailyPosterMovies(pool, evening);
+
+    assert.equal(first.length, 5);
+    assert.equal(new Set(first.map((movie) => movie.id)).size, 5);
+    assert.deepEqual(first.map((movie) => movie.id), second.map((movie) => movie.id));
+});
+
+test('selection order does not depend on the order MongoDB returned the pool in', () => {
+    const pool = buildPool(20).map(normalizeHeroMovie);
+    const shuffledPool = [...pool].reverse();
+    const now = new Date('2026-03-10T02:00:00.000Z');
+
+    assert.deepEqual(
+        selectDailyPosterMovies(pool, now).map((movie) => movie.id),
+        selectDailyPosterMovies(shuffledPool, now).map((movie) => movie.id),
+    );
+});
+
+test('a different day reshuffles the line-up', () => {
+    const pool = buildPool(30).map(normalizeHeroMovie);
+    const days = ['2026-03-10', '2026-03-11', '2026-03-12', '2026-03-13'].map(
+        (day) => selectDailyPosterMovies(pool, new Date(`${day}T02:00:00.000Z`)).map((movie) => movie.id).join(','),
+    );
+    // With a 30-movie pool, four consecutive days must not all produce one line-up.
+    assert.ok(new Set(days).size > 1, `daily seed did not rotate: ${days.join(' | ')}`);
+});
+
+test('a different seed salt reshuffles the line-up without waiting for the next day', () => {
+    const pool = buildPool(30).map(normalizeHeroMovie);
+    const now = new Date('2026-03-10T02:00:00.000Z');
+    const base = selectDailyPosterMovies(pool, now).map((movie) => movie.id).join(',');
+    const salted = selectDailyPosterMovies(pool, now, 'admin-randomized').map((movie) => movie.id).join(',');
+    assert.notEqual(base, salted);
+});
+
+test('a pool at or below five movies is returned whole instead of being dropped', () => {
+    const pool = buildPool(5).map(normalizeHeroMovie);
+    assert.equal(selectDailyPosterMovies(pool, new Date()).length, 5);
+});
+
+test('auto mode returns five movies plus the seed metadata clients cache on', async () => {
+    await withStubs({}, async () => {
+        const payload = await getPublicHomeHero({ now: new Date('2026-03-10T02:00:00.000Z') });
+        assert.equal(payload.movies.length, 5);
+        assert.equal(payload.settings.effectiveMode, 'auto');
+        assert.equal(payload.meta.source, 'daily-poster-rotation');
+        assert.equal(payload.dateKey, '2026-03-10');
+        assert.equal(payload.meta.seed, 'hero:2026-03-10:default');
+        assert.equal(payload.rotation.type, 'daily-poster');
+        assert.equal(payload.nextRefreshAt, '2026-03-10T17:00:00.000Z');
+    });
+});
+
+test('manual mode is authoritative and preserves the saved order', async () => {
+    const movieIds = ['movie-9', 'movie-3', 'movie-7', 'movie-1', 'movie-5'];
+    await withStubs({
+        config: { homeHero: { mode: 'manual', movieIds }, updatedAt: new Date('2026-03-01T00:00:00Z') },
+    }, async () => {
+        const payload = await getPublicHomeHero({ now: new Date('2026-03-10T02:00:00.000Z') });
         assert.equal(payload.settings.effectiveMode, 'manual');
-        assert.equal(payload.meta.configuredMode, 'manual');
-        assert.equal(payload.meta.effectiveMode, 'manual');
         assert.equal(payload.meta.source, 'manual-selection');
-        assert.deepEqual(payload.movies.map((m) => m.id), manualIds);
-        assert.ok(payload.movies.every((m) => m.heroVideoStatus === 'ready'));
-        assert.ok(payload.movies.every((m) => m.heroVideoUrl.includes('.mp4')));
-    } finally {
-        SiteConfig.findOne = originals.configFindOne;
-        SiteConfig.findOneAndUpdate = originals.configFindOneAndUpdate;
-        HeroRotationBatch.findById = originals.batchFindById;
-        Movie.find = originals.movieFind;
-        heroRotationRuntime.loadReadyMediaAssets = originals.loadReadyMediaAssets;
-    }
+        assert.deepEqual(payload.movies.map((movie) => movie.id), movieIds);
+    });
 });
 
-test('missing active batch returns five ordered posters and never exposes mock/generic media as playable', async () => {
-    const originals = {
-        configFindOne: SiteConfig.findOne,
-        configFindOneAndUpdate: SiteConfig.findOneAndUpdate,
-        batchFindOne: HeroRotationBatch.findOne,
-        movieFind: Movie.find,
-    };
-    const ids = ['legacy-3', 'legacy-1', 'legacy-5', 'legacy-2', 'legacy-4'];
-    const movies = ids.map((id) => ({
-        ...nativeMovie(id),
-        heroVideoUrl: '/mock/hero-trailer.mp4',
-        heroVideoId: 'hero_trailers/cinematic_universal_loop_1',
-    })).reverse();
-    SiteConfig.findOne = () => chain(null);
-    SiteConfig.findOneAndUpdate = () => chain({
-        homeHero: {
-            mode: 'auto',
-            movieIds: ids,
-            heroSoundDefaultEnabled: false,
-            heroDefaultVolume: 0.35,
+test('manual mode falls back to the daily rotation when a saved movie disappears', async () => {
+    await withStubs({
+        movies: buildPool(20),
+        config: {
+            homeHero: { mode: 'manual', movieIds: ['movie-1', 'movie-2', 'gone-1', 'gone-2', 'gone-3'] },
+            updatedAt: new Date('2026-03-01T00:00:00Z'),
         },
-        updatedAt: new Date('2026-07-01T00:00:00Z'),
+    }, async () => {
+        const payload = await getPublicHomeHero({ now: new Date('2026-03-10T02:00:00.000Z') });
+        assert.equal(payload.movies.length, 5);
+        assert.equal(payload.settings.effectiveMode, 'auto');
+        assert.equal(payload.meta.source, 'daily-poster-rotation');
     });
-    HeroRotationBatch.findOne = () => chain(null);
-    Movie.find = () => chain(movies);
-    try {
-        const payload = await getPublicHomeHero({ now: new Date('2026-07-02T00:00:00+07:00') });
-        assert.equal(payload.cache, 'fallback');
-        assert.equal(payload.settings.effectiveMode, 'poster-only');
-        assert.deepEqual(payload.movies.map((movie) => movie.id), ids);
-        assert.ok(payload.movies.every((movie) => movie.heroVideoUrl === ''));
-        assert.ok(payload.movies.every((movie) => movie.heroVideoSources.length === 0));
-        assert.ok(payload.movies.every((movie) => movie.heroVideoStatus === 'poster-only'));
-    } finally {
-        SiteConfig.findOne = originals.configFindOne;
-        SiteConfig.findOneAndUpdate = originals.configFindOneAndUpdate;
-        HeroRotationBatch.findOne = originals.batchFindOne;
-        Movie.find = originals.movieFind;
-    }
 });
 
-test('semantic Hero ETag changes for movie order, video version, and sound settings', () => {
-    const base = {
-        batchId: 'batch-1',
-        version: 1,
-        movies: [
-            { id: 'a', heroVideoVersion: '1' },
-            { id: 'b', heroVideoVersion: '1' },
-        ],
-        settings: {
-            heroSoundDefaultEnabled: false,
-            heroDefaultVolume: 0.35,
-            updatedAt: '2026-07-01T00:00:00Z',
-        },
-    };
-    const original = createHeroEtag(base);
-    assert.notEqual(createHeroEtag({ ...base, movies: [...base.movies].reverse() }), original);
-    assert.notEqual(createHeroEtag({
-        ...base,
-        movies: [{ id: 'a', heroVideoVersion: '2' }, base.movies[1]],
-    }), original);
-    assert.notEqual(createHeroEtag({
-        ...base,
-        settings: { ...base.settings, heroSoundDefaultEnabled: true },
-    }), original);
-});
-
-test('R2: getAdminHomeHero populates selectedMovies using saved settings.movieIds without forcing poster-only strip', async () => {
-    const originals = {
-        configFindOneAndUpdate: SiteConfig.findOneAndUpdate,
-        configFindOne: SiteConfig.findOne,
-        batchFindOne: HeroRotationBatch.findOne,
-        batchFind: HeroRotationBatch.find,
-        catalogFindOne: CatalogBatch.findOne,
-        movieFind: Movie.find,
-        showFind: Show.find,
-        loadReadyMediaAssets: heroRotationRuntime.loadReadyMediaAssets,
-    };
-    const savedIds = ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'];
-    const movies = savedIds.map(nativeMovie);
-    SiteConfig.findOneAndUpdate = () => chain({
-        homeHero: {
-            mode: 'manual',
-            movieIds: savedIds,
-            heroSoundDefaultEnabled: false,
-            heroDefaultVolume: 0.35,
-        },
-        updatedAt: new Date('2026-07-01T00:00:00Z'),
-    });
-    SiteConfig.findOne = () => chain(null);
-    HeroRotationBatch.findOne = () => chain(null);
-    HeroRotationBatch.find = () => chain([]);
-    CatalogBatch.findOne = () => chain(null);
-    Show.find = () => chain([]);
-    Movie.find = () => chain(movies);
-    heroRotationRuntime.loadReadyMediaAssets = async (movieIds) => (
-        registeredHeroAssetsForMovies(movies, movieIds)
-    );
-    try {
-        const { getAdminHomeHero } = await import('../services/heroService.js');
-        const adminHero = await getAdminHomeHero();
-        assert.deepEqual(adminHero.selectedMovies.map((m) => m.id), savedIds);
-        assert.ok(adminHero.selectedMovies.every((m) => m.heroVideoStatus === 'ready'));
-        assert.ok(adminHero.selectedMovies.every((m) => m.heroVideoUrl.includes('.mp4')));
-    } finally {
-        SiteConfig.findOneAndUpdate = originals.configFindOneAndUpdate;
-        SiteConfig.findOne = originals.configFindOne;
-        HeroRotationBatch.findOne = originals.batchFindOne;
-        HeroRotationBatch.find = originals.batchFind;
-        CatalogBatch.findOne = originals.catalogFindOne;
-        Show.find = originals.showFind;
-        Movie.find = originals.movieFind;
-        heroRotationRuntime.loadReadyMediaAssets = originals.loadReadyMediaAssets;
-    }
-});
-
-test('R3: updateHomeHero in manual mode enforces 5 unique native-ready movies with HTTP 422 and preserves SiteConfig atomically on failure', async () => {
-    const originals = {
-        configFindOneAndUpdate: SiteConfig.findOneAndUpdate,
-        configFindOne: SiteConfig.findOne,
-        configUpdateOne: SiteConfig.updateOne,
-        batchFindById: HeroRotationBatch.findById,
-        movieFind: Movie.find,
-        loadReadyMediaAssets: heroRotationRuntime.loadReadyMediaAssets,
-    };
-    let updateCalled = false;
-    SiteConfig.findOneAndUpdate = () => {
-        updateCalled = true;
-        return chain({
-            homeHero: {
-                mode: 'manual',
-                movieIds: ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'],
-                heroSoundDefaultEnabled: false,
-                heroDefaultVolume: 0.35,
-            },
-            updatedAt: new Date('2026-07-01T00:00:00Z'),
-        });
-    };
-    SiteConfig.findOne = () => chain({ heroRotation: { activeBatchId: 'batch-1' } });
-    SiteConfig.updateOne = async () => ({ modifiedCount: 1 });
-    HeroRotationBatch.findById = () => chain({
-        _id: 'batch-1',
-        status: 'active',
-        batchKey: 'hero-2026-07-01',
-        version: 1,
-        activeHeroMovieIds: ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'],
-    });
-
-    const validMovies = ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'].map(nativeMovie);
-    Movie.find = () => chain(validMovies);
-    heroRotationRuntime.loadReadyMediaAssets = async (movieIds) => (
-        registeredHeroAssetsForMovies(validMovies, movieIds)
-    );
-
-    try {
-        const { updateHomeHero } = await import('../services/heroService.js');
-
-        // Test 1: Fewer than 5 unique IDs throws HTTP 422
-        updateCalled = false;
+test('a pool that cannot fill five slots is a 503, never a short Hero', async () => {
+    await withStubs({ movies: buildPool(3) }, async () => {
         await assert.rejects(
-            updateHomeHero({ mode: 'manual', movieIds: ['m-1', 'm-2', 'm-3', 'm-4'] }),
-            (error) => (error.status === 422 || error.statusCode === 422),
-        );
-        assert.equal(updateCalled, false, 'SiteConfig must remain untouched when validation fails');
-
-        // Test 2: Non-unique IDs (e.g. 5 IDs with 1 duplicate) throws HTTP 422
-        updateCalled = false;
-        await assert.rejects(
-            updateHomeHero({ mode: 'manual', movieIds: ['m-1', 'm-1', 'm-2', 'm-3', 'm-4'] }),
-            (error) => (error.status === 422 || error.statusCode === 422),
-        );
-        assert.equal(updateCalled, false, 'SiteConfig must remain untouched when validation fails');
-
-        // Test 3: Missing movie in DB throws HTTP 422
-        updateCalled = false;
-        Movie.find = () => chain(validMovies.slice(0, 4));
-        await assert.rejects(
-            updateHomeHero({ mode: 'manual', movieIds: ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'] }),
-            (error) => (error.status === 422 || error.statusCode === 422),
-        );
-        assert.equal(updateCalled, false, 'SiteConfig must remain untouched when validation fails');
-
-        // Test 4: Movie with heroVideoStatus !== 'ready' throws HTTP 422
-        updateCalled = false;
-        const unreadyMovies = validMovies.map((m, idx) => (idx === 0 ? { ...m, heroVideoStatus: 'missing' } : m));
-        Movie.find = () => chain(unreadyMovies);
-        await assert.rejects(
-            updateHomeHero({ mode: 'manual', movieIds: ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'] }),
-            (error) => (error.status === 422 || error.statusCode === 422),
-        );
-        assert.equal(updateCalled, false, 'SiteConfig must remain untouched when validation fails');
-
-        // Test 5: Legacy Movie fields alone cannot bypass the durable registry.
-        updateCalled = false;
-        Movie.find = () => chain(validMovies);
-        heroRotationRuntime.loadReadyMediaAssets = async () => (
-            registeredHeroAssetsForMovies(validMovies).slice(0, 4)
-        );
-        await assert.rejects(
-            updateHomeHero({ mode: 'manual', movieIds: ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'] }),
-            (error) => error.code === 'MANUAL_HERO_INVALID'
-                && error.invalidMovies.some((item) => (
-                    item.movieId === 'm-5' && item.reasons.includes('registry-asset-not-found')
-                )),
-        );
-        assert.equal(updateCalled, false, 'SiteConfig must remain untouched without a registry asset');
-
-        // Test 6: Valid manual selection succeeds, calls SiteConfig update, pre-warms cache, and returns effective payload
-        updateCalled = false;
-        heroRotationRuntime.loadReadyMediaAssets = async (movieIds) => (
-            registeredHeroAssetsForMovies(validMovies, movieIds)
-        );
-        const result = await updateHomeHero({ mode: 'manual', movieIds: ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'] });
-        assert.equal(updateCalled, true, 'SiteConfig should be updated on valid manual selection');
-        assert.equal(result.mode, 'manual');
-        assert.ok(Array.isArray(result.movies));
-        assert.equal(result.movies.length, 5);
-        assert.ok(result.meta);
-        assert.equal(result.meta.configuredMode, 'manual');
-    } finally {
-        SiteConfig.findOneAndUpdate = originals.configFindOneAndUpdate;
-        SiteConfig.findOne = originals.configFindOne;
-        SiteConfig.updateOne = originals.configUpdateOne;
-        HeroRotationBatch.findById = originals.batchFindById;
-        Movie.find = originals.movieFind;
-        heroRotationRuntime.loadReadyMediaAssets = originals.loadReadyMediaAssets;
-    }
-});
-
-test('R3/R4: getAdminHomeHero returns liveMovies and manualSelection in response object', async () => {
-    const originals = {
-        configFindOneAndUpdate: SiteConfig.findOneAndUpdate,
-        configFindOne: SiteConfig.findOne,
-        batchFindOne: HeroRotationBatch.findOne,
-        batchFind: HeroRotationBatch.find,
-        catalogFindOne: CatalogBatch.findOne,
-        movieFind: Movie.find,
-        showFind: Show.find,
-        loadReadyMediaAssets: heroRotationRuntime.loadReadyMediaAssets,
-    };
-    const savedIds = ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'];
-    const movies = savedIds.map(nativeMovie);
-    SiteConfig.findOneAndUpdate = () => chain({
-        homeHero: {
-            mode: 'manual',
-            movieIds: savedIds,
-            heroSoundDefaultEnabled: false,
-            heroDefaultVolume: 0.35,
-        },
-        updatedAt: new Date('2026-07-01T00:00:00Z'),
-    });
-    SiteConfig.findOne = () => chain(null);
-    HeroRotationBatch.findOne = () => chain(null);
-    HeroRotationBatch.find = () => chain([]);
-    CatalogBatch.findOne = () => chain(null);
-    Show.find = () => chain([]);
-    Movie.find = () => chain(movies);
-    heroRotationRuntime.loadReadyMediaAssets = async (movieIds) => (
-        registeredHeroAssetsForMovies(movies, movieIds)
-    );
-
-    try {
-        const { getAdminHomeHero } = await import('../services/heroService.js');
-        const adminHero = await getAdminHomeHero();
-        assert.ok(Array.isArray(adminHero.liveMovies));
-        assert.ok(adminHero.manualSelection);
-        assert.deepEqual(adminHero.manualSelection.movieIds, savedIds);
-        assert.ok(Array.isArray(adminHero.manualSelection.movies));
-        assert.equal(adminHero.manualSelection.movies.length, 5);
-        assert.ok(adminHero.rotation);
-        assert.ok(adminHero.settings);
-        assert.ok(adminHero.selectedMovies);
-        assert.ok(adminHero.availableMovies);
-    } finally {
-        SiteConfig.findOneAndUpdate = originals.configFindOneAndUpdate;
-        SiteConfig.findOne = originals.configFindOne;
-        HeroRotationBatch.findOne = originals.batchFindOne;
-        HeroRotationBatch.find = originals.batchFind;
-        CatalogBatch.findOne = originals.catalogFindOne;
-        Show.find = originals.showFind;
-        Movie.find = originals.movieFind;
-        heroRotationRuntime.loadReadyMediaAssets = originals.loadReadyMediaAssets;
-    }
-});
-
-test('updateHomeHero throws HTTP 422 with MANUAL_HERO_INVALID and invalidMovies details on validation failure', async () => {
-    const originals = {
-        configFindOneAndUpdate: SiteConfig.findOneAndUpdate,
-        movieFind: Movie.find,
-        loadReadyMediaAssets: heroRotationRuntime.loadReadyMediaAssets,
-    };
-    const validMovies = ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'].map(nativeMovie);
-    const flawedMovies = validMovies.map((m, idx) => {
-        if (idx === 0) return { ...m, heroVideoStatus: 'missing' };
-        if (idx === 1 || idx === 2) return { ...m, heroVideoUrl: 'https://res.cloudinary.com/test/video/upload/hero_trailers/dup/official.mp4' };
-        return m;
-    });
-
-    Movie.find = () => chain(flawedMovies);
-    heroRotationRuntime.loadReadyMediaAssets = async (movieIds) => (
-        registeredHeroAssetsForMovies(flawedMovies, movieIds)
-    );
-    SiteConfig.findOneAndUpdate = () => {
-        assert.fail('SiteConfig.findOneAndUpdate should not be called when validation fails');
-    };
-
-    try {
-        const { updateHomeHero } = await import('../services/heroService.js');
-        await assert.rejects(
-            updateHomeHero({ mode: 'manual', movieIds: ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'] }),
+            () => getPublicHomeHero({ now: new Date('2026-03-10T02:00:00.000Z') }),
             (error) => {
-                assert.equal(error.status, 422);
-                assert.equal(error.statusCode, 422);
-                assert.equal(error.code, 'MANUAL_HERO_INVALID');
-                assert.equal(error.message, 'All five Manual Hero movies require verified native trailers.');
-                assert.ok(Array.isArray(error.invalidMovies));
-                assert.ok(error.invalidMovies.length > 0);
-                const m1Failure = error.invalidMovies.find((item) => item.movieId === 'm-1');
-                assert.ok(m1Failure);
-                assert.ok(m1Failure.reasons.includes('status-not-ready'));
+                assert.equal(error.statusCode, 503);
+                assert.equal(error.code, 'HERO_POOL_TOO_SMALL');
                 return true;
             },
         );
-    } finally {
-        SiteConfig.findOneAndUpdate = originals.configFindOneAndUpdate;
-        Movie.find = originals.movieFind;
-        heroRotationRuntime.loadReadyMediaAssets = originals.loadReadyMediaAssets;
-    }
+    });
 });
 
-test('getAdminHomeHero includes safe meta with buildSha, deploymentId, and environment', async () => {
-    const originals = {
-        configFindOneAndUpdate: SiteConfig.findOneAndUpdate,
-        configFindOne: SiteConfig.findOne,
-        batchFindOne: HeroRotationBatch.findOne,
-        batchFind: HeroRotationBatch.find,
-        catalogFindOne: CatalogBatch.findOne,
-        movieFind: Movie.find,
-        showFind: Show.find,
-        loadReadyMediaAssets: heroRotationRuntime.loadReadyMediaAssets,
-    };
-    const savedIds = ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'];
-    const movies = savedIds.map(nativeMovie);
-    SiteConfig.findOneAndUpdate = () => chain({
-        homeHero: {
-            mode: 'manual',
-            movieIds: savedIds,
-            heroSoundDefaultEnabled: false,
-            heroDefaultVolume: 0.35,
-        },
-        updatedAt: new Date('2026-07-01T00:00:00Z'),
+test('updateHomeHero rejects an incomplete manual selection without writing SiteConfig', async () => {
+    let wrote = false;
+    await withStubs({ onUpdate: () => { wrote = true; } }, async () => {
+        await assert.rejects(
+            () => updateHomeHero({ mode: 'manual', movieIds: ['movie-1', 'movie-2'] }),
+            (error) => {
+                assert.equal(error.statusCode, 400);
+                assert.equal(error.code, 'MANUAL_HERO_INVALID');
+                return true;
+            },
+        );
     });
-    SiteConfig.findOne = () => chain(null);
-    HeroRotationBatch.findOne = () => chain(null);
-    HeroRotationBatch.find = () => chain([]);
-    CatalogBatch.findOne = () => chain(null);
-    Show.find = () => chain([]);
-    Movie.find = () => chain(movies);
-    heroRotationRuntime.loadReadyMediaAssets = async (movieIds) => (
-        registeredHeroAssetsForMovies(movies, movieIds)
-    );
+    assert.equal(wrote, false);
+});
 
-    try {
-        const { getAdminHomeHero } = await import('../services/heroService.js');
-        const adminHero = await getAdminHomeHero();
-        assert.ok(adminHero.meta);
-        assert.equal(typeof adminHero.meta.buildSha, 'string');
-        assert.equal(typeof adminHero.meta.deploymentId, 'string');
-        assert.equal(typeof adminHero.meta.environment, 'string');
-        assert.equal(adminHero.meta.configuredMode, 'manual');
-        assert.equal(adminHero.meta.effectiveMode, 'manual');
-    } finally {
-        SiteConfig.findOneAndUpdate = originals.configFindOneAndUpdate;
-        SiteConfig.findOne = originals.configFindOne;
-        HeroRotationBatch.findOne = originals.batchFindOne;
-        HeroRotationBatch.find = originals.batchFind;
-        CatalogBatch.findOne = originals.catalogFindOne;
-        Show.find = originals.showFind;
-        Movie.find = originals.movieFind;
-        heroRotationRuntime.loadReadyMediaAssets = originals.loadReadyMediaAssets;
-    }
+test('updateHomeHero reports which manual movies no longer exist', async () => {
+    await withStubs({ movies: buildPool(3) }, async () => {
+        await assert.rejects(
+            () => updateHomeHero({ mode: 'manual', movieIds: ['movie-1', 'movie-2', 'movie-3', 'gone-1', 'gone-2'] }),
+            (error) => {
+                assert.equal(error.code, 'MANUAL_HERO_INVALID');
+                assert.deepEqual(error.invalidMovies, ['gone-1', 'gone-2']);
+                return true;
+            },
+        );
+    });
+});
+
+test('getAdminHomeHero exposes the live line-up, the saved selection, and the pool', async () => {
+    const movieIds = ['movie-2', 'movie-4', 'movie-6', 'movie-8', 'movie-10'];
+    await withStubs({
+        config: { homeHero: { mode: 'manual', movieIds }, updatedAt: new Date('2026-03-01T00:00:00Z') },
+    }, async () => {
+        const hero = await getAdminHomeHero({ now: new Date('2026-03-10T02:00:00.000Z') });
+        assert.equal(hero.liveMovies.length, 5);
+        assert.deepEqual(hero.manualSelection.movieIds, movieIds);
+        assert.deepEqual(hero.selectedMovies.map((movie) => movie.id), movieIds);
+        assert.ok(hero.availableMovies.length >= 5);
+        assert.equal(hero.meta.effectiveMode, 'manual');
+    });
+});
+
+test('the Hero ETag tracks movie order, seed, and mode', () => {
+    const base = {
+        settings: { configuredMode: 'auto', effectiveMode: 'auto' },
+        meta: { source: 'daily-poster-rotation', seed: 'hero:2026-03-10:default' },
+        dateKey: '2026-03-10',
+        movies: [{ id: 'a' }, { id: 'b' }],
+    };
+    const etag = createHeroEtag(base);
+
+    assert.equal(createHeroEtag(base), etag);
+    assert.notEqual(createHeroEtag({ ...base, movies: [{ id: 'b' }, { id: 'a' }] }), etag);
+    assert.notEqual(createHeroEtag({ ...base, meta: { ...base.meta, seed: 'hero:2026-03-11:default' } }), etag);
+    assert.notEqual(
+        createHeroEtag({ ...base, settings: { configuredMode: 'manual', effectiveMode: 'manual' } }),
+        etag,
+    );
+});
+
+test('If-None-Match accepts weak and comma-separated Hero ETags', () => {
+    const etag = '"hero-abc123"';
+    assert.equal(matchesHeroEtag(etag, etag), true);
+    assert.equal(matchesHeroEtag(`W/${etag}`, etag), true);
+    assert.equal(matchesHeroEtag(`"hero-other", ${etag}`, etag), true);
+    assert.equal(matchesHeroEtag('*', etag), true);
+    assert.equal(matchesHeroEtag('"hero-other"', etag), false);
+    assert.equal(matchesHeroEtag('', etag), false);
 });

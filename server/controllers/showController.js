@@ -1,12 +1,10 @@
-import { randomUUID } from 'node:crypto';
 import Movie from '../models/Movie.js';
 import Show from '../models/Show.js';
 import { importTrendingMoviesLogic } from '../services/movieService.js';
 import { deleteKeys, getJson, rememberJson, setJson } from '../services/cacheService.js';
 import { invalidateMovieCatalog } from '../services/cacheInvalidationService.js';
 import { redisKeys, redisTtl } from '../services/redisKeys.js';
-import { getPublicHomeHero } from '../services/heroService.js';
-import { createHeroEtag, matchesHeroEtag } from '../services/heroRotationService.js';
+import { createHeroEtag, getPublicHomeHero, matchesHeroEtag } from '../services/heroService.js';
 import {
     createHomeNowShowingEtag,
     getPublicHomeNowShowing,
@@ -20,6 +18,8 @@ import {
 } from '../services/tmdbTrailerService.js';
 import { calculateCurrentSlot, getPublicHomePayload } from '../services/catalogRefreshService.js';
 import { groupPersistedShowtimes, parseCinemaShowDateTime } from '../services/showtimeService.js';
+import { requestIdFor } from '../middleware/requestContext.js';
+import { LockBusyError } from '../services/lockService.js';
 import {
     getBookableNowShowingMovies,
     ensureDemoShowtimes,
@@ -33,13 +33,6 @@ import {
 const setCacheHeader = (res, cache) => res.set('X-Cache', cache);
 const HOME_BROWSER_CACHE_CONTROL = 'public, max-age=60, stale-if-error=86400';
 const HOME_CDN_CACHE_CONTROL = 's-maxage=300, stale-while-revalidate=43200, stale-if-error=86400';
-
-const requestIdFor = (req) => {
-    const candidate = req.get?.('x-request-id');
-    return /^[A-Za-z0-9._:-]{1,100}$/.test(String(candidate || ''))
-        ? String(candidate)
-        : randomUUID();
-};
 
 const setTimingHeader = (res, timing = {}) => {
     const entries = [
@@ -658,7 +651,7 @@ export const addShow = async (req, res) => {
         if (!showsToCreate.length) {
             return res.status(400).json({ success: false, message: 'At least one valid showtime is required.' });
         }
-        if (showsToCreate.length) await Show.insertMany(showsToCreate, { ordered: false });
+        await Show.insertMany(showsToCreate, { ordered: false });
         await invalidateMovieCatalog(String(movieId));
         return res.json({ success: true, message: 'Show added successfully.' });
     } catch (error) {
@@ -727,7 +720,10 @@ export const getShow = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Invalid movie ID.' });
         }
 
-        const loadShowtimes = async () => {
+        // `allowGeneration` bounds this to a single demo-schedule generation pass.
+        // Recursing unconditionally would loop forever whenever generation cannot
+        // reach SCHEDULE_DAYS distinct dates.
+        const loadShowtimes = async (allowGeneration = isDemoShowtimesEnabled()) => {
             const [shows, cachedMovie] = await Promise.all([
                 Show.find({
                     movie: movieId,
@@ -737,12 +733,18 @@ export const getShow = async (req, res) => {
                 getJson(redisKeys.movie(movieId)),
             ]);
             const grouped = groupPersistedShowtimes(shows);
-            const demoEligible = isDemoShowtimesEnabled()
+            const demoEligible = allowGeneration
                 && (!shows.length || shows.every((show) => isDemoScheduleKey(show.scheduleKey)))
                 && Object.keys(grouped).length < SCHEDULE_DAYS;
             if (demoEligible) {
-                await ensureDemoShowtimes({ movieId });
-                return loadShowtimes();
+                try {
+                    await ensureDemoShowtimes({ movieId });
+                } catch (error) {
+                    // A concurrent request already holds the generation lock; read
+                    // whatever is persisted rather than failing the whole response.
+                    if (!(error instanceof LockBusyError)) throw error;
+                }
+                return loadShowtimes(false);
             }
             const databaseMovie = cachedMovie ? null : await Movie.findById(movieId).lean();
             const movie = cachedMovie || databaseMovie || await fetchMovieFromTmdb(movieId);

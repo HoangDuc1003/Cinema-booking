@@ -57,13 +57,29 @@ export const deleteByPattern = async (pattern) => withRedis(async (client) => {
     return deleted;
 }, 0);
 
+// Coalesces concurrent misses for the same key inside this process. Without it a
+// cold or expired key lets every in-flight request run the loader at once, which
+// turns one popular endpoint into a burst of identical TMDB/MongoDB calls.
+const inFlight = new Map();
+
 export const rememberJson = async (key, ttlSeconds, loader) => {
     const cached = await getJson(key);
     if (cached !== null) return { value: cached, cache: 'hit' };
 
-    const value = await loader();
-    await setJson(key, value, ttlSeconds);
-    return { value, cache: 'miss' };
+    const pending = inFlight.get(key);
+    if (pending) return { value: await pending, cache: 'miss' };
+
+    const load = (async () => {
+        const value = await loader();
+        await setJson(key, value, ttlSeconds);
+        return value;
+    })();
+    inFlight.set(key, load);
+    try {
+        return { value: await load, cache: 'miss' };
+    } finally {
+        inFlight.delete(key);
+    }
 };
 
 export default {

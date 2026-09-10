@@ -10,9 +10,16 @@ test('catalog refresh and slot rotation jobs are registered with production sche
     assert.ok(byId.get('weekly-catalog-refresh'));
     assert.ok(byId.get('rotate-active-catalog-slot'));
     assert.ok(byId.get('sync-vn-now-playing-shows'));
-    assert.ok(byId.get('hero-media-requested'));
-    assert.ok(byId.get('hero-media-ingest'));
-    assert.ok(byId.get('hero-media-verify'));
-    assert.ok(byId.get('hero-pool-reconcile'));
-    assert.equal(byId.has('enrich-catalog-hero-videos'), false);
+    // The Hero is poster-only: no native-video ingestion or rotation jobs remain.
+    for (const removed of [
+        'hero-media-requested',
+        'hero-media-ingest',
+        'hero-media-verify',
+        'hero-pool-reconcile',
+        'enrich-catalog-hero-videos',
+        'daily-native-hero-rotation-refresh',
+        'reconcile-hero-assets',
+    ]) {
+        assert.equal(byId.has(removed), false, `${removed} should no longer be registered`);
+    }
 });

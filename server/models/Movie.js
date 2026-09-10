@@ -38,5 +38,10 @@ const movieSchema = new mongoose.Schema(
         heroVideoChecksum: { type: String, default: "" },
     },{timestamps:true}
 )
+
+// Backs the repeated "newest movies first" reads (catalog fallbacks, hero poster
+// pool). Without it every one of those is a full collection scan plus in-memory sort.
+movieSchema.index({ updatedAt: -1, _id: 1 });
+
 const Movie = mongoose.model('Movie', movieSchema);
 export default Movie;

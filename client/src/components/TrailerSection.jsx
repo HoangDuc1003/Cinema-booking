@@ -1,13 +1,32 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Film, Play, Star } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronLeft, ChevronRight, Film, Play, Star, Volume2, VolumeX } from 'lucide-react';
 import BlurCircle from './BlurCircle';
 import Loading from './Loading';
 import { useHomeData } from '../context/HomeDataContext';
 import { fetchHomeTrailers } from '../services/tmdb';
-import { useMediaQuery } from './hero/useHeroEnvironment';
+import { useMediaQuery, useSaveData } from './hero/useHeroEnvironment';
 
 const MAX_TRAILER_CANDIDATES = 10;
 const EMPTY_MOVIES = Object.freeze([]);
+// Autoplay only once the player is genuinely on screen, not merely near it.
+const AUTOPLAY_VISIBILITY_RATIO = 0.55;
+const YOUTUBE_ORIGIN = 'https://www.youtube-nocookie.com';
+// Kept as one literal so the privacy-preserving embed host stays greppable.
+const YOUTUBE_EMBED_BASE = 'https://www.youtube-nocookie.com/embed';
+
+const buildEmbedUrl = (key, { autoplay, muted }) => {
+    const params = new URLSearchParams({
+        rel: '0',
+        modestbranding: '1',
+        playsinline: '1',
+        // enablejsapi lets us pause over postMessage when the player scrolls away,
+        // instead of remounting the iframe and restarting the trailer.
+        enablejsapi: '1',
+        autoplay: autoplay ? '1' : '0',
+        mute: muted ? '1' : '0',
+    });
+    return `${YOUTUBE_EMBED_BASE}/${key}?${params.toString()}`;
+};
 
 const movieIdFor = (movie) => {
   const value = String(movie?._id || movie?.id || '').trim();
@@ -65,7 +84,15 @@ const TrailerUnavailable = ({ movie, allUnavailable = false }) => (
 const TrailerSection = ({ featuredMovie = null, sectionId = 'home-trailer-section' }) => {
   const { hero, heroStatus, nowShowing, nowShowingStatus } = useHomeData();
   const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
+  const saveData = useSaveData();
   const railRef = useRef(null);
+  const playerRef = useRef(null);
+  const frameRef = useRef(null);
+  const [inView, setInView] = useState(false);
+  const [muted, setMuted] = useState(true);
+  // Readiness is stored as the key that finished loading, so switching trailers
+  // invalidates it without an effect that resets state.
+  const [readyTrailerKey, setReadyTrailerKey] = useState('');
   const [selection, setSelection] = useState({ movieId: null, featuredId: null });
   const [requestState, setRequestState] = useState({
     key: '',
@@ -109,6 +136,48 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'home-trailer-sectio
     };
   }, [candidateIds, requestKey, sourcesSettled]);
 
+  // Autoplay is opt-out: honour reduced-motion and Save-Data, both of which mean
+  // "do not start heavy media on your own".
+  const autoplayAllowed = !reducedMotion && !saveData;
+
+  const postToPlayer = useCallback((func) => {
+    const frame = frameRef.current;
+    if (!frame?.contentWindow) return;
+    try {
+      frame.contentWindow.postMessage(
+        JSON.stringify({ event: 'command', func, args: [] }),
+        YOUTUBE_ORIGIN,
+      );
+    } catch {
+      // A cross-origin frame that has not finished loading rejects postMessage;
+      // the next visibility change retries, so there is nothing to recover here.
+    }
+  }, []);
+
+  // Tracks whether the player is on screen. The iframe stays mounted so scrolling
+  // past and back resumes the trailer instead of reloading it.
+  useEffect(() => {
+    const node = playerRef.current;
+    if (!node || typeof IntersectionObserver === 'undefined') {
+      setInView(true);
+      return undefined;
+    }
+    const observer = new IntersectionObserver(([entry]) => {
+      setInView(entry.isIntersecting && entry.intersectionRatio >= AUTOPLAY_VISIBILITY_RATIO);
+    }, { threshold: [0, AUTOPLAY_VISIBILITY_RATIO, 1] });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  // A trailer playing in a background tab is noise the user cannot see.
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState !== 'visible') postToPlayer('pauseVideo');
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [postToPlayer]);
+
   const resolvedByMovie = useMemo(() => new Map(
     (requestState.key === requestKey ? requestState.trailers : [])
       .map((trailer) => [trailer.movieId, trailer]),
@@ -128,6 +197,30 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'home-trailer-sectio
   const availableCount = items.filter((item) => item.trailer?.available).length;
   const loading = !sourcesSettled || (requestKey && requestState.key !== requestKey);
   const allUnavailable = !loading && items.length > 0 && availableCount === 0;
+
+  // The src never encodes play state: playback is driven entirely over
+  // postMessage, so scrolling and muting cannot rewrite the URL and reload the
+  // trailer. It always loads muted because browsers block sound-on autoplay -
+  // the user unmutes with the button, which is a real gesture and so allowed.
+  const trailerKey = current?.trailer?.available ? current.trailer.key : '';
+  const embedSrc = useMemo(
+    () => (trailerKey ? buildEmbedUrl(trailerKey, { autoplay: false, muted: true }) : ''),
+    [trailerKey],
+  );
+  const frameReady = Boolean(trailerKey) && readyTrailerKey === trailerKey;
+
+  // Waits for the iframe to load: a command posted to an unloaded frame is lost.
+  useEffect(() => {
+    if (!frameReady || !autoplayAllowed) return;
+    postToPlayer(inView ? 'playVideo' : 'pauseVideo');
+  }, [autoplayAllowed, frameReady, inView, postToPlayer]);
+
+  // Mute is toggled over postMessage, never through the src. Rewriting the src
+  // would reload the iframe and restart the trailer from zero.
+  useEffect(() => {
+    if (!frameReady) return;
+    postToPlayer(muted ? 'mute' : 'unMute');
+  }, [frameReady, muted, postToPlayer]);
 
   const selectMovie = (movieId) => {
     setSelection({ movieId, featuredId });
@@ -170,11 +263,18 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'home-trailer-sectio
             </div>
           </div>
         ) : current.trailer?.available ? (
-          <div className="aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl">
+          <div
+            ref={playerRef}
+            data-trailer-autoplay={autoplayAllowed ? 'enabled' : 'disabled'}
+            data-trailer-playing={autoplayAllowed && inView ? 'true' : 'false'}
+            className="trailer-player relative aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl"
+          >
             <iframe
               key={current.trailer.key}
+              ref={frameRef}
+              onLoad={() => setReadyTrailerKey(current.trailer.key)}
               id={`${sectionId}-player`}
-              src={`https://www.youtube-nocookie.com/embed/${current.trailer.key}?rel=0&modestbranding=1`}
+              src={embedSrc}
               title={`${current.movie.title || current.movie.name} ${current.trailer.name || 'trailer'}`}
               loading="lazy"
               referrerPolicy="strict-origin-when-cross-origin"
@@ -182,6 +282,17 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'home-trailer-sectio
               allowFullScreen
               className="h-full w-full"
             />
+            {autoplayAllowed && (
+              <button
+                type="button"
+                onClick={() => setMuted((current2) => !current2)}
+                aria-pressed={!muted}
+                aria-label={muted ? 'Unmute trailer' : 'Mute trailer'}
+                className="absolute bottom-4 right-4 z-10 flex h-11 w-11 items-center justify-center rounded-full border border-white/20 bg-black/70 text-white backdrop-blur-md transition hover:border-rose-400/60 hover:bg-rose-500/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+              >
+                {muted ? <VolumeX className="h-5 w-5" aria-hidden="true" /> : <Volume2 className="h-5 w-5" aria-hidden="true" />}
+              </button>
+            )}
           </div>
         ) : (
           <TrailerUnavailable movie={current.movie} allUnavailable={allUnavailable || requestState.status === 'error'} />

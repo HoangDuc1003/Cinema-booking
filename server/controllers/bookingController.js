@@ -26,21 +26,23 @@ import {
 
 export const isPersistedShowId = (showId) => mongoose.isValidObjectId(String(showId || ''));
 
-const resolveShow = (showId) => Show.findOne({
+const BOOKING_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+// A show is bookable only while it is open and starts inside the booking window.
+const bookableShowFilter = (showId) => ({
     _id: showId,
     bookingOpen: true,
-    showDateTime: { $gt: new Date(), $lt: new Date(Date.now() + (7 * 24 * 60 * 60 * 1000)) },
+    showDateTime: { $gt: new Date(), $lt: new Date(Date.now() + BOOKING_WINDOW_MS) },
     hall: { $ne: 'Virtual Hall' },
 });
 
-const findShowForSeatMap = async (showId) => {
-    return Show.findOne({
-        _id: showId,
-        bookingOpen: true,
-        showDateTime: { $gt: new Date(), $lt: new Date(Date.now() + (7 * 24 * 60 * 60 * 1000)) },
-        hall: { $ne: 'Virtual Hall' },
-    }).lean();
-};
+const resolveShow = (showId) => Show.findOne(bookableShowFilter(showId));
+
+const findShowForSeatMap = (showId) => Show.findOne(bookableShowFilter(showId)).lean();
+
+const earliestHoldExpiry = (bookings) => bookings.reduce((earliest, booking) => (
+    !earliest || booking.holdExpiresAt < earliest ? booking.holdExpiresAt : earliest
+), null);
 
 const logStripeSessionFailure = ({ label, error, booking, bookings, amount, origin }) => {
     console.error(label, {
@@ -191,7 +193,7 @@ export const createBooking = async (req, res) => {
                         const currentShow = await Show.findById(show._id).session(session);
                         if (!currentShow) throw Object.assign(new Error('Show not found.'), { statusCode: 404 });
                         if (!currentShow.bookingOpen || currentShow.showDateTime <= new Date()
-                            || currentShow.showDateTime >= new Date(Date.now() + (7 * 24 * 60 * 60 * 1000))) {
+                            || currentShow.showDateTime >= new Date(Date.now() + BOOKING_WINDOW_MS)) {
                             throw Object.assign(new Error('This show is no longer available for booking.'), { statusCode: 409, code: 'SHOW_NOT_BOOKABLE' });
                         }
 
@@ -544,9 +546,7 @@ export const payAllBookings = async (req, res) => {
             return res.json({
                 success: true,
                 bookingIds: validBookings.map((booking) => booking._id),
-                holdExpiresAt: validBookings.reduce((earliest, booking) => (
-                    !earliest || booking.holdExpiresAt < earliest ? booking.holdExpiresAt : earliest
-                ), null),
+                holdExpiresAt: earliestHoldExpiry(validBookings),
                 url: checkout.url,
             });
         } catch (paymentError) {
@@ -557,9 +557,7 @@ export const payAllBookings = async (req, res) => {
                 amount: totalAmount,
                 origin,
             });
-            const holdExpiresAt = validBookings.reduce((earliest, booking) => (
-                !earliest || booking.holdExpiresAt < earliest ? booking.holdExpiresAt : earliest
-            ), null);
+            const holdExpiresAt = earliestHoldExpiry(validBookings);
             return res.status(getPaymentErrorStatus(paymentError)).json({
                 success: false,
                 code: getPaymentErrorCode(paymentError),

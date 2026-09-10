@@ -246,20 +246,33 @@ body {
   transform: translate3d(0, 0, 0);
 }
 
+/* Each grid item is observed on its own, so this runs as the row reaches the
+   viewport rather than once for the whole grid. */
 @keyframes catalog-card-enter {
   from {
     opacity: 0;
-    transform: translate3d(0, 18px, 0);
+    transform: translate3d(0, 26px, 0) scale(0.965);
+    filter: blur(6px);
+  }
+  60% {
+    filter: blur(0);
   }
   to {
     opacity: 1;
-    transform: translate3d(0, 0, 0);
+    transform: translate3d(0, 0, 0) scale(1);
+    filter: blur(0);
   }
 }
 
 .catalog-grid-item.is-entering {
-  animation: catalog-card-enter var(--nitro-motion-slow) var(--nitro-ease-out) both;
+  animation: catalog-card-enter 620ms var(--nitro-ease-out) both;
   animation-delay: var(--catalog-card-delay, 0ms);
+  /* Dropped after the animation settles so the compositor can release the layer. */
+  will-change: transform, opacity;
+}
+
+.catalog-grid-item.is-entering:not(:hover) {
+  will-change: auto;
 }
 
 .movie-card {
@@ -595,4 +608,56 @@ body {
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: rgba(248, 69, 101, 0.5);
+}
+
+
+/* ---------- Hero admin ---------- */
+
+@keyframes hero-admin-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.hero-admin-poster,
+.hero-admin-row {
+  animation: hero-admin-enter 380ms var(--nitro-ease-out) both;
+  animation-delay: var(--hero-admin-delay, 0ms);
+}
+
+.hero-admin-poster img {
+  transition: transform 420ms var(--nitro-ease-out);
+}
+
+.hero-admin-poster:hover img {
+  transform: scale(1.04);
+}
+
+/* ---------- Home trailer ---------- */
+
+.trailer-player {
+  transition: box-shadow 420ms var(--nitro-ease-out), transform 420ms var(--nitro-ease-out);
+}
+
+/* A soft lift while the trailer is actually playing, so the section reads as
+   live without adding another moving element next to the video. */
+.trailer-player[data-trailer-playing='true'] {
+  transform: translate3d(0, -2px, 0);
+  box-shadow: 0 26px 60px -24px rgba(248, 69, 101, 0.55);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-admin-poster,
+  .hero-admin-row,
+  .hero-admin-poster img,
+  .trailer-player {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
 }

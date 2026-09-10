@@ -1,10 +1,28 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import MovieCard from './MovieCard';
-import useIntersectionObserver from '../hooks/useIntersectionObserver';
+import useScrollReveal from '../hooks/useScrollReveal';
 
 /**
- * @param {Array} movies 
- * @param {string} columns 
+ * One card plus its own reveal trigger. Observing per card (instead of once for
+ * the whole grid) is what makes the effect track the scroll: rows animate in as
+ * they reach the viewport rather than all at once when the grid is first seen.
+ */
+const GridItem = ({ movie, delay, animated, ctaLabel }) => {
+  const { ref, isRevealed } = useScrollReveal();
+  return (
+    <div
+      ref={ref}
+      className={`catalog-grid-item${animated && isRevealed ? ' is-entering' : ''}`}
+      style={{ '--catalog-card-delay': `${delay}ms` }}
+    >
+      <MovieCard movie={movie} ctaLabel={ctaLabel} />
+    </div>
+  );
+};
+
+/**
+ * @param {Array} movies
+ * @param {string} columns
  * @param {boolean} animated
  * @param {number} staggerDelay
  */
@@ -15,35 +33,20 @@ const MovieGrid = ({
   staggerDelay = 30,
   ctaLabel,
 }) => {
-  const { ref, isVisible } = useIntersectionObserver({
-    threshold: 0.01,
-    rootMargin: '0px 0px 500px 0px',
-    triggerOnce: true,
-  });
-
-  const movieItems = useMemo(() => {
-    if (!movies || movies.length === 0) return null;
-
-    return movies.map((movie, index) => {
-      const key = movie._id || movie.id || index;
-      const delay = Math.min(index * staggerDelay, 150);
-      const className = animated && isVisible
-        ? 'catalog-grid-item is-entering'
-        : 'catalog-grid-item';
-
-      return (
-        <div key={key} className={className} style={{ '--catalog-card-delay': `${delay}ms` }}>
-          <MovieCard movie={movie} ctaLabel={ctaLabel} />
-        </div>
-      );
-    });
-  }, [movies, animated, staggerDelay, isVisible, ctaLabel]);
-
-  if (!movieItems) return null;
+  if (!movies?.length) return null;
 
   return (
-    <div ref={ref} className={`catalog-movie-grid grid ${columns} gap-3 sm:gap-6 w-full`}>
-      {movieItems}
+    <div className={`catalog-movie-grid grid ${columns} w-full gap-3 sm:gap-6`}>
+      {movies.map((movie, index) => (
+        <GridItem
+          key={movie._id || movie.id || index}
+          movie={movie}
+          animated={animated}
+          ctaLabel={ctaLabel}
+          // Stagger inside a row only; a long list must not accumulate delay.
+          delay={(index % 5) * staggerDelay}
+        />
+      ))}
     </div>
   );
 };

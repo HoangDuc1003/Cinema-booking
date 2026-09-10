@@ -4,8 +4,6 @@ const HeroMedia = ({
   title,
   posterCandidates = [],
   posterVisible,
-  videoVisible,
-  children,
 }) => {
   const candidates = [...new Set(posterCandidates.filter(Boolean))];
   const candidateKey = candidates.join('|');
@@ -19,7 +17,7 @@ const HeroMedia = ({
   };
 
   return (
-    <div className={`hero-media ${videoVisible ? 'is-video-visible' : ''}`}>
+    <div className="hero-media">
       <div className={`hero-poster-shell ${currentSource ? '' : 'is-fallback'} ${posterVisible ? 'is-visible' : 'is-hidden'}`}>
         {currentSource && (
           <img
@@ -35,9 +33,6 @@ const HeroMedia = ({
           />
         )}
       </div>
-
-      {children}
-
       <div className="hero-media__breath" aria-hidden="true" />
       <div className="hero-media__gradient hero-media__gradient--side" aria-hidden="true" />
       <div className="hero-media__gradient hero-media__gradient--bottom" aria-hidden="true" />
