@@ -98,11 +98,17 @@ export const createGetHomeHeroHandler = ({
     etagMatches = matchesHeroEtag,
 } = {}) => async (req, res) => {
     try {
-        const payload = await loadHero();
+        const viewerId = req.auth?.()?.userId || null;
+        const payload = await loadHero({ viewerId });
         const etag = makeEtag(payload);
         res.set('ETag', etag);
-        res.set('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=86400');
-        res.set('Vary', 'Origin');
+        // A signed-in line-up is drawn from that account's own seed, so it must
+        // never be stored by a CDN or any other shared cache. Signed-out visitors
+        // all share one seed and stay publicly cacheable.
+        res.set('Cache-Control', payload.personalized
+            ? 'private, max-age=60, must-revalidate'
+            : 'public, max-age=60, s-maxage=300, stale-while-revalidate=86400');
+        res.set('Vary', payload.personalized ? 'Origin, Authorization, Cookie' : 'Origin');
         setCacheHeader(res, payload.cache);
         if (etagMatches(req.get('if-none-match'), etag)) {
             return res.status(304).end();
@@ -115,6 +121,7 @@ export const createGetHomeHeroHandler = ({
             generatedAt: payload.generatedAt,
             nextRefreshAt: payload.nextRefreshAt,
             timezone: payload.timezone,
+            personalized: payload.personalized,
             settings: payload.settings,
             movies: payload.movies,
             rotation: payload.rotation,

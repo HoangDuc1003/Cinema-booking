@@ -566,6 +566,19 @@
 
 .hero-action--details { display: none; }
 
+/* Sits beside Book Now and jumps the viewer to the trailer, so unlike
+   --details it stays visible at every breakpoint. */
+.hero-action--trailer {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(10, 12, 18, 0.48);
+  backdrop-filter: blur(14px);
+}
+
+.hero-content-zone.is-compact .hero-action--trailer,
+.hero-content-zone.is-compacting .hero-action--trailer {
+  display: none;
+}
+
 .hero-action:disabled,
 .hero-control:disabled {
   cursor: wait;

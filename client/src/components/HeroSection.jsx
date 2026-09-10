@@ -14,6 +14,7 @@ import {
   validateMovieCandidates,
 } from './hero/heroCatalogLoader';
 import { useMediaQuery } from './hero/useHeroEnvironment';
+import { scrollToTrailer } from '../lib/scrollToTrailer';
 import { useHomeData } from '../context/HomeDataContext';
 import './hero/hero.css';
 
@@ -226,6 +227,7 @@ const HeroSection = () => {
     navigate(`/movies/${currentMovie._id || currentMovie.id}`);
     window.scrollTo({ top: 0, behavior: reducedMotion ? 'auto' : 'smooth' });
   };
+  const showTrailer = () => scrollToTrailer({ reducedMotion });
 
   return (
     <section
@@ -258,6 +260,7 @@ const HeroSection = () => {
         runtime={formatRuntime(currentMovie.runtime)}
         rating={Number.isFinite(currentMovie.vote_average) ? currentMovie.vote_average.toFixed(1) : 'N/A'}
         onBook={navigateToMovie}
+        onTrailer={showTrailer}
         onDetails={navigateToMovie}
       />
 

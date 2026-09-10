@@ -6,11 +6,12 @@ import SiteConfig from '../models/SiteConfig.js';
 import {
     createHeroEtag,
     getAdminHomeHero,
-    getHeroDailySeed,
+    getHeroSeed,
+    getHeroSeedWindow,
     getPublicHomeHero,
     matchesHeroEtag,
     normalizeHeroMovie,
-    selectDailyPosterMovies,
+    selectHeroMovies,
     updateHomeHero,
 } from '../services/heroService.js';
 
@@ -22,6 +23,8 @@ const chain = (value) => ({
     lean: async () => value,
 });
 
+// Popularity descends with the index, so movie-1 and movie-2 are always the two
+// hottest and every other movie is a seeded candidate.
 const buildMovie = (index) => ({
     _id: `movie-${index}`,
     title: `Movie ${index}`,
@@ -30,6 +33,8 @@ const buildMovie = (index) => ({
     backdrop_path: `/backdrop-${index}.jpg`,
     release_date: '2026-01-01',
     vote_average: 7.5,
+    vote_count: 1000,
+    popularity: 1000 - index,
     runtime: 110,
     genres: [{ id: 28, name: 'Action' }],
 });
@@ -79,27 +84,68 @@ test('the Hero is poster-only and never projects a video field', () => {
     assert.equal(normalized.poster_path, '/poster-1.jpg');
 });
 
-test('the daily seed changes with the Vietnam calendar day, not with the clock', () => {
-    const morning = new Date('2026-03-10T02:00:00.000Z');
-    const evening = new Date('2026-03-10T15:00:00.000Z');
+test('a seed window spans three Vietnam days and turns over at local midnight', () => {
     // 2026-03-10T17:00Z is already 2026-03-11 in Vietnam (UTC+7).
-    const nextDay = new Date('2026-03-10T17:30:00.000Z');
+    const window = getHeroSeedWindow(new Date('2026-03-10T02:00:00.000Z'));
+    const sameWindowLater = getHeroSeedWindow(new Date('2026-03-10T15:00:00.000Z'));
 
-    assert.equal(getHeroDailySeed(morning), getHeroDailySeed(evening));
-    assert.notEqual(getHeroDailySeed(morning), getHeroDailySeed(nextDay));
+    assert.equal(window.key, sameWindowLater.key);
+    assert.equal(window.endsAt.getTime() - window.startsAt.getTime(), 3 * 86400000);
+    // The boundary is Vietnam midnight, i.e. 17:00 UTC on the previous day.
+    assert.match(window.startsAt.toISOString(), /T17:00:00\.000Z$/);
+    assert.match(window.endsAt.toISOString(), /T17:00:00\.000Z$/);
 });
 
-test('daily selection returns exactly five unique movies and is stable for the whole day', () => {
+test('the seed holds for three days and then rolls', () => {
+    const seedAt = (iso) => getHeroSeed({ now: new Date(iso), viewerId: 'user-1' });
+    const windowStart = getHeroSeedWindow(new Date('2026-03-10T02:00:00.000Z')).startsAt;
+    const dayIn = (days) => new Date(windowStart.getTime() + (days * 86400000) + 3600000).toISOString();
+
+    const first = seedAt(dayIn(0));
+    assert.equal(seedAt(dayIn(1)), first, 'day 2 of the window must keep the seed');
+    assert.equal(seedAt(dayIn(2)), first, 'day 3 of the window must keep the seed');
+    assert.notEqual(seedAt(dayIn(3)), first, 'day 4 starts a new window');
+});
+
+test('each account gets its own seed, and signed-out visitors share one', () => {
+    const now = new Date('2026-03-10T02:00:00.000Z');
+    const userA = getHeroSeed({ now, viewerId: 'user-a' });
+    const userB = getHeroSeed({ now, viewerId: 'user-b' });
+
+    assert.notEqual(userA, userB);
+    assert.equal(getHeroSeed({ now }), getHeroSeed({ now, viewerId: null }));
+    assert.equal(getHeroSeed({ now, viewerId: '  ' }), getHeroSeed({ now, viewerId: undefined }));
+    assert.notEqual(getHeroSeed({ now }), userA);
+});
+
+test('selection is two hottest movies plus three seeded, all unique', () => {
     const pool = buildPool(20).map(normalizeHeroMovie);
+    const picked = selectHeroMovies(pool, { now: new Date('2026-03-10T02:00:00.000Z'), viewerId: 'user-1' });
+
+    assert.equal(picked.length, 5);
+    assert.equal(new Set(picked.map((movie) => movie.id)).size, 5);
+    assert.deepEqual(picked.slice(0, 2).map((movie) => movie.id), ['movie-1', 'movie-2']);
+});
+
+test('the hot pair is identical for every account; only the other three differ', () => {
+    const pool = buildPool(30).map(normalizeHeroMovie);
+    const now = new Date('2026-03-10T02:00:00.000Z');
+    const a = selectHeroMovies(pool, { now, viewerId: 'user-a' }).map((movie) => movie.id);
+    const b = selectHeroMovies(pool, { now, viewerId: 'user-b' }).map((movie) => movie.id);
+
+    assert.deepEqual(a.slice(0, 2), b.slice(0, 2));
+    assert.notDeepEqual(a.slice(2), b.slice(2));
+});
+
+test('one account keeps the same five movies for the whole window', () => {
+    const pool = buildPool(30).map(normalizeHeroMovie);
     const morning = new Date('2026-03-10T02:00:00.000Z');
     const evening = new Date('2026-03-10T15:00:00.000Z');
 
-    const first = selectDailyPosterMovies(pool, morning);
-    const second = selectDailyPosterMovies(pool, evening);
-
-    assert.equal(first.length, 5);
-    assert.equal(new Set(first.map((movie) => movie.id)).size, 5);
-    assert.deepEqual(first.map((movie) => movie.id), second.map((movie) => movie.id));
+    assert.deepEqual(
+        selectHeroMovies(pool, { now: morning, viewerId: 'user-1' }).map((movie) => movie.id),
+        selectHeroMovies(pool, { now: evening, viewerId: 'user-1' }).map((movie) => movie.id),
+    );
 });
 
 test('selection order does not depend on the order MongoDB returned the pool in', () => {
@@ -108,43 +154,53 @@ test('selection order does not depend on the order MongoDB returned the pool in'
     const now = new Date('2026-03-10T02:00:00.000Z');
 
     assert.deepEqual(
-        selectDailyPosterMovies(pool, now).map((movie) => movie.id),
-        selectDailyPosterMovies(shuffledPool, now).map((movie) => movie.id),
+        selectHeroMovies(pool, { now, viewerId: 'user-1' }).map((movie) => movie.id),
+        selectHeroMovies(shuffledPool, { now, viewerId: 'user-1' }).map((movie) => movie.id),
     );
 });
 
-test('a different day reshuffles the line-up', () => {
+test('a new window reshuffles the seeded three', () => {
     const pool = buildPool(30).map(normalizeHeroMovie);
-    const days = ['2026-03-10', '2026-03-11', '2026-03-12', '2026-03-13'].map(
-        (day) => selectDailyPosterMovies(pool, new Date(`${day}T02:00:00.000Z`)).map((movie) => movie.id).join(','),
-    );
-    // With a 30-movie pool, four consecutive days must not all produce one line-up.
-    assert.ok(new Set(days).size > 1, `daily seed did not rotate: ${days.join(' | ')}`);
+    const windows = [0, 3, 6, 9].map((offset) => {
+        const now = new Date(Date.parse('2026-03-10T02:00:00.000Z') + (offset * 86400000));
+        return selectHeroMovies(pool, { now, viewerId: 'user-1' }).slice(2).map((movie) => movie.id).join(',');
+    });
+    assert.ok(new Set(windows).size > 1, `seed did not roll across windows: ${windows.join(' | ')}`);
 });
 
-test('a different seed salt reshuffles the line-up without waiting for the next day', () => {
+test('a different seed salt reshuffles without waiting for the next window', () => {
     const pool = buildPool(30).map(normalizeHeroMovie);
     const now = new Date('2026-03-10T02:00:00.000Z');
-    const base = selectDailyPosterMovies(pool, now).map((movie) => movie.id).join(',');
-    const salted = selectDailyPosterMovies(pool, now, 'admin-randomized').map((movie) => movie.id).join(',');
+    const base = selectHeroMovies(pool, { now, viewerId: 'user-1' }).slice(2).map((movie) => movie.id).join(',');
+    const salted = selectHeroMovies(pool, { now, viewerId: 'user-1', salt: 'admin-randomized' })
+        .slice(2).map((movie) => movie.id).join(',');
     assert.notEqual(base, salted);
 });
 
 test('a pool at or below five movies is returned whole instead of being dropped', () => {
     const pool = buildPool(5).map(normalizeHeroMovie);
-    assert.equal(selectDailyPosterMovies(pool, new Date()).length, 5);
+    assert.equal(selectHeroMovies(pool, { now: new Date(), viewerId: 'user-1' }).length, 5);
 });
 
 test('auto mode returns five movies plus the seed metadata clients cache on', async () => {
     await withStubs({}, async () => {
-        const payload = await getPublicHomeHero({ now: new Date('2026-03-10T02:00:00.000Z') });
+        const payload = await getPublicHomeHero({
+            now: new Date('2026-03-10T02:00:00.000Z'),
+            viewerId: 'user-1',
+        });
         assert.equal(payload.movies.length, 5);
         assert.equal(payload.settings.effectiveMode, 'auto');
-        assert.equal(payload.meta.source, 'daily-poster-rotation');
+        assert.equal(payload.meta.source, 'seeded-poster-rotation');
         assert.equal(payload.dateKey, '2026-03-10');
-        assert.equal(payload.meta.seed, 'hero:2026-03-10:default');
-        assert.equal(payload.rotation.type, 'daily-poster');
-        assert.equal(payload.nextRefreshAt, '2026-03-10T17:00:00.000Z');
+        assert.equal(payload.meta.seedWindowDays, 3);
+        assert.equal(payload.meta.hotCount, 2);
+        assert.equal(payload.rotation.type, 'seeded-poster');
+        assert.equal(payload.personalized, true);
+        assert.match(payload.meta.seed, /^hero:w\d+:user-1:default$/);
+        assert.equal(
+            payload.nextRefreshAt,
+            new Date(Date.parse(payload.meta.seedWindowStartsAt) + (3 * 86400000)).toISOString(),
+        );
     });
 });
 
@@ -171,7 +227,9 @@ test('manual mode falls back to the daily rotation when a saved movie disappears
         const payload = await getPublicHomeHero({ now: new Date('2026-03-10T02:00:00.000Z') });
         assert.equal(payload.movies.length, 5);
         assert.equal(payload.settings.effectiveMode, 'auto');
-        assert.equal(payload.meta.source, 'daily-poster-rotation');
+        assert.equal(payload.meta.source, 'seeded-poster-rotation');
+        // Signed out: shared seed, so the response stays publicly cacheable.
+        assert.equal(payload.personalized, false);
     });
 });
 
@@ -233,7 +291,7 @@ test('getAdminHomeHero exposes the live line-up, the saved selection, and the po
 test('the Hero ETag tracks movie order, seed, and mode', () => {
     const base = {
         settings: { configuredMode: 'auto', effectiveMode: 'auto' },
-        meta: { source: 'daily-poster-rotation', seed: 'hero:2026-03-10:default' },
+        meta: { source: 'seeded-poster-rotation', seed: 'hero:w6000:user-1:default' },
         dateKey: '2026-03-10',
         movies: [{ id: 'a' }, { id: 'b' }],
     };
@@ -241,7 +299,7 @@ test('the Hero ETag tracks movie order, seed, and mode', () => {
 
     assert.equal(createHeroEtag(base), etag);
     assert.notEqual(createHeroEtag({ ...base, movies: [{ id: 'b' }, { id: 'a' }] }), etag);
-    assert.notEqual(createHeroEtag({ ...base, meta: { ...base.meta, seed: 'hero:2026-03-11:default' } }), etag);
+    assert.notEqual(createHeroEtag({ ...base, meta: { ...base.meta, seed: 'hero:w6001:user-1:default' } }), etag);
     assert.notEqual(
         createHeroEtag({ ...base, settings: { configuredMode: 'manual', effectiveMode: 'manual' } }),
         etag,

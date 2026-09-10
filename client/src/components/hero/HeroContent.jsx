@@ -1,5 +1,5 @@
 import React from 'react';
-import { CalendarIcon, ClockIcon, Info, Star, Ticket } from 'lucide-react';
+import { CalendarIcon, ClockIcon, Info, PlayCircle, Star, Ticket } from 'lucide-react';
 
 const HeroContent = ({
   movieKey,
@@ -10,6 +10,7 @@ const HeroContent = ({
   runtime,
   rating,
   onBook,
+  onTrailer,
   onDetails,
 }) => {
   const title = movie.title || movie.name || '';
@@ -57,6 +58,12 @@ const HeroContent = ({
             <Ticket aria-hidden="true" />
             <span>Book Now</span>
           </button>
+          {onTrailer && (
+            <button type="button" onClick={onTrailer} className="hero-action hero-action--trailer">
+              <PlayCircle aria-hidden="true" />
+              <span>Trailer</span>
+            </button>
+          )}
           <button type="button" onClick={onDetails} className="hero-action hero-action--details">
             <Info aria-hidden="true" />
             <span>Details</span>

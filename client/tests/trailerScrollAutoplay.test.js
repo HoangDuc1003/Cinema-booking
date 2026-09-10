@@ -80,3 +80,42 @@ test('movie cards reveal individually as the grid scrolls past, and stay visible
   assert.match(hook, /typeof IntersectionObserver === 'undefined'/);
   assert.match(css, /\.catalog-grid-item \{[^}]*opacity: 1;/);
 });
+
+test('the Hero offers a Trailer button beside Book Now that jumps to the trailer', async () => {
+  const [content, section] = await Promise.all([
+    read('../src/components/hero/HeroContent.jsx'),
+    read('../src/components/HeroSection.jsx'),
+  ]);
+
+  assert.match(content, /hero-action--trailer/);
+  assert.match(content, /<span>Trailer<\/span>/);
+  // It sits between Book Now and Details.
+  assert.ok(
+    content.indexOf('hero-action--primary') < content.indexOf('hero-action--trailer'),
+    'Trailer must come after Book Now',
+  );
+  assert.match(section, /scrollToTrailer\(\{ reducedMotion \}\)/);
+  assert.match(section, /onTrailer=\{showTrailer\}/);
+});
+
+test('the trailer jump centres its target and never scrolls past a tall one', async () => {
+  const source = await read('../src/lib/scrollToTrailer.js');
+
+  assert.match(source, /window\.innerHeight - rect\.height\) \/ 2/);
+  // An element taller than the viewport aligns to the top instead of centring.
+  assert.match(source, /Math\.max\(0, \(window\.innerHeight - rect\.height\) \/ 2\)/);
+  assert.match(source, /Math\.max\(0, window\.scrollY \+ rect\.top - spare\)/);
+  // The section mounts lazily, so the player is re-centred once it appears.
+  assert.match(source, /TARGET_SELECTORS = \['\.trailer-player', '#home-trailer-section', '#trailers'\]/);
+  assert.match(source, /requestAnimationFrame\(settle\)/);
+  assert.match(source, /reducedMotion \? 'auto' : 'smooth'/);
+});
+
+test('the movie poster grows downward on hover so the artwork is never cropped at the top', async () => {
+  const css = await read('../src/index.css');
+
+  const posterRule = css.slice(css.indexOf('.movie-card__poster {'));
+  assert.match(posterRule.slice(0, 600), /transform-origin: top center;/);
+  // The card still clips, which is exactly why the origin has to be the top edge.
+  assert.match(css, /\.movie-card \{[\s\S]*?overflow: hidden;/);
+});
