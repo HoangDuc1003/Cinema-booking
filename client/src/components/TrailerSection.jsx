@@ -14,6 +14,30 @@ const YOUTUBE_ORIGIN = 'https://www.youtube-nocookie.com';
 // Kept as one literal so the privacy-preserving embed host stays greppable.
 const YOUTUBE_EMBED_BASE = 'https://www.youtube-nocookie.com/embed';
 
+// YouTube player states delivered over postMessage.
+const YT_PLAYING = 1;
+const YT_BUFFERING = 3;
+// How long to wait for sound-on playback before deciding the browser refused it.
+const SOUND_FALLBACK_MS = 1500;
+const SOUND_PREFERENCE_KEY = 'nitro_trailer_sound';
+
+const readSoundPreference = () => {
+    try {
+        // Sound is on by default; only an explicit mute is remembered.
+        return localStorage.getItem(SOUND_PREFERENCE_KEY) !== 'off';
+    } catch {
+        return true;
+    }
+};
+
+const writeSoundPreference = (soundOn) => {
+    try {
+        localStorage.setItem(SOUND_PREFERENCE_KEY, soundOn ? 'on' : 'off');
+    } catch {
+        // Private browsing or blocked storage: the preference just will not persist.
+    }
+};
+
 const buildEmbedUrl = (key, { autoplay, muted }) => {
     const params = new URLSearchParams({
         rel: '0',
@@ -89,7 +113,17 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'home-trailer-sectio
   const playerRef = useRef(null);
   const frameRef = useRef(null);
   const [inView, setInView] = useState(false);
-  const [muted, setMuted] = useState(true);
+  // Sound is on by default; the player falls back to muted only when the browser
+  // actually refuses to start with sound.
+  const [soundOn, setSoundOn] = useState(readSoundPreference);
+  const [soundBlocked, setSoundBlocked] = useState(false);
+  // The trailer the viewer explicitly started, which is the gesture that lets
+  // the browser allow sound.
+  const [startedKey, setStartedKey] = useState('');
+  const playerStateRef = useRef(-1);
+  // Whether the viewer has interacted with the page at all. This decides whether
+  // sound is allowed, so it drives rendering and has to be state, not a ref.
+  const [hasGesture, setHasGesture] = useState(false);
   // Readiness is stored as the key that finished loading, so switching trailers
   // invalidates it without an effect that resets state.
   const [readyTrailerKey, setReadyTrailerKey] = useState('');
@@ -140,18 +174,50 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'home-trailer-sectio
   // "do not start heavy media on your own".
   const autoplayAllowed = !reducedMotion && !saveData;
 
-  const postToPlayer = useCallback((func) => {
+  const postToFrame = useCallback((payload) => {
     const frame = frameRef.current;
     if (!frame?.contentWindow) return;
     try {
-      frame.contentWindow.postMessage(
-        JSON.stringify({ event: 'command', func, args: [] }),
-        YOUTUBE_ORIGIN,
-      );
+      frame.contentWindow.postMessage(JSON.stringify(payload), YOUTUBE_ORIGIN);
     } catch {
       // A cross-origin frame that has not finished loading rejects postMessage;
       // the next visibility change retries, so there is nothing to recover here.
     }
+  }, []);
+
+  const postToPlayer = useCallback((func) => {
+    postToFrame({ event: 'command', func, args: [] });
+  }, [postToFrame]);
+
+  // Any real click or key press unlocks sound-on playback in every browser's
+  // autoplay policy, so remember that one happened.
+  useEffect(() => {
+    if (hasGesture) return undefined;
+    const remember = () => setHasGesture(true);
+    window.addEventListener('pointerdown', remember, { once: true, passive: true });
+    window.addEventListener('keydown', remember, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', remember);
+      window.removeEventListener('keydown', remember);
+    };
+  }, [hasGesture]);
+
+  // The player reports its state only after we subscribe, and that state is how
+  // we tell "playing with sound" from "the browser silently refused".
+  useEffect(() => {
+    const onMessage = (event) => {
+      if (event.origin !== YOUTUBE_ORIGIN) return;
+      let payload;
+      try {
+        payload = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      const state = payload?.info?.playerState;
+      if (typeof state === 'number') playerStateRef.current = state;
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
   }, []);
 
   // Tracks whether the player is on screen. The iframe stays mounted so scrolling
@@ -198,32 +264,76 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'home-trailer-sectio
   const loading = !sourcesSettled || (requestKey && requestState.key !== requestKey);
   const allUnavailable = !loading && items.length > 0 && availableCount === 0;
 
-  // The src never encodes play state: playback is driven entirely over
-  // postMessage, so scrolling and muting cannot rewrite the URL and reload the
-  // trailer. It always loads muted because browsers block sound-on autoplay -
-  // the user unmutes with the button, which is a real gesture and so allowed.
   const trailerKey = current?.trailer?.available ? current.trailer.key : '';
+  const userStarted = Boolean(trailerKey) && startedKey === trailerKey;
+  // Either the viewer pressed play, or the trailer scrolled far enough into view.
+  const active = Boolean(trailerKey) && (userStarted || (autoplayAllowed && inView));
+  // Sound needs a prior interaction; without one the browser would refuse to
+  // start at all, which is worse than starting quietly.
+  const muted = !soundOn || soundBlocked || (!userStarted && !hasGesture);
+
+  // The src carries the opening play state and nothing else. Scrolling, muting
+  // and pausing all go over postMessage, because rewriting the src would reload
+  // the iframe and restart the trailer from zero.
   const embedSrc = useMemo(
-    () => (trailerKey ? buildEmbedUrl(trailerKey, { autoplay: false, muted: true }) : ''),
-    [trailerKey],
+    () => (active ? buildEmbedUrl(trailerKey, { autoplay: true, muted }) : ''),
+    // `muted` is deliberately read only when the player first mounts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [active, trailerKey],
   );
   const frameReady = Boolean(trailerKey) && readyTrailerKey === trailerKey;
 
   // Waits for the iframe to load: a command posted to an unloaded frame is lost.
   useEffect(() => {
-    if (!frameReady || !autoplayAllowed) return;
-    postToPlayer(inView ? 'playVideo' : 'pauseVideo');
-  }, [autoplayAllowed, frameReady, inView, postToPlayer]);
+    if (!frameReady) return;
+    postToFrame({ event: 'listening', id: sectionId });
+    if (!autoplayAllowed && !userStarted) return;
+    postToPlayer(inView || userStarted ? 'playVideo' : 'pauseVideo');
+  }, [autoplayAllowed, frameReady, inView, postToFrame, postToPlayer, sectionId, userStarted]);
 
-  // Mute is toggled over postMessage, never through the src. Rewriting the src
-  // would reload the iframe and restart the trailer from zero.
   useEffect(() => {
     if (!frameReady) return;
     postToPlayer(muted ? 'mute' : 'unMute');
   }, [frameReady, muted, postToPlayer]);
 
-  const selectMovie = (movieId) => {
+  // If the browser refused sound-on playback it simply never starts, so give it
+  // a moment and then retry quietly rather than leaving a dead player on screen.
+  useEffect(() => {
+    if (!frameReady || !active || muted) return undefined;
+    const timer = window.setTimeout(() => {
+      const state = playerStateRef.current;
+      if (state !== YT_PLAYING && state !== YT_BUFFERING) {
+        setSoundBlocked(true);
+        postToPlayer('mute');
+        postToPlayer('playVideo');
+      }
+    }, SOUND_FALLBACK_MS);
+    return () => window.clearTimeout(timer);
+  }, [active, frameReady, muted, postToPlayer, trailerKey]);
+
+  const toggleSound = () => {
+    const next = !soundOn;
+    setSoundOn(next);
+    writeSoundPreference(next);
+    // An explicit unmute is itself the gesture the browser was waiting for.
+    if (next) setSoundBlocked(false);
+  };
+
+  const startTrailer = (key) => {
+    playerStateRef.current = -1;
+    setHasGesture(true);
+    setSoundBlocked(false);
+    setStartedKey(key);
+  };
+
+  const selectMovie = (movieId, key) => {
     setSelection({ movieId, featuredId });
+    playerStateRef.current = -1;
+    setSoundBlocked(false);
+    // Picking a card from the rail is an explicit gesture, so that trailer may
+    // start straight away with sound instead of dropping back to the preview.
+    if (key) startTrailer(key);
+    else setStartedKey('');
   };
 
   const scrollRail = (direction) => {
@@ -269,26 +379,55 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'home-trailer-sectio
             data-trailer-playing={autoplayAllowed && inView ? 'true' : 'false'}
             className="trailer-player relative aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl"
           >
-            <iframe
-              key={current.trailer.key}
-              ref={frameRef}
-              onLoad={() => setReadyTrailerKey(current.trailer.key)}
-              id={`${sectionId}-player`}
-              src={embedSrc}
-              title={`${current.movie.title || current.movie.name} ${current.trailer.name || 'trailer'}`}
-              loading="lazy"
-              referrerPolicy="strict-origin-when-cross-origin"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-              allowFullScreen
-              className="h-full w-full"
-            />
-            {autoplayAllowed && (
+            {active ? (
+              <iframe
+                key={current.trailer.key}
+                ref={frameRef}
+                onLoad={() => setReadyTrailerKey(current.trailer.key)}
+                id={`${sectionId}-player`}
+                src={embedSrc}
+                title={`${current.movie.title || current.movie.name} ${current.trailer.name || 'trailer'}`}
+                referrerPolicy="strict-origin-when-cross-origin"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowFullScreen
+                className="h-full w-full"
+              />
+            ) : (
+              // Our own preview. The embed is not mounted yet, so YouTube's
+              // branded poster and red play button never appear.
               <button
                 type="button"
-                onClick={() => setMuted((current2) => !current2)}
+                onClick={() => startTrailer(current.trailer.key)}
+                aria-label={`Play the ${current.movie.title || current.movie.name} trailer`}
+                className="trailer-preview"
+              >
+                {(current.trailer.thumbnailUrl || imageFor(current.movie)) && (
+                  <img
+                    src={current.trailer.thumbnailUrl || imageFor(current.movie)}
+                    alt=""
+                    aria-hidden="true"
+                    className="trailer-preview__art"
+                  />
+                )}
+                <span className="trailer-preview__scrim" aria-hidden="true" />
+                <span className="trailer-preview__play" aria-hidden="true">
+                  <Play className="h-7 w-7 fill-current" />
+                </span>
+                <span className="trailer-preview__meta">
+                  <span className="trailer-preview__title">{current.movie.title || current.movie.name}</span>
+                  <span className="trailer-preview__hint">
+                    {current.trailer.official ? 'Official ' : ''}{current.trailer.type || 'Trailer'}
+                  </span>
+                </span>
+              </button>
+            )}
+            {active && (
+              <button
+                type="button"
+                onClick={toggleSound}
                 aria-pressed={!muted}
                 aria-label={muted ? 'Unmute trailer' : 'Mute trailer'}
-                className="absolute bottom-4 right-4 z-10 flex h-11 w-11 items-center justify-center rounded-full border border-white/20 bg-black/70 text-white backdrop-blur-md transition hover:border-rose-400/60 hover:bg-rose-500/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                className="trailer-glass-button absolute bottom-4 right-4 z-10"
               >
                 {muted ? <VolumeX className="h-5 w-5" aria-hidden="true" /> : <Volume2 className="h-5 w-5" aria-hidden="true" />}
               </button>
@@ -328,7 +467,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'home-trailer-sectio
                   <button
                     key={item.movieId}
                     type="button"
-                    onClick={() => selectMovie(item.movieId)}
+                    onClick={() => selectMovie(item.movieId, item.trailer?.available ? item.trailer.key : '')}
                     aria-pressed={selected}
                     aria-controls={`${sectionId}-player`}
                     aria-label={`${item.trailer?.available ? 'Play trailer for' : 'Select'} ${title}`}

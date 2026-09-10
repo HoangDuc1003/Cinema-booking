@@ -45,7 +45,7 @@ const millisecondsUntilNextVietnamDay = (now = new Date()) => {
   return Math.max(1_000, nextMidnight - now.getTime());
 };
 
-const HeroSection = () => {
+const HeroSection = ({ onTrailerRequest }) => {
   const navigate = useNavigate();
   // Aliased to keep Hero's retry visibly distinct from the Now Showing one:
   // the two sections must never share a retry path.
@@ -227,7 +227,12 @@ const HeroSection = () => {
     navigate(`/movies/${currentMovie._id || currentMovie.id}`);
     window.scrollTo({ top: 0, behavior: reducedMotion ? 'auto' : 'smooth' });
   };
-  const showTrailer = () => scrollToTrailer({ reducedMotion });
+  const showTrailer = () => {
+    // Hand the Trailer section the movie on screen so it opens that one, rather
+    // than whatever happened to be selected down there already.
+    onTrailerRequest?.(currentMovie);
+    scrollToTrailer({ reducedMotion });
+  };
 
   return (
     <section

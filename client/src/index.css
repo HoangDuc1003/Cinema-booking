@@ -645,6 +645,122 @@ body {
 
 /* ---------- Home trailer ---------- */
 
+/* Shared frosted-glass control. The trailer preview and the sound toggle are the
+   same object at two sizes, so they read as one control language. */
+.trailer-glass-button,
+.trailer-preview__play {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 999px;
+  background: rgba(10, 12, 18, 0.46);
+  color: #fff;
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  backdrop-filter: blur(16px) saturate(140%);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  transition: transform 260ms var(--nitro-ease-out), background 260ms ease, border-color 260ms ease;
+}
+
+.trailer-glass-button {
+  width: 2.75rem;
+  height: 2.75rem;
+}
+
+.trailer-glass-button:hover,
+.trailer-glass-button:focus-visible {
+  border-color: rgba(248, 69, 101, 0.6);
+  background: rgba(248, 69, 101, 0.28);
+}
+
+.trailer-glass-button:focus-visible,
+.trailer-preview:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9);
+}
+
+/* Stands in for the embed until playback starts, which is how YouTube's own
+   poster and red play button are kept off screen entirely. */
+.trailer-preview {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: #05060a;
+  cursor: pointer;
+}
+
+.trailer-preview__art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 700ms var(--nitro-ease-out);
+}
+
+.trailer-preview:hover .trailer-preview__art {
+  transform: scale(1.03);
+}
+
+.trailer-preview__scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(4, 5, 8, 0.24) 0%, rgba(4, 5, 8, 0.12) 42%, rgba(4, 5, 8, 0.88) 100%);
+}
+
+.trailer-preview__play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 5rem;
+  height: 5rem;
+  transform: translate(-50%, -50%);
+}
+
+.trailer-preview:hover .trailer-preview__play,
+.trailer-preview:focus-visible .trailer-preview__play {
+  border-color: rgba(248, 69, 101, 0.62);
+  background: rgba(248, 69, 101, 0.3);
+  transform: translate(-50%, -50%) scale(1.07);
+}
+
+.trailer-preview__meta {
+  position: absolute;
+  right: 1.25rem;
+  bottom: 1.15rem;
+  left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  text-align: left;
+}
+
+.trailer-preview__title {
+  overflow: hidden;
+  color: #fff;
+  font-size: 1.05rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trailer-preview__hint {
+  color: rgba(229, 231, 235, 0.74);
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 640px) {
+  .trailer-preview__play { width: 3.75rem; height: 3.75rem; }
+  .trailer-preview__title { font-size: 0.9rem; }
+}
+
+
 .trailer-player {
   transition: box-shadow 420ms var(--nitro-ease-out), transform 420ms var(--nitro-ease-out);
 }
@@ -660,9 +776,23 @@ body {
   .hero-admin-poster,
   .hero-admin-row,
   .hero-admin-poster img,
+  .trailer-preview__art,
+  .trailer-glass-button,
   .trailer-player {
     animation: none !important;
     transition: none !important;
     transform: none !important;
+  }
+
+  /* Motion off, but keep the transform: it is what centres the play button,
+     not decoration. */
+  .trailer-preview__play {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .trailer-preview:hover .trailer-preview__play,
+  .trailer-preview:focus-visible .trailer-preview__play {
+    transform: translate(-50%, -50%);
   }
 }
