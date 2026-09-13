@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { randomUUID } from 'node:crypto';
+import Booking from '../models/Booking.js';
 import Movie from '../models/Movie.js';
 import Show from '../models/Show.js';
 import { invalidateMovieCatalog } from './cacheInvalidationService.js';
@@ -24,22 +25,12 @@ export const HALLS = Object.freeze([
     'Hall 4',
 ]);
 
-export const WEEKDAY_TIMES = Object.freeze([
-    '10:00',
-    '13:00',
-    '16:00',
-    '19:00',
-    '22:00',
-]);
-
-export const WEEKEND_TIMES = Object.freeze([
-    '08:30',
-    '11:30',
-    '14:30',
-    '17:30',
-    '20:30',
-    '23:15',
-]);
+export const SHOWS_PER_DAY = 3;
+// Mock schedules start any time between opening and the last start, on a
+// 15-minute grid so the times still look like a real cinema's.
+export const FIRST_SHOW_MINUTE = 9 * 60;
+export const LAST_SHOW_MINUTE = 23 * 60;
+export const SHOW_SLOT_STEP_MINUTES = 15;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const VIETNAM_OFFSET_MS = 7 * 60 * 60 * 1000;
@@ -151,6 +142,70 @@ export const getScheduleDateKeys = ({ now = new Date(), days = SCHEDULE_DAYS, st
     });
 };
 
+// FNV-1a: a stable 32-bit hash so a movie/date pair always seeds the same draw.
+const hashSeed = (value) => {
+    let hash = 0x811c9dc5;
+    for (const char of String(value)) {
+        hash ^= char.codePointAt(0);
+        hash = Math.imul(hash, 0x01000193);
+    }
+    return hash >>> 0;
+};
+
+// mulberry32: tiny seeded PRNG, good enough to scatter mock showtimes.
+const seededRandom = (seed) => {
+    let state = seed >>> 0;
+    return () => {
+        state = (state + 0x6d2b79f5) >>> 0;
+        let t = state;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+};
+
+const minuteToTime = (minute) => (
+    `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`
+);
+
+const SHOW_SLOT_MINUTES = Object.freeze(Array.from(
+    { length: Math.floor((LAST_SHOW_MINUTE - FIRST_SHOW_MINUTE) / SHOW_SLOT_STEP_MINUTES) + 1 },
+    (_, index) => FIRST_SHOW_MINUTE + (index * SHOW_SLOT_STEP_MINUTES),
+));
+
+// The draw looks random but is seeded by movie and date. Sync runs daily and
+// upserts by scheduleKey, so a truly random draw would pile up extra shows on
+// every run instead of converging on the same three.
+// The draw always runs over the whole day, never only the slots still ahead:
+// narrowing the pool would reshuffle today's times whenever sync runs mid-day.
+export const pickDailyShowTimes = ({ movieId, dateKey, runtime }) => {
+    const random = seededRandom(hashSeed(`${movieId}:${dateKey}`));
+
+    // One movie's own shows never overlap, so the same audience could catch any
+    // of the three. Capped so a very long film still fits three into one day.
+    const gap = Math.min(
+        normalizeRuntime(runtime) + CLEANUP_MINUTES,
+        Math.floor((LAST_SHOW_MINUTE - FIRST_SHOW_MINUTE) / SHOWS_PER_DAY),
+    );
+    // A greedy pick can paint itself into a corner when the gap is wide, so
+    // reshuffle a few times before settling for fewer shows.
+    let best = [];
+    for (let attempt = 0; attempt < 12 && best.length < SHOWS_PER_DAY; attempt += 1) {
+        const order = [...SHOW_SLOT_MINUTES];
+        for (let index = order.length - 1; index > 0; index -= 1) {
+            const swap = Math.floor(random() * (index + 1));
+            [order[index], order[swap]] = [order[swap], order[index]];
+        }
+        const picked = [];
+        for (const minute of order) {
+            if (picked.every((other) => Math.abs(other - minute) >= gap)) picked.push(minute);
+            if (picked.length === SHOWS_PER_DAY) break;
+        }
+        if (picked.length > best.length) best = picked;
+    }
+    return best.sort((left, right) => left - right).map(minuteToTime);
+};
+
 export const buildGeneratedShows = ({
     movieIds = [],
     movies = [],
@@ -163,12 +218,6 @@ export const buildGeneratedShows = ({
     const price = normalizePrice(showPrice);
     const generatedShows = [];
     const normalizedDays = normalizeDays(days);
-    const firstDate = getScheduleDateKeys({ now, days: 1 })[0];
-    const firstDayTimes = firstDate.weekday === 0 || firstDate.weekday === 6 ? WEEKEND_TIMES : WEEKDAY_TIMES;
-    const lastShowOfFirstDay = parseCinemaShowDateTime(firstDate.dateKey, firstDayTimes.at(-1));
-    const startOffset = asDate(now).getTime() + (SCHEDULE_BUFFER_MINUTES * 60 * 1000)
-        > lastShowOfFirstDay.getTime() ? 1 : 0;
-    const dateKeys = getScheduleDateKeys({ now, days: normalizedDays, startOffset });
     const normalizedMovies = (movies.length ? movies : movieIds.map((id) => ({ id })))
         .map((movie) => ({
             id: toMovieId(movie),
@@ -176,42 +225,39 @@ export const buildGeneratedShows = ({
         }))
         .filter((movie) => movie.id);
     const earliestAllowed = asDate(now).getTime() + (SCHEDULE_BUFFER_MINUTES * 60 * 1000);
+    // One spare date: when some of today's shows have already started, today
+    // keeps what is left and the full number of whole days still follows.
+    const dateKeys = getScheduleDateKeys({ now, days: normalizedDays + 1 });
 
-    for (const { dateKey, weekday } of dateKeys) {
-        const times = weekday === 0 || weekday === 6 ? WEEKEND_TIMES : WEEKDAY_TIMES;
-        const availableAt = new Map(HALLS.map((hall) => [hall, 0]));
-        for (const movie of normalizedMovies) {
-            let selected = null;
-            for (const time of times) {
-                const showDateTime = parseCinemaShowDateTime(dateKey, time);
-                if (showDateTime.getTime() <= earliestAllowed) continue;
-                for (const hall of HALLS) {
-                    if (showDateTime.getTime() < (availableAt.get(hall) || 0)) continue;
-                    selected = { time, hall, showDateTime };
-                    break;
-                }
-                if (selected) break;
-            }
-            if (!selected) continue;
-            availableAt.set(
-                selected.hall,
-                selected.showDateTime.getTime() + ((movie.runtime + CLEANUP_MINUTES) * 60 * 1000),
-            );
-            generatedShows.push({
-                movie: movie.id,
-                showDateTime: selected.showDateTime,
-                showPrice: price,
-                hall: selected.hall,
-                source: 'tmdb-now-playing',
-                region: normalizedRegion,
-                bookingOpen: true,
-                scheduleStatus: 'scheduled',
-                scheduleKey: `tmdb-${normalizedRegion.toLowerCase()}:${movie.id}:${dateKey}:${selected.time}:${selected.hall}`,
+    for (const movie of normalizedMovies) {
+        let fullDays = 0;
+        for (const { dateKey } of dateKeys) {
+            if (fullDays === normalizedDays) break;
+            const upcoming = pickDailyShowTimes({ movieId: movie.id, dateKey, runtime: movie.runtime })
+                .map((time) => ({ time, showDateTime: parseCinemaShowDateTime(dateKey, time) }))
+                .filter(({ showDateTime }) => showDateTime.getTime() > earliestAllowed);
+            if (upcoming.length === SHOWS_PER_DAY) fullDays += 1;
+            // The day's shows never overlap, so they share one hall: seat layout
+            // asks for a hall first, and all three times should sit behind it.
+            // Seats belong to the show, so hall packing across movies is not solved.
+            const hall = HALLS[hashSeed(`${movie.id}:${dateKey}`) % HALLS.length];
+            upcoming.forEach(({ time, showDateTime }) => {
+                generatedShows.push({
+                    movie: movie.id,
+                    showDateTime,
+                    showPrice: price,
+                    hall,
+                    source: 'tmdb-now-playing',
+                    region: normalizedRegion,
+                    bookingOpen: true,
+                    scheduleStatus: 'scheduled',
+                    scheduleKey: `tmdb-${normalizedRegion.toLowerCase()}:${movie.id}:${dateKey}:${time}:${hall}`,
+                });
             });
         }
     }
 
-    return generatedShows;
+    return generatedShows.sort((left, right) => left.showDateTime - right.showDateTime);
 };
 
 const upsertMovies = async ({ movies, movieModel }) => {
@@ -266,6 +312,38 @@ const closeStaleShows = async ({ showModel, activeMovieIds, now, region }) => {
             showDateTime: { $gte: now },
             movie: { $nin: activeMovieIds },
         },
+        { $set: { bookingOpen: false, scheduleStatus: 'closed' } },
+    );
+    return Number(result?.modifiedCount ?? result?.nModified ?? 0);
+};
+
+// Future generated shows for these movies that the current draw no longer
+// produces (for example the old one-show-a-day pattern). A show that anyone has
+// booked, or is still checking out on, stays exactly as it is: holds live in
+// Booking/SeatReservation, not only in the legacy occupiedSeats map.
+const closeSupersededShows = async ({ showModel, bookingModel, generatedShows, now, keyPrefix }) => {
+    if (!generatedShows.length || typeof showModel.find !== 'function') return 0;
+    const candidates = await showModel.find({
+        movie: { $in: [...new Set(generatedShows.map((show) => show.movie))] },
+        scheduleKey: {
+            $regex: `^${keyPrefix}:`,
+            $nin: generatedShows.map((show) => show.scheduleKey),
+        },
+        bookingOpen: true,
+        showDateTime: { $gte: asDate(now) },
+        occupiedSeats: {},
+    }).select('_id').lean();
+    if (!candidates.length) return 0;
+
+    const booked = new Set((await bookingModel.distinct('show', {
+        show: { $in: candidates.map((show) => show._id) },
+    })).map(String));
+    const closable = candidates.map((show) => show._id).filter((id) => !booked.has(String(id)));
+    if (!closable.length) return 0;
+
+    const result = await showModel.updateMany(
+        // Re-checked here so a show that took a seat since the read stays open.
+        { _id: { $in: closable }, bookingOpen: true, occupiedSeats: {} },
         { $set: { bookingOpen: false, scheduleStatus: 'closed' } },
     );
     return Number(result?.modifiedCount ?? result?.nModified ?? 0);
@@ -346,6 +424,7 @@ export const ensureDemoShowtimes = async ({
     fetcher = axios.get,
     movieModel = Movie,
     showModel = Show,
+    bookingModel = Booking,
     invalidate = invalidateMovieCatalog,
     lock = withDistributedLock,
 } = {}) => {
@@ -386,11 +465,19 @@ export const ensureDemoShowtimes = async ({
                 generatedShows,
                 syncBatchId: `demo-vn-${normalizedMovieId}`,
             });
+            const showsClosed = await closeSupersededShows({
+                showModel,
+                bookingModel,
+                generatedShows,
+                now,
+                keyPrefix: 'demo-vn',
+            });
             await invalidate(normalizedMovieId);
             return {
                 movieId: normalizedMovieId,
                 showsCreated: showStats.created,
                 showsReused: showStats.reused,
+                showsClosed,
                 days: normalizeDays(days),
                 simulated: true,
             };
@@ -406,6 +493,7 @@ export const syncNowPlayingShows = async ({
     fetcher = axios.get,
     movieModel = Movie,
     showModel = Show,
+    bookingModel = Booking,
     invalidate = invalidateMovieCatalog,
     lock = withDistributedLock,
     logger = console,
@@ -484,6 +572,13 @@ export const syncNowPlayingShows = async ({
             });
             const syncBatchId = `tmdb-vn-${nowDate.toISOString()}-${randomUUID()}`;
             const showStats = await upsertShows({ showModel, generatedShows, syncBatchId });
+            const showsSuperseded = await closeSupersededShows({
+                showModel,
+                bookingModel,
+                generatedShows,
+                now: nowDate,
+                keyPrefix: `tmdb-${normalizedRegion.toLowerCase()}`,
+            });
             await invalidate();
 
             const summary = {
@@ -497,6 +592,7 @@ export const syncNowPlayingShows = async ({
                 showsCreated: showStats.created,
                 showsReused: showStats.reused,
                 showsClosed,
+                showsSuperseded,
                 requestedBy,
             };
             logger.info?.(JSON.stringify(summary));

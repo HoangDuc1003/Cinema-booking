@@ -26,6 +26,7 @@ import {
     isDemoScheduleKey,
     isDemoShowtimesEnabled,
     SCHEDULE_DAYS,
+    SHOWS_PER_DAY,
     TMDB_REGION,
     syncNowPlayingShows,
 } from '../services/nowPlayingShowSyncService.js';
@@ -720,6 +721,12 @@ export const getCinemas = async (req, res) => {
     }
 };
 
+// Today may legitimately hold fewer shows once some have started, so a schedule
+// is full when enough whole days are covered, not when every day is.
+const isFullDemoSchedule = (dateTime = {}) => Object.values(dateTime)
+    .filter((shows) => Array.isArray(shows) && shows.length >= SHOWS_PER_DAY)
+    .length >= SCHEDULE_DAYS;
+
 export const getShow = async (req, res) => {
     try {
         const movieId = String(req.params.movieId || '');
@@ -729,20 +736,22 @@ export const getShow = async (req, res) => {
 
         // `allowGeneration` bounds this to a single demo-schedule generation pass.
         // Recursing unconditionally would loop forever whenever generation cannot
-        // reach SCHEDULE_DAYS distinct dates.
+        // reach SCHEDULE_DAYS full dates.
         const loadShowtimes = async (allowGeneration = isDemoShowtimesEnabled()) => {
             const [shows, cachedMovie] = await Promise.all([
                 Show.find({
                     movie: movieId,
                     showDateTime: { $gte: new Date() },
                     hall: { $ne: 'Virtual Hall' },
+                    // Superseded generated shows are closed, not deleted.
+                    bookingOpen: { $ne: false },
                 }).sort({ showDateTime: 1 }).lean(),
                 getJson(redisKeys.movie(movieId)),
             ]);
             const grouped = groupPersistedShowtimes(shows);
             const demoEligible = allowGeneration
                 && (!shows.length || shows.every((show) => isDemoScheduleKey(show.scheduleKey)))
-                && Object.keys(grouped).length < SCHEDULE_DAYS;
+                && !isFullDemoSchedule(grouped);
             if (demoEligible) {
                 try {
                     await ensureDemoShowtimes({ movieId });
@@ -765,7 +774,7 @@ export const getShow = async (req, res) => {
         let result = await rememberJson(redisKeys.showtimes(movieId), redisTtl.showtimes, loadShowtimes);
         const resultDateCount = Object.keys(result.value?.dateTime || {}).length;
         const refreshDemoCache = isDemoShowtimesEnabled()
-            && (!resultDateCount || (result.value?.simulated === true && resultDateCount < SCHEDULE_DAYS));
+            && (!resultDateCount || (result.value?.simulated === true && !isFullDemoSchedule(result.value.dateTime)));
         if (refreshDemoCache) {
             await deleteKeys(redisKeys.showtimes(movieId));
             result = await rememberJson(redisKeys.showtimes(movieId), redisTtl.showtimes, loadShowtimes);

@@ -765,6 +765,130 @@ body {
   transition: box-shadow 420ms var(--nitro-ease-out), transform 420ms var(--nitro-ease-out);
 }
 
+/* ---------- Movie details trailer preview ---------- */
+
+.trailer-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(3, 4, 8, 0.78);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  animation: trailer-modal-fade 220ms ease-out;
+}
+
+.trailer-modal__panel {
+  /* Capped by height too, so header, 16:9 stage and footer always fit on screen. */
+  width: min(100%, 64rem, calc((100dvh - 11rem) * 16 / 9));
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 1.25rem;
+  background: linear-gradient(180deg, rgba(20, 22, 30, 0.96), rgba(8, 9, 14, 0.98));
+  box-shadow: 0 40px 120px -30px rgba(248, 69, 101, 0.35), 0 24px 60px rgba(0, 0, 0, 0.6);
+  animation: trailer-modal-rise 320ms var(--nitro-ease-out);
+}
+
+.trailer-modal__header,
+.trailer-modal__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+}
+
+.trailer-modal__eyebrow {
+  color: var(--color-primary, #f84565);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.trailer-modal__title {
+  overflow: hidden;
+  color: #fff;
+  font-size: clamp(1.1rem, 2.2vw, 1.5rem);
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trailer-modal__stage {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  overflow: hidden;
+  background: #05060a;
+}
+
+.trailer-modal__art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: opacity 400ms ease, filter 400ms ease;
+}
+
+.trailer-modal__art[data-dim='true'] {
+  opacity: 0.35;
+  filter: blur(2px) saturate(80%);
+}
+
+.trailer-preview--overlay {
+  background: transparent;
+}
+
+.trailer-modal__state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 1.5rem;
+  color: rgba(229, 231, 235, 0.86);
+  text-align: center;
+}
+
+.trailer-modal__pulse {
+  width: 4.5rem;
+  height: 4.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  background: rgba(10, 12, 18, 0.46);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  animation: trailer-modal-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes trailer-modal-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes trailer-modal-rise {
+  from { opacity: 0; transform: translate3d(0, 16px, 0) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes trailer-modal-pulse {
+  0%, 100% { transform: scale(0.92); box-shadow: 0 0 0 0 rgba(248, 69, 101, 0.35); }
+  50% { transform: scale(1); box-shadow: 0 0 0 14px rgba(248, 69, 101, 0); }
+}
+
+@media (max-width: 640px) {
+  .trailer-modal { padding: 0.5rem; }
+  .trailer-modal__header,
+  .trailer-modal__footer { padding: 0.75rem 0.9rem; }
+}
+
 /* A soft lift while the trailer is actually playing, so the section reads as
    live without adding another moving element next to the video. */
 .trailer-player[data-trailer-playing='true'] {
@@ -778,7 +902,10 @@ body {
   .hero-admin-poster img,
   .trailer-preview__art,
   .trailer-glass-button,
-  .trailer-player {
+  .trailer-player,
+  .trailer-modal,
+  .trailer-modal__panel,
+  .trailer-modal__pulse {
     animation: none !important;
     transition: none !important;
     transform: none !important;

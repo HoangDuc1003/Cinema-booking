@@ -6,8 +6,10 @@ import {
     ensureDemoShowtimes,
     getBookableNowShowingMovies,
     isDemoShowtimesEnabled,
+    pickDailyShowTimes,
     syncNowPlayingShows,
 } from '../services/nowPlayingShowSyncService.js';
+import { getShowtimeDateKey } from '../services/showtimeService.js';
 
 test('Show stores generated lifecycle fields and a partial unique schedule index', () => {
     assert.equal(Show.schema.path('source').options.default, 'manual');
@@ -24,35 +26,120 @@ test('Show stores generated lifecycle fields and a partial unique schedule index
     assert.equal(legacyIdentityIndex?.[1]?.unique, true);
 });
 
-test('generated VN schedules use local dates, weekday/weekend times, and stable keys', () => {
+test('generated VN schedules give each movie three drawn times on each of seven local dates', () => {
+    const now = new Date('2026-08-01T01:00:00.000Z');
     const shows = buildGeneratedShows({
-        movieIds: ['101'],
-        now: new Date('2026-08-01T01:00:00.000Z'),
+        movies: [{ id: '101', runtime: 120 }, { id: '102', runtime: 95 }],
+        now,
         days: 7,
         showPrice: 120,
     });
 
-    assert.equal(shows.length, 7);
-    assert.equal(shows[0].showDateTime.toISOString(), '2026-08-01T04:30:00.000Z');
-    assert.equal(shows[0].scheduleKey, 'tmdb-vn:101:2026-08-01:11:30:Hall 1');
+    for (const movieId of ['101', '102']) {
+        const own = shows.filter((show) => show.movie === movieId);
+        assert.equal(own.length, 21);
+        const byDate = Map.groupBy(own, (show) => getShowtimeDateKey(show.showDateTime));
+        assert.equal(byDate.size, 7);
+        assert.equal(byDate.keys().next().value, '2026-08-01');
+        for (const dayShows of byDate.values()) {
+            assert.equal(dayShows.length, 3);
+            assert.equal(new Set(dayShows.map((show) => show.hall)).size, 1);
+            // scheduleKey is "tmdb-vn:<movie>:<date>:<HH>:<mm>:<hall>".
+            const minutes = dayShows.map((show) => {
+                const [, , , hours, mins] = show.scheduleKey.split(':');
+                return (Number(hours) * 60) + Number(mins);
+            });
+            assert.ok(minutes.every((minute) => minute >= 9 * 60 && minute <= 23 * 60 && minute % 15 === 0));
+            const runtime = movieId === '101' ? 120 : 95;
+            for (let index = 1; index < minutes.length; index += 1) {
+                assert.ok(minutes[index] - minutes[index - 1] >= runtime + 30);
+            }
+        }
+    }
+
     assert.equal(shows[0].source, 'tmdb-now-playing');
     assert.equal(shows[0].region, 'VN');
     assert.equal(shows[0].bookingOpen, true);
+    assert.equal(shows[0].showPrice, 120);
+    assert.match(shows[0].scheduleKey, /^tmdb-vn:10[12]:2026-08-01:\d{2}:\d{2}:Hall \d$/);
     assert.ok(shows.every((show) => show.showDateTime > new Date('2026-08-01T01:45:00.000Z')));
+    assert.equal(new Set(shows.map((show) => show.scheduleKey)).size, shows.length);
+});
+
+test('generated times are drawn per movie and date but stable across sync runs', () => {
+    const build = (now) => buildGeneratedShows({ movieIds: ['101', '102'], now, days: 7 });
+    const first = build(new Date('2026-08-01T01:00:00.000Z'));
+    const again = build(new Date('2026-08-01T01:05:00.000Z'));
+    assert.deepEqual(again.map((show) => show.scheduleKey), first.map((show) => show.scheduleKey));
+
+    const timesFor = (movieId) => first
+        .filter((show) => show.movie === movieId)
+        .map((show) => show.scheduleKey.split(':').slice(2, 5).join(':'));
+    assert.notDeepEqual(timesFor('101'), timesFor('102'));
+    const dailyPatterns = new Set([...Map.groupBy(
+        first.filter((show) => show.movie === '101'),
+        (show) => getShowtimeDateKey(show.showDateTime),
+    ).values()].map((dayShows) => dayShows.map((show) => show.scheduleKey.split(':').slice(3, 5).join(':')).join(',')));
+    assert.ok(dailyPatterns.size > 1, 'times should vary from day to day');
+});
+
+test('a mid-day sync keeps today\'s remaining times instead of redrawing them', () => {
+    const build = (now) => buildGeneratedShows({ movieIds: ['101'], now, days: 7 });
+    const morning = build(new Date('2026-08-01T00:00:00.000Z'));
+    const evening = build(new Date('2026-08-01T11:00:00.000Z'));
+    const cutoff = new Date('2026-08-01T11:45:00.000Z');
+    const stillAhead = morning
+        .filter((show) => show.showDateTime > cutoff && getShowtimeDateKey(show.showDateTime) === '2026-08-01')
+        .map((show) => show.scheduleKey);
+    const eveningKeys = new Set(evening.map((show) => show.scheduleKey));
+    assert.ok(stillAhead.every((key) => eveningKeys.has(key)));
+    // Seven whole days still follow a partly used today.
+    const fullDays = [...Map.groupBy(evening, (show) => getShowtimeDateKey(show.showDateTime)).values()]
+        .filter((dayShows) => dayShows.length === 3);
+    assert.ok(fullDays.length >= 7);
+});
+
+test('a very long film still gets three shows a day', () => {
+    const times = pickDailyShowTimes({ movieId: '555', dateKey: '2026-08-03', runtime: 400 });
+    assert.equal(times.length, 3);
 });
 
 test('sync fetches only TMDB now-playing VN movies, closes stale shows, and idempotently upserts shows', async () => {
-    const calls = { movieOps: [], close: null, showOps: [], invalidated: false, log: null };
+    const calls = {
+        movieOps: [], close: null, candidates: null, bookedQuery: null, superseded: null,
+        showOps: [], invalidated: false, log: null,
+    };
     const movieModel = {
         bulkWrite: async (operations) => {
             calls.movieOps = operations;
             return { upsertedCount: 2 };
         },
     };
+    const bookingModel = {
+        distinct: async (field, query) => {
+            calls.bookedQuery = { field, query };
+            // Someone is mid-checkout on the second superseded show.
+            return ['old-booked'];
+        },
+    };
     const showModel = {
+        find: (filter) => {
+            calls.candidates = filter;
+            const chain = {
+                select: () => chain,
+                lean: async () => [{ _id: 'old-free' }, { _id: 'old-booked' }],
+            };
+            return chain;
+        },
         updateMany: async (filter, update) => {
-            calls.close = { filter, update };
-            return { modifiedCount: 3 };
+            // First call closes movies that left now-playing; the second closes
+            // unbooked shows the new draw no longer produces.
+            if (!calls.close) {
+                calls.close = { filter, update };
+                return { modifiedCount: 3 };
+            }
+            calls.superseded = { filter, update };
+            return { modifiedCount: 1 };
         },
         bulkWrite: async (operations) => {
             calls.showOps = operations;
@@ -75,6 +162,7 @@ test('sync fetches only TMDB now-playing VN movies, closes stale shows, and idem
         },
         movieModel,
         showModel,
+        bookingModel,
         invalidate: async () => { calls.invalidated = true; },
         logger: { info: (message) => { calls.log = JSON.parse(message); } },
     });
@@ -82,8 +170,17 @@ test('sync fetches only TMDB now-playing VN movies, closes stale shows, and idem
     assert.equal(result.movies, 2);
     assert.equal(result.moviesCreated, 2);
     assert.equal(result.showsCreated, 1);
-    assert.equal(result.showsReused, 13);
+    assert.equal(result.showsReused, 41);
     assert.equal(result.showsClosed, 3);
+    assert.equal(calls.candidates.scheduleKey.$regex, '^tmdb-vn:');
+    assert.equal(calls.candidates.scheduleKey.$nin.length, 42);
+    assert.deepEqual(calls.candidates.occupiedSeats, {});
+    assert.deepEqual(calls.bookedQuery.query.show.$in, ['old-free', 'old-booked']);
+    // Only the show nobody has touched is closed.
+    assert.deepEqual(calls.superseded.filter._id.$in, ['old-free']);
+    assert.deepEqual(calls.superseded.filter.occupiedSeats, {});
+    assert.equal(calls.superseded.update.$set.bookingOpen, false);
+    assert.equal(result.showsSuperseded, 1);
     assert.equal(calls.movieOps.length, 2);
     assert.deepEqual(calls.close.filter.movie.$nin, ['101', '102']);
     assert.equal(calls.close.filter.source, 'tmdb-now-playing');
@@ -147,7 +244,7 @@ test('sync prioritizes active Hero movies in the seven-day simulated schedule', 
     };
     const showModel = {
         updateMany: async (filter) => {
-            calls.close = filter;
+            calls.close ??= filter;
             return { modifiedCount: 0 };
         },
         bulkWrite: async (operations) => {
@@ -202,8 +299,8 @@ test('demo showtimes persist seven bookable dates with real Mongo-compatible sho
 
     assert.equal(result.simulated, true);
     assert.equal(result.days, 7);
-    assert.equal(result.showsCreated, 7);
-    assert.equal(calls.operations.length, 7);
+    assert.equal(result.showsCreated, 21);
+    assert.equal(calls.operations.length, 21);
     assert.equal(calls.invalidated, '101');
     assert.ok(calls.operations.every((operation) => (
         operation.updateOne.update.$setOnInsert.source === 'manual'

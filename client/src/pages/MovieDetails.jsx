@@ -12,7 +12,7 @@ import MovieGrid from '../components/MovieGrid';
 import MovieCard from '../components/MovieCard';
 import DateSelect from '../components/DateSelect';
 import Loading from '../components/Loading';
-import TrailerSection from '../components/TrailerSection';
+import MovieTrailerModal from '../components/MovieTrailerModal';
 import toast from 'react-hot-toast';
 
 const MovieDetails = () => {
@@ -31,7 +31,7 @@ const MovieDetails = () => {
   const [recommendationReloadToken, setRecommendationReloadToken] = useState(0);
   const navigate = useNavigate();
   const [isFavorited, setIsFavorited] = useState(false);
-  const [showTrailerSection, setShowTrailerSection] = useState(false);
+  const [trailerOpen, setTrailerOpen] = useState(false);
 
   const toggleFavorite = useCallback((e) => {
     e.stopPropagation();
@@ -62,7 +62,7 @@ const MovieDetails = () => {
     const controller = new AbortController();
 
     const loadMovieDetails = async () => {
-      setShowTrailerSection(false);
+      setTrailerOpen(false);
       setIsLoading(true);
       setHasError(false);
       setShowtimeStatus('loading');
@@ -154,12 +154,11 @@ const MovieDetails = () => {
     [show?.genres]
   );
 
-  const handleWatchTrailer = () => {
-    setShowTrailerSection(true);
-    window.setTimeout(() => {
-      document.getElementById('movie-trailers')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 80);
-  };
+  const handleWatchTrailer = () => setTrailerOpen(true);
+  const closeTrailer = useCallback(() => setTrailerOpen(false), []);
+  const scrollToShowtimes = useCallback(() => {
+    document.getElementById('dateSelect')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
 
   useEffect(() => {
     if (recommendationStatus !== 'ready' || movies.length === 0) return;
@@ -314,10 +313,14 @@ const MovieDetails = () => {
           onRetry={() => setShowtimeReloadToken((value) => value + 1)}
         />
 
-        {showTrailerSection && (
-          <TrailerSection sectionId="movie-trailers" featuredMovie={show} movieOnly />
-        )}
       </div>
+
+      <MovieTrailerModal
+        movie={show}
+        open={trailerOpen}
+        onClose={closeTrailer}
+        onBuyTickets={scrollToShowtimes}
+      />
 
       <section className="relative z-10 w-full mt-16 pb-10">
         <div className="mx-auto w-full max-w-[1440px] px-6 lg:px-10 xl:px-12">
