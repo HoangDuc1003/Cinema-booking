@@ -20,11 +20,12 @@ import { calculateCurrentSlot, getPublicHomePayload } from '../services/catalogR
 import { groupPersistedShowtimes, parseCinemaShowDateTime } from '../services/showtimeService.js';
 import { requestIdFor } from '../middleware/requestContext.js';
 import { LockBusyError } from '../services/lockService.js';
+import { isScheduledMovie } from '../services/scheduleMovieService.js';
 import {
     getBookableNowShowingMovies,
-    ensureDemoShowtimes,
-    isDemoScheduleKey,
-    isDemoShowtimesEnabled,
+    ensureScheduledShowtimes,
+    isGeneratedScheduleKey,
+    isShowtimeGenerationEnabled,
     SCHEDULE_DAYS,
     SHOWS_PER_DAY,
     TMDB_REGION,
@@ -99,17 +100,13 @@ export const createGetHomeHeroHandler = ({
     etagMatches = matchesHeroEtag,
 } = {}) => async (req, res) => {
     try {
-        const viewerId = req.auth?.()?.userId || null;
-        const payload = await loadHero({ viewerId });
+        const payload = await loadHero();
         const etag = makeEtag(payload);
         res.set('ETag', etag);
-        // A signed-in line-up is drawn from that account's own seed, so it must
-        // never be stored by a CDN or any other shared cache. Signed-out visitors
-        // all share one seed and stay publicly cacheable.
-        res.set('Cache-Control', payload.personalized
-            ? 'private, max-age=60, must-revalidate'
-            : 'public, max-age=60, s-maxage=300, stale-while-revalidate=86400');
-        res.set('Vary', payload.personalized ? 'Origin, Authorization, Cookie' : 'Origin');
+        // One line-up for everyone, so the CDN may hold it. Stale serving is kept
+        // short so the midnight rotation is not masked for a whole day.
+        res.set('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=600');
+        res.set('Vary', 'Origin');
         setCacheHeader(res, payload.cache);
         if (etagMatches(req.get('if-none-match'), etag)) {
             return res.status(304).end();
@@ -122,7 +119,6 @@ export const createGetHomeHeroHandler = ({
             generatedAt: payload.generatedAt,
             nextRefreshAt: payload.nextRefreshAt,
             timezone: payload.timezone,
-            personalized: payload.personalized,
             settings: payload.settings,
             movies: payload.movies,
             rotation: payload.rotation,
@@ -255,8 +251,8 @@ export const syncNowPlayingShowsAdmin = async (req, res) => {
         if (!result.success && result.skipped) {
             return res.status(503).json({
                 success: false,
-                code: result.code || 'TMDB_UNAVAILABLE',
-                message: 'TMDB returned no usable now-playing movies. Existing schedules were preserved.',
+                code: result.code || 'SCHEDULE_EMPTY',
+                message: 'Neither the Hero nor Now Showing had movies to schedule. Existing schedules were preserved.',
                 summary: result,
             });
         }
@@ -723,9 +719,32 @@ export const getCinemas = async (req, res) => {
 
 // Today may legitimately hold fewer shows once some have started, so a schedule
 // is full when enough whole days are covered, not when every day is.
-const isFullDemoSchedule = (dateTime = {}) => Object.values(dateTime)
+const isFullSchedule = (dateTime = {}) => Object.values(dateTime)
     .filter((shows) => Array.isArray(shows) && shows.length >= SHOWS_PER_DAY)
     .length >= SCHEDULE_DAYS;
+
+const readOpenShows = (movieId) => Show.find({
+    movie: movieId,
+    showDateTime: { $gte: new Date() },
+    hall: { $ne: 'Virtual Hall' },
+    // Superseded generated shows are closed, not deleted.
+    bookingOpen: { $ne: false },
+}).sort({ showDateTime: 1 }).lean();
+
+// Whether this movie's schedule should be kept topped up: it is on the Hero or
+// in Now Showing. `null` means the answer could not be worked out this time.
+const resolveScheduleManaged = async (movieId) => {
+    try {
+        return await isScheduledMovie(movieId);
+    } catch (error) {
+        console.error(JSON.stringify({
+            event: 'schedule-membership-unavailable',
+            movieId,
+            errorCode: error?.code || error?.name || 'UNKNOWN',
+        }));
+        return null;
+    }
+};
 
 export const getShow = async (req, res) => {
     try {
@@ -734,53 +753,65 @@ export const getShow = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Invalid movie ID.' });
         }
 
-        // `allowGeneration` bounds this to a single demo-schedule generation pass.
-        // Recursing unconditionally would loop forever whenever generation cannot
-        // reach SCHEDULE_DAYS full dates.
-        const loadShowtimes = async (allowGeneration = isDemoShowtimesEnabled()) => {
-            const [shows, cachedMovie] = await Promise.all([
-                Show.find({
-                    movie: movieId,
-                    showDateTime: { $gte: new Date() },
-                    hall: { $ne: 'Virtual Hall' },
-                    // Superseded generated shows are closed, not deleted.
-                    bookingOpen: { $ne: false },
-                }).sort({ showDateTime: 1 }).lean(),
+        const loadShowtimes = async () => {
+            const [initialShows, cachedMovie] = await Promise.all([
+                readOpenShows(movieId),
                 getJson(redisKeys.movie(movieId)),
             ]);
-            const grouped = groupPersistedShowtimes(shows);
-            const demoEligible = allowGeneration
-                && (!shows.length || shows.every((show) => isDemoScheduleKey(show.scheduleKey)))
-                && !isFullDemoSchedule(grouped);
-            if (demoEligible) {
-                try {
-                    await ensureDemoShowtimes({ movieId });
-                } catch (error) {
-                    // A concurrent request already holds the generation lock; read
-                    // whatever is persisted rather than failing the whole response.
-                    if (!(error instanceof LockBusyError)) throw error;
+            let shows = initialShows;
+            // An admin's own shows are the schedule; mock shows are never mixed in.
+            const hasManualShows = shows.some((show) => !isGeneratedScheduleKey(show.scheduleKey));
+            let scheduleManaged = false;
+            if (isShowtimeGenerationEnabled() && !hasManualShows) {
+                if (isFullSchedule(groupPersistedShowtimes(shows))) {
+                    scheduleManaged = true;
+                } else {
+                    scheduleManaged = await resolveScheduleManaged(movieId);
+                    if (scheduleManaged) {
+                        try {
+                            await ensureScheduledShowtimes({ movieId });
+                        } catch (error) {
+                            // A concurrent request holding the lock is already doing
+                            // this. Anything else is reported, and whatever is
+                            // persisted is still served.
+                            if (!(error instanceof LockBusyError)) {
+                                console.error(JSON.stringify({
+                                    event: 'scheduled-showtimes-failed',
+                                    movieId,
+                                    errorCode: error?.code || error?.name || 'UNKNOWN',
+                                }));
+                            }
+                        }
+                        shows = await readOpenShows(movieId);
+                    }
                 }
-                return loadShowtimes(false);
             }
             const databaseMovie = cachedMovie ? null : await Movie.findById(movieId).lean();
             const movie = cachedMovie || databaseMovie || await fetchMovieFromTmdb(movieId);
             await setJson(redisKeys.movie(movieId), movie, redisTtl.movie);
             return {
                 movie,
-                dateTime: grouped,
-                simulated: shows.some((show) => isDemoScheduleKey(show.scheduleKey)),
+                dateTime: groupPersistedShowtimes(shows),
+                simulated: shows.some((show) => isGeneratedScheduleKey(show.scheduleKey)),
+                scheduleManaged,
             };
         };
+
         let result = await rememberJson(redisKeys.showtimes(movieId), redisTtl.showtimes, loadShowtimes);
-        const resultDateCount = Object.keys(result.value?.dateTime || {}).length;
-        const refreshDemoCache = isDemoShowtimesEnabled()
-            && (!resultDateCount || (result.value?.simulated === true && !isFullDemoSchedule(result.value.dateTime)));
-        if (refreshDemoCache) {
+        // A cached copy of a Hero or Now Showing movie that is not full yet (or
+        // was cached before this field existed) is rebuilt rather than served, so
+        // a movie joining the Hero is bookable at once instead of after the TTL.
+        const staleSchedule = result.cache === 'hit'
+            && isShowtimeGenerationEnabled()
+            && result.value?.scheduleManaged !== false
+            && !isFullSchedule(result.value?.dateTime);
+        if (staleSchedule) {
             await deleteKeys(redisKeys.showtimes(movieId));
             result = await rememberJson(redisKeys.showtimes(movieId), redisTtl.showtimes, loadShowtimes);
         }
 
-        setCacheHeader(res, result.cache).json({ success: true, ...result.value });
+        const { scheduleManaged, ...payload } = result.value || {};
+        setCacheHeader(res, result.cache).json({ success: true, ...payload });
     } catch (error) {
         console.error('[getShow]', error.message);
         return res.status(500).json({ success: false, message: 'Unable to load showtimes.' });

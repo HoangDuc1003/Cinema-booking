@@ -3,9 +3,10 @@ import test from 'node:test';
 import Show from '../models/Show.js';
 import {
     buildGeneratedShows,
-    ensureDemoShowtimes,
+    ensureScheduledShowtimes,
     getBookableNowShowingMovies,
-    isDemoShowtimesEnabled,
+    isGeneratedScheduleKey,
+    isShowtimeGenerationEnabled,
     pickDailyShowTimes,
     syncNowPlayingShows,
 } from '../services/nowPlayingShowSyncService.js';
@@ -104,15 +105,33 @@ test('a very long film still gets three shows a day', () => {
     assert.equal(times.length, 3);
 });
 
-test('sync fetches only TMDB now-playing VN movies, closes stale shows, and idempotently upserts shows', async () => {
+const heroMovie = (id, extra = {}) => ({ _id: String(id), id: String(id), title: `Hero ${id}`, poster_path: `/${id}.jpg`, ...extra });
+const nowShowingMovie = (id) => ({ _id: String(id), id, title: `Now ${id}`, overview: `Now ${id}`, poster_path: `/${id}.jpg`, release_date: '2026-07-20' });
+
+const scheduleOf = ({ hero = [], nowShowing = [], complete = true } = {}) => async () => {
+    const movies = [...new Map([...hero, ...nowShowing].map((movie) => [String(movie._id), movie])).values()];
+    return {
+        movies,
+        heroIds: hero.map((movie) => String(movie._id)),
+        nowShowingIds: nowShowing.map((movie) => String(movie._id)),
+        complete,
+        failures: complete ? [] : [{ source: 'hero', errorCode: 'HERO_POOL_TOO_SMALL' }],
+    };
+};
+
+const recordingModels = () => {
     const calls = {
         movieOps: [], close: null, candidates: null, bookedQuery: null, superseded: null,
-        showOps: [], invalidated: false, log: null,
+        showOps: [], invalidated: false, log: null, warnings: [],
     };
     const movieModel = {
         bulkWrite: async (operations) => {
             calls.movieOps = operations;
-            return { upsertedCount: 2 };
+            return { upsertedCount: 1 };
+        },
+        find: () => {
+            const chain = { select: () => chain, lean: async () => [{ _id: '101', runtime: 95 }] };
+            return chain;
         },
     };
     const bookingModel = {
@@ -132,9 +151,9 @@ test('sync fetches only TMDB now-playing VN movies, closes stale shows, and idem
             return chain;
         },
         updateMany: async (filter, update) => {
-            // First call closes movies that left now-playing; the second closes
+            // First call closes movies that left the schedule; the second closes
             // unbooked shows the new draw no longer produces.
-            if (!calls.close) {
+            if (!calls.close && filter.source) {
                 calls.close = { filter, update };
                 return { modifiedCount: 3 };
             }
@@ -146,52 +165,69 @@ test('sync fetches only TMDB now-playing VN movies, closes stale shows, and idem
             return { upsertedCount: 1 };
         },
     };
+    return { calls, movieModel, bookingModel, showModel };
+};
+
+test('sync schedules exactly the Hero and Now Showing movies and closes everything else', async () => {
+    const { calls, movieModel, bookingModel, showModel } = recordingModels();
     const result = await syncNowPlayingShows({
         now: new Date('2026-08-01T01:00:00.000Z'),
-        fetcher: async (url, options) => {
-            assert.equal(url, 'https://api.themoviedb.org/3/movie/now_playing');
-            assert.deepEqual(options.params, { region: 'VN', language: 'vi-VN', page: 1 });
-            return {
-                data: {
-                    results: [
-                        { id: 101, title: 'One', overview: 'One', vote_average: 8 },
-                        { id: 102, title: 'Two', overview: 'Two', vote_average: 7 },
-                    ],
-                },
-            };
-        },
+        loadScheduleMovies: scheduleOf({
+            hero: [heroMovie(999, { genres: [{ id: 18, name: 'Drama' }] })],
+            nowShowing: [nowShowingMovie(101), nowShowingMovie(102)],
+        }),
         movieModel,
         showModel,
         bookingModel,
         invalidate: async () => { calls.invalidated = true; },
-        logger: { info: (message) => { calls.log = JSON.parse(message); } },
+        logger: { info: (message) => { calls.log = JSON.parse(message); }, warn: () => {} },
     });
 
-    assert.equal(result.movies, 2);
-    assert.equal(result.moviesCreated, 2);
+    assert.equal(result.success, true);
+    assert.equal(result.heroMovies, 1);
+    assert.equal(result.nowShowingMovies, 2);
+    assert.equal(result.scheduledMovies, 3);
     assert.equal(result.showsCreated, 1);
-    assert.equal(result.showsReused, 41);
+    assert.equal(result.showsReused, 62);
     assert.equal(result.showsClosed, 3);
-    assert.equal(calls.candidates.scheduleKey.$regex, '^tmdb-vn:');
-    assert.equal(calls.candidates.scheduleKey.$nin.length, 42);
-    assert.deepEqual(calls.candidates.occupiedSeats, {});
+    assert.deepEqual([...new Set(calls.showOps.map((operation) => operation.updateOne.update.$setOnInsert.movie))].sort(), ['101', '102', '999']);
+
+    // Movies are inserted when missing and never rewritten: a Hero entry is a
+    // trimmed projection of the stored document.
+    assert.equal(calls.movieOps.length, 3);
+    assert.ok(calls.movieOps.every((operation) => !operation.updateOne.update.$set && operation.updateOne.upsert));
+
+    assert.deepEqual(calls.close.filter.movie.$nin.sort(), ['101', '102', '999']);
+    assert.equal(calls.close.filter.source, 'tmdb-now-playing');
+    assert.equal(calls.close.update.$set.bookingOpen, false);
+
+    assert.equal(calls.candidates.scheduleKey.$regex, '^(?:tmdb|demo)-vn:');
+    assert.equal(calls.candidates.scheduleKey.$nin.length, 63);
     assert.deepEqual(calls.bookedQuery.query.show.$in, ['old-free', 'old-booked']);
     // Only the show nobody has touched is closed.
     assert.deepEqual(calls.superseded.filter._id.$in, ['old-free']);
     assert.deepEqual(calls.superseded.filter.occupiedSeats, {});
-    assert.equal(calls.superseded.update.$set.bookingOpen, false);
     assert.equal(result.showsSuperseded, 1);
-    assert.equal(calls.movieOps.length, 2);
-    assert.deepEqual(calls.close.filter.movie.$nin, ['101', '102']);
-    assert.equal(calls.close.filter.source, 'tmdb-now-playing');
-    assert.equal(calls.close.filter.region, 'VN');
-    assert.equal(calls.close.update.$set.bookingOpen, false);
-    assert.equal(calls.movieOps[0].updateOne.update.$set.genres, undefined);
-    assert.deepEqual(calls.movieOps[0].updateOne.update.$setOnInsert.genres, []);
+
     assert.equal(calls.showOps[0].updateOne.update.$set.bookingOpen, true);
     assert.deepEqual(calls.showOps[0].updateOne.update.$setOnInsert.occupiedSeats, {});
     assert.equal(calls.invalidated, true);
     assert.equal(calls.log.event, 'sync-vn-now-playing-shows');
+});
+
+test('sync spaces the daily shows by the stored runtime when the list entry has none', async () => {
+    const { calls, movieModel, bookingModel, showModel } = recordingModels();
+    await syncNowPlayingShows({
+        now: new Date('2026-08-01T01:00:00.000Z'),
+        loadScheduleMovies: scheduleOf({ nowShowing: [nowShowingMovie(101)] }),
+        movieModel,
+        showModel,
+        bookingModel,
+        invalidate: async () => {},
+        logger: { info: () => {}, warn: () => {} },
+    });
+    const expected = buildGeneratedShows({ movies: [{ id: '101', runtime: 95 }], now: new Date('2026-08-01T01:00:00.000Z') });
+    assert.deepEqual(calls.showOps.map((operation) => operation.updateOne.filter.scheduleKey), expected.map((show) => show.scheduleKey));
 });
 
 test('bookable now showing reads only open generated shows and de-duplicates movies', async () => {
@@ -237,62 +273,48 @@ test('generated schedules still provide seven future dates after today has ended
     assert.equal(dates[0], '2026-08-02');
 });
 
-test('sync prioritizes active Hero movies in the seven-day simulated schedule', async () => {
-    const calls = { close: null, showOps: [] };
-    const movieModel = {
-        bulkWrite: async () => ({ upsertedCount: 1 }),
-    };
-    const showModel = {
-        updateMany: async (filter) => {
-            calls.close ??= filter;
-            return { modifiedCount: 0 };
-        },
-        bulkWrite: async (operations) => {
-            calls.showOps = operations;
-            return { upsertedCount: operations.length };
-        },
-    };
+test('a sync missing one source still schedules what it has but closes nothing', async () => {
+    const { calls, movieModel, bookingModel, showModel } = recordingModels();
+    const warnings = [];
     const result = await syncNowPlayingShows({
         now: new Date('2026-08-01T01:00:00.000Z'),
-        fetcher: async () => ({
-            data: { results: [{ id: 101, title: 'Now Playing', poster_path: '/one.jpg' }] },
-        }),
-        getHeroMovies: async () => ({
-            movies: [{ id: 999, title: 'Hero Movie', poster_path: '/hero.jpg', runtime: 100 }],
-        }),
+        loadScheduleMovies: scheduleOf({ nowShowing: [nowShowingMovie(101)], complete: false }),
         movieModel,
         showModel,
+        bookingModel,
         invalidate: async () => {},
-        logger: { info: () => {}, warn: () => {} },
+        logger: { info: () => {}, warn: (message) => warnings.push(JSON.parse(message)) },
     });
-
-    assert.equal(result.heroMovies, 1);
-    assert.equal(result.scheduledMovies, 2);
-    assert.ok(calls.close.movie.$nin.includes('999'));
-    assert.ok(calls.showOps.some((operation) => operation.updateOne.filter.scheduleKey.includes(':999:')));
+    assert.equal(result.success, true);
+    assert.equal(result.complete, false);
+    assert.equal(result.showsClosed, 0);
+    assert.equal(calls.close, null, 'stale shows are left open while a source is down');
+    assert.ok(calls.showOps.length > 0);
+    assert.ok(warnings.some((warning) => warning.event === 'schedule-movies-partial'));
 });
 
-test('demo showtimes persist seven bookable dates with real Mongo-compatible show IDs', async () => {
+test('on-demand showtimes use the sync keys so both converge on the same shows', async () => {
     const calls = { operations: [], invalidated: null };
     const movieModel = {
-        findById: () => ({ lean: async () => ({
-            _id: '101',
-            id: '101',
-            title: 'Demo Feature',
-            runtime: 120,
-        }) }),
+        findById: () => ({ lean: async () => ({ _id: '101', id: '101', title: 'Feature', runtime: 120 }) }),
     };
     const showModel = {
         bulkWrite: async (operations) => {
             calls.operations = operations;
             return { upsertedCount: operations.length };
         },
+        find: () => {
+            const chain = { select: () => chain, lean: async () => [] };
+            return chain;
+        },
     };
-    const result = await ensureDemoShowtimes({
+    const now = new Date('2026-08-01T01:00:00.000Z');
+    const result = await ensureScheduledShowtimes({
         movieId: '101',
-        now: new Date('2026-08-01T01:00:00.000Z'),
+        now,
         movieModel,
         showModel,
+        bookingModel: { distinct: async () => [] },
         lock: async (_key, _options, task) => task({ coordinatedByRedis: false }),
         invalidate: async (movieId) => { calls.invalidated = movieId; },
     });
@@ -300,68 +322,109 @@ test('demo showtimes persist seven bookable dates with real Mongo-compatible sho
     assert.equal(result.simulated, true);
     assert.equal(result.days, 7);
     assert.equal(result.showsCreated, 21);
-    assert.equal(calls.operations.length, 21);
     assert.equal(calls.invalidated, '101');
+    assert.deepEqual(
+        calls.operations.map((operation) => operation.updateOne.filter.scheduleKey),
+        buildGeneratedShows({ movies: [{ id: '101', runtime: 120 }], now }).map((show) => show.scheduleKey),
+    );
     assert.ok(calls.operations.every((operation) => (
-        operation.updateOne.update.$setOnInsert.source === 'manual'
-        && operation.updateOne.filter.scheduleKey.startsWith('demo-vn:')
-        && operation.updateOne.update.$setOnInsert.occupiedSeats
+        operation.updateOne.update.$setOnInsert.source === 'tmdb-now-playing'
+        && operation.updateOne.filter.scheduleKey.startsWith('tmdb-vn:')
     )));
 });
 
-test('demo showtimes are opt-in through the server environment', () => {
-    const previous = process.env.DEMO_SHOWTIMES_ENABLED;
-    const previousClerkKey = process.env.CLERK_PUBLISHABLE_KEY;
-    const previousNodeEnv = process.env.NODE_ENV;
-    const previousVercelEnv = process.env.VERCEL_ENV;
-    delete process.env.DEMO_SHOWTIMES_ENABLED;
-    delete process.env.NODE_ENV;
-    delete process.env.VERCEL_ENV;
-    process.env.CLERK_PUBLISHABLE_KEY = 'pk_live_example';
-    assert.equal(isDemoShowtimesEnabled(), false);
-    process.env.CLERK_PUBLISHABLE_KEY = 'pk_test_example';
-    assert.equal(isDemoShowtimesEnabled(), true);
-    process.env.DEMO_SHOWTIMES_ENABLED = 'true';
-    assert.equal(isDemoShowtimesEnabled(), true);
-    process.env.NODE_ENV = 'production';
-    assert.equal(isDemoShowtimesEnabled(), false);
-    delete process.env.NODE_ENV;
-    process.env.VERCEL_ENV = 'production';
-    assert.equal(isDemoShowtimesEnabled(), false);
-    if (previous === undefined) delete process.env.DEMO_SHOWTIMES_ENABLED;
-    else process.env.DEMO_SHOWTIMES_ENABLED = previous;
-    if (previousClerkKey === undefined) delete process.env.CLERK_PUBLISHABLE_KEY;
-    else process.env.CLERK_PUBLISHABLE_KEY = previousClerkKey;
-    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
-    else process.env.NODE_ENV = previousNodeEnv;
-    if (previousVercelEnv === undefined) delete process.env.VERCEL_ENV;
-    else process.env.VERCEL_ENV = previousVercelEnv;
+test('a slot already held under an older key does not fail the rest of the batch', async () => {
+    const duplicate = Object.assign(new Error('E11000 duplicate key'), {
+        code: 11000,
+        writeErrors: [{ code: 11000 }, { code: 11000 }],
+        result: { upsertedCount: 19 },
+    });
+    const warnings = [];
+    const result = await ensureScheduledShowtimes({
+        movieId: '101',
+        now: new Date('2026-08-01T01:00:00.000Z'),
+        movieModel: { findById: () => ({ lean: async () => ({ _id: '101', runtime: 120 }) }) },
+        showModel: {
+            bulkWrite: async () => { throw duplicate; },
+            find: () => {
+                const chain = { select: () => chain, lean: async () => [] };
+                return chain;
+            },
+        },
+        bookingModel: { distinct: async () => [] },
+        lock: async (_key, _options, task) => task(),
+        invalidate: async () => {},
+        logger: { warn: (message) => warnings.push(JSON.parse(message)) },
+    });
+    assert.equal(result.showsCreated, 19);
+    assert.equal(warnings[0].event, 'generated-show-slot-already-taken');
+
+    await assert.rejects(() => ensureScheduledShowtimes({
+        movieId: '101',
+        now: new Date('2026-08-01T01:00:00.000Z'),
+        movieModel: { findById: () => ({ lean: async () => ({ _id: '101', runtime: 120 }) }) },
+        showModel: { bulkWrite: async () => { throw Object.assign(new Error('network'), { code: 'ECONNRESET' }); } },
+        bookingModel: { distinct: async () => [] },
+        lock: async (_key, _options, task) => task(),
+        invalidate: async () => {},
+    }), /network/, 'any other write failure is surfaced');
 });
 
-test('TMDB sync does not fall back to another catalog when now-playing fails', async () => {
+test('generated keys cover both the sync namespace and the legacy demo one', () => {
+    assert.equal(isGeneratedScheduleKey('tmdb-vn:101:2026-08-01:13:00:Hall 1'), true);
+    assert.equal(isGeneratedScheduleKey('demo-vn:101:2026-08-01:13:00:Hall 1'), true);
+    assert.equal(isGeneratedScheduleKey(null), false);
+    assert.equal(isGeneratedScheduleKey('admin:101'), false);
+});
+
+test('mock showtimes are on by default, production included, and can be switched off', () => {
+    const previous = { flag: process.env.DEMO_SHOWTIMES_ENABLED, nodeEnv: process.env.NODE_ENV, vercel: process.env.VERCEL_ENV };
+    try {
+        delete process.env.DEMO_SHOWTIMES_ENABLED;
+        process.env.NODE_ENV = 'production';
+        process.env.VERCEL_ENV = 'production';
+        assert.equal(isShowtimeGenerationEnabled(), true);
+        process.env.DEMO_SHOWTIMES_ENABLED = 'false';
+        assert.equal(isShowtimeGenerationEnabled(), false);
+        process.env.DEMO_SHOWTIMES_ENABLED = ' FALSE ';
+        assert.equal(isShowtimeGenerationEnabled(), false);
+        process.env.DEMO_SHOWTIMES_ENABLED = 'true';
+        assert.equal(isShowtimeGenerationEnabled(), true);
+    } finally {
+        for (const [key, value] of [['DEMO_SHOWTIMES_ENABLED', previous.flag], ['NODE_ENV', previous.nodeEnv], ['VERCEL_ENV', previous.vercel]]) {
+            if (value === undefined) delete process.env[key];
+            else process.env[key] = value;
+        }
+    }
+});
+
+test('sync writes nothing when neither schedule source is available', async () => {
     let writes = 0;
+    const errors = [];
     await assert.rejects(
         () => syncNowPlayingShows({
-            fetcher: async () => { throw new Error('TMDB unavailable'); },
+            loadScheduleMovies: async () => { throw Object.assign(new Error('down'), { code: 'SCHEDULE_SOURCES_UNAVAILABLE' }); },
             movieModel: { bulkWrite: async () => { writes += 1; } },
             showModel: { updateMany: async () => { writes += 1; }, bulkWrite: async () => { writes += 1; } },
             invalidate: async () => { writes += 1; },
+            logger: { error: (message) => errors.push(JSON.parse(message)) },
         }),
-        /TMDB unavailable/,
+        (error) => error.code === 'SCHEDULE_SOURCES_UNAVAILABLE' && error.statusCode === 503,
     );
     assert.equal(writes, 0);
+    assert.equal(errors[0].event, 'schedule-movies-unavailable');
 });
 
-test('an empty TMDB response preserves existing schedules and skips cache invalidation', async () => {
+test('an empty schedule preserves existing shows and skips cache invalidation', async () => {
     let writes = 0;
     const result = await syncNowPlayingShows({
-        fetcher: async () => ({ data: { results: [] } }),
+        loadScheduleMovies: scheduleOf(),
         movieModel: { bulkWrite: async () => { writes += 1; } },
         showModel: { init: async () => { writes += 1; }, updateMany: async () => { writes += 1; }, bulkWrite: async () => { writes += 1; } },
         invalidate: async () => { writes += 1; },
         logger: { warn: () => {} },
     });
-    assert.equal(result.code, 'TMDB_EMPTY_RESPONSE');
+    assert.equal(result.code, 'SCHEDULE_EMPTY');
     assert.equal(result.skipped, true);
     assert.equal(writes, 0);
 });

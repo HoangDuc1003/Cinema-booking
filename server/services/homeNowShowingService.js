@@ -2,9 +2,12 @@ import { createHash } from 'node:crypto';
 import { getJson, setJson } from './cacheService.js';
 import { redisKeys, redisTtl } from './redisKeys.js';
 import { fetchTmdbJson } from './tmdbService.js';
-import { TMDB_LANGUAGE, TMDB_REGION } from './nowPlayingShowSyncService.js';
+import { TMDB_LANGUAGE, TMDB_REGION } from './tmdbConfig.js';
 
 const DEFAULT_LIMIT = 10;
+// How many movies the home page's Now Showing section asks for. Those are the
+// movies the showtime schedule covers, alongside the Hero posters.
+export const HOME_NOW_SHOWING_LIMIT = DEFAULT_LIMIT;
 const MAX_LIMIT = 20;
 const TMDB_PAGES = Object.freeze([1, 2]);
 const roundMs = (value) => Math.round(value * 100) / 100;

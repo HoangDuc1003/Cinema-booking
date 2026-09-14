@@ -7,13 +7,18 @@ import {
     createHeroEtag,
     getAdminHomeHero,
     getHeroSeed,
-    getHeroSeedWindow,
     getPublicHomeHero,
     matchesHeroEtag,
     normalizeHeroMovie,
+    pickDailyRotation,
     selectHeroMovies,
     updateHomeHero,
 } from '../services/heroService.js';
+
+const DAY_MS = 86400000;
+// 09:00 in Vietnam on 2026-03-10.
+const NOW = new Date('2026-03-10T02:00:00.000Z');
+const dayAfter = (days, from = NOW) => new Date(from.getTime() + (days * DAY_MS));
 
 const chain = (value) => ({
     select: () => chain(value),
@@ -23,36 +28,63 @@ const chain = (value) => ({
     lean: async () => value,
 });
 
-// Popularity descends with the index, so movie-1 and movie-2 are always the two
-// hottest and every other movie is a seeded candidate.
-const buildMovie = (index) => ({
-    _id: `movie-${index}`,
-    title: `Movie ${index}`,
-    overview: `Overview ${index}`,
-    poster_path: `/poster-${index}.jpg`,
-    backdrop_path: `/backdrop-${index}.jpg`,
-    release_date: '2026-01-01',
-    vote_average: 7.5,
-    vote_count: 1000,
-    popularity: 1000 - index,
-    runtime: 110,
+// Runtime and genres are present so the Hero never reaches for TMDB details.
+const buildHot = (index) => ({
+    _id: `hot-${index}`,
+    title: `Hot ${index}`,
+    overview: `New release ${index}`,
+    poster_path: `/hot-${index}.jpg`,
+    backdrop_path: `/hot-${index}-backdrop.jpg`,
+    release_date: '2026-02-20',
+    vote_average: 7,
+    vote_count: 300,
+    popularity: 900 - index,
+    runtime: 105,
     genres: [{ id: 28, name: 'Action' }],
 });
 
-const buildPool = (size) => Array.from({ length: size }, (_, index) => buildMovie(index + 1));
+const buildClassic = (index) => ({
+    _id: `classic-${index}`,
+    title: `Classic ${index}`,
+    overview: `Classic ${index}`,
+    poster_path: `/classic-${index}.jpg`,
+    backdrop_path: `/classic-${index}-backdrop.jpg`,
+    release_date: '1994-09-23',
+    vote_average: 8.4,
+    vote_count: 20000 - index,
+    popularity: 40,
+    runtime: 140,
+    genres: [{ id: 18, name: 'Drama' }],
+});
 
-const withStubs = async ({ movies = buildPool(20), config = null, onUpdate }, run) => {
+const hotPool = (size = 6) => Array.from({ length: size }, (_, index) => normalizeHeroMovie(buildHot(index + 1)));
+const classicPool = (size = 20) => Array.from({ length: size }, (_, index) => normalizeHeroMovie(buildClassic(index + 1)));
+const ids = (movies) => movies.map((movie) => movie.id);
+
+const nowShowingOf = (movies) => async () => ({ value: { results: movies } });
+
+const withStubs = async ({
+    classics = Array.from({ length: 20 }, (_, index) => buildClassic(index + 1)),
+    recent = [],
+    manualMovies = [],
+    config = null,
+    onUpdate,
+}, run) => {
     const originals = {
         movieFind: Movie.find,
         showFind: Show.find,
         configFindOne: SiteConfig.findOne,
         configFindOneAndUpdate: SiteConfig.findOneAndUpdate,
     };
-    Movie.find = (filter) => {
-        const ids = filter?._id?.$in;
-        if (!ids) return chain(movies);
-        const wanted = new Set(ids.map(String));
-        return chain(movies.filter((movie) => wanted.has(String(movie._id))));
+    Movie.find = (filter = {}) => {
+        const wanted = filter?._id?.$in;
+        if (wanted) {
+            const set = new Set(wanted.map(String));
+            return chain([...manualMovies, ...classics].filter((movie) => set.has(String(movie._id))));
+        }
+        if (filter.release_date?.$lte && !filter.release_date?.$gte?.startsWith?.('19')) return chain(recent);
+        if (filter.release_date?.$lte) return chain(classics);
+        return chain([...classics, ...manualMovies]);
     };
     Show.find = () => chain([]);
     SiteConfig.findOne = () => chain(config);
@@ -72,7 +104,7 @@ const withStubs = async ({ movies = buildPool(20), config = null, onUpdate }, ru
 
 test('the Hero is poster-only and never projects a video field', () => {
     const normalized = normalizeHeroMovie({
-        ...buildMovie(1),
+        ...buildHot(1),
         heroVideoUrl: 'https://res.cloudinary.com/demo/video/upload/x.mp4',
         heroVideoStatus: 'ready',
         heroVideoMimeType: 'video/mp4',
@@ -80,163 +112,154 @@ test('the Hero is poster-only and never projects a video field', () => {
     for (const key of Object.keys(normalized)) {
         assert.ok(!key.toLowerCase().includes('video'), `unexpected video field: ${key}`);
     }
-    assert.equal(normalized.id, 'movie-1');
-    assert.equal(normalized.poster_path, '/poster-1.jpg');
+    assert.equal(normalized.id, 'hot-1');
 });
 
-test('a seed window spans three Vietnam days and turns over at local midnight', () => {
-    // 2026-03-10T17:00Z is already 2026-03-11 in Vietnam (UTC+7).
-    const window = getHeroSeedWindow(new Date('2026-03-10T02:00:00.000Z'));
-    const sameWindowLater = getHeroSeedWindow(new Date('2026-03-10T15:00:00.000Z'));
-
-    assert.equal(window.key, sameWindowLater.key);
-    assert.equal(window.endsAt.getTime() - window.startsAt.getTime(), 3 * 86400000);
-    // The boundary is Vietnam midnight, i.e. 17:00 UTC on the previous day.
-    assert.match(window.startsAt.toISOString(), /T17:00:00\.000Z$/);
-    assert.match(window.endsAt.toISOString(), /T17:00:00\.000Z$/);
+test('list entries with genre IDs only still get genre names', () => {
+    const normalized = normalizeHeroMovie({ id: 1288445, title: 'Mutiny', genre_ids: [28, 53], poster_path: '/x.jpg' });
+    assert.deepEqual(normalized.genres.map((genre) => genre.name), ['Action', 'Thriller']);
+    assert.equal(normalized.runtime, null, 'a missing runtime is not reported as zero');
 });
 
-test('the seed holds for three days and then rolls', () => {
-    const seedAt = (iso) => getHeroSeed({ now: new Date(iso), viewerId: 'user-1' });
-    const windowStart = getHeroSeedWindow(new Date('2026-03-10T02:00:00.000Z')).startsAt;
-    const dayIn = (days) => new Date(windowStart.getTime() + (days * 86400000) + 3600000).toISOString();
-
-    const first = seedAt(dayIn(0));
-    assert.equal(seedAt(dayIn(1)), first, 'day 2 of the window must keep the seed');
-    assert.equal(seedAt(dayIn(2)), first, 'day 3 of the window must keep the seed');
-    assert.notEqual(seedAt(dayIn(3)), first, 'day 4 starts a new window');
+test('the seed is one per Vietnam day and turns over at local midnight', () => {
+    // 16:59 UTC is 23:59 in Vietnam; 17:00 UTC is already the next local day.
+    assert.equal(getHeroSeed({ now: new Date('2026-03-10T02:00:00Z') }), getHeroSeed({ now: new Date('2026-03-10T16:59:00Z') }));
+    assert.notEqual(getHeroSeed({ now: new Date('2026-03-10T16:59:00Z') }), getHeroSeed({ now: new Date('2026-03-10T17:00:00Z') }));
+    assert.match(getHeroSeed({ now: NOW, salt: 'abc' }), /^hero:2026-03-10:abc$/);
 });
 
-test('each account gets its own seed, and signed-out visitors share one', () => {
-    const now = new Date('2026-03-10T02:00:00.000Z');
-    const userA = getHeroSeed({ now, viewerId: 'user-a' });
-    const userB = getHeroSeed({ now, viewerId: 'user-b' });
-
-    assert.notEqual(userA, userB);
-    assert.equal(getHeroSeed({ now }), getHeroSeed({ now, viewerId: null }));
-    assert.equal(getHeroSeed({ now, viewerId: '  ' }), getHeroSeed({ now, viewerId: undefined }));
-    assert.notEqual(getHeroSeed({ now }), userA);
-});
-
-test('selection is two hottest movies plus three seeded, all unique', () => {
-    const pool = buildPool(20).map(normalizeHeroMovie);
-    const picked = selectHeroMovies(pool, { now: new Date('2026-03-10T02:00:00.000Z'), viewerId: 'user-1' });
+test('the line-up is two hot releases, hotter first, then three classics', () => {
+    const picked = selectHeroMovies({ hot: hotPool(), classic: classicPool() }, { now: NOW });
 
     assert.equal(picked.length, 5);
-    assert.equal(new Set(picked.map((movie) => movie.id)).size, 5);
-    assert.deepEqual(picked.slice(0, 2).map((movie) => movie.id), ['movie-1', 'movie-2']);
+    assert.equal(new Set(ids(picked)).size, 5);
+    assert.deepEqual(picked.map((movie) => movie.heroSlot), ['hot', 'hot', 'classic', 'classic', 'classic']);
+    assert.ok(picked.slice(0, 2).every((movie) => movie.id.startsWith('hot-')));
+    assert.ok(picked.slice(2).every((movie) => movie.id.startsWith('classic-')));
+    assert.ok(picked[0].popularity >= picked[1].popularity, 'the hotter of the pair leads');
 });
 
-test('the hot pair is identical for every account; only the other three differ', () => {
-    const pool = buildPool(30).map(normalizeHeroMovie);
-    const now = new Date('2026-03-10T02:00:00.000Z');
-    const a = selectHeroMovies(pool, { now, viewerId: 'user-a' }).map((movie) => movie.id);
-    const b = selectHeroMovies(pool, { now, viewerId: 'user-b' }).map((movie) => movie.id);
-
-    assert.deepEqual(a.slice(0, 2), b.slice(0, 2));
-    assert.notDeepEqual(a.slice(2), b.slice(2));
+test('every slot changes from one day to the next', () => {
+    const pools = { hot: hotPool(), classic: classicPool() };
+    for (let day = 0; day < 10; day += 1) {
+        const today = selectHeroMovies(pools, { now: dayAfter(day) });
+        const tomorrow = new Set(ids(selectHeroMovies(pools, { now: dayAfter(day + 1) })));
+        assert.ok(ids(today).every((id) => !tomorrow.has(id)), `day ${day} shares a poster with the next day`);
+    }
 });
 
-test('one account keeps the same five movies for the whole window', () => {
-    const pool = buildPool(30).map(normalizeHeroMovie);
-    const morning = new Date('2026-03-10T02:00:00.000Z');
-    const evening = new Date('2026-03-10T15:00:00.000Z');
-
+test('one day keeps the same line-up from morning to night', () => {
+    const pools = { hot: hotPool(), classic: classicPool() };
     assert.deepEqual(
-        selectHeroMovies(pool, { now: morning, viewerId: 'user-1' }).map((movie) => movie.id),
-        selectHeroMovies(pool, { now: evening, viewerId: 'user-1' }).map((movie) => movie.id),
+        ids(selectHeroMovies(pools, { now: new Date('2026-03-09T17:00:00Z') })),
+        ids(selectHeroMovies(pools, { now: new Date('2026-03-10T16:59:00Z') })),
     );
 });
 
-test('selection order does not depend on the order MongoDB returned the pool in', () => {
-    const pool = buildPool(20).map(normalizeHeroMovie);
-    const shuffledPool = [...pool].reverse();
-    const now = new Date('2026-03-10T02:00:00.000Z');
+test('the hot pair only ever comes from the hottest six releases', () => {
+    const hot = hotPool(6);
+    const seen = new Set();
+    for (let day = 0; day < 12; day += 1) {
+        ids(pickDailyRotation(hot, { count: 2, now: dayAfter(day), key: 'hero:hot:default' })).forEach((id) => seen.add(id));
+    }
+    assert.deepEqual([...seen].sort(), ids(hot).sort(), 'the rotation walks the whole pool');
+});
 
+test('selection does not depend on the order the pools arrived in', () => {
+    const hot = hotPool();
+    const classic = classicPool();
     assert.deepEqual(
-        selectHeroMovies(pool, { now, viewerId: 'user-1' }).map((movie) => movie.id),
-        selectHeroMovies(shuffledPool, { now, viewerId: 'user-1' }).map((movie) => movie.id),
+        ids(selectHeroMovies({ hot, classic }, { now: NOW })),
+        ids(selectHeroMovies({ hot: [...hot].reverse(), classic: [...classic].reverse() }, { now: NOW })),
     );
 });
 
-test('a new window reshuffles the seeded three', () => {
-    const pool = buildPool(30).map(normalizeHeroMovie);
-    const windows = [0, 3, 6, 9].map((offset) => {
-        const now = new Date(Date.parse('2026-03-10T02:00:00.000Z') + (offset * 86400000));
-        return selectHeroMovies(pool, { now, viewerId: 'user-1' }).slice(2).map((movie) => movie.id).join(',');
-    });
-    assert.ok(new Set(windows).size > 1, `seed did not roll across windows: ${windows.join(' | ')}`);
+test('an admin salt reshuffles the day without waiting for midnight', () => {
+    const pools = { hot: hotPool(), classic: classicPool() };
+    assert.notDeepEqual(
+        ids(selectHeroMovies(pools, { now: NOW })),
+        ids(selectHeroMovies(pools, { now: NOW, salt: 'admin-randomized' })),
+    );
 });
 
-test('a different seed salt reshuffles without waiting for the next window', () => {
-    const pool = buildPool(30).map(normalizeHeroMovie);
-    const now = new Date('2026-03-10T02:00:00.000Z');
-    const base = selectHeroMovies(pool, { now, viewerId: 'user-1' }).slice(2).map((movie) => movie.id).join(',');
-    const salted = selectHeroMovies(pool, { now, viewerId: 'user-1', salt: 'admin-randomized' })
-        .slice(2).map((movie) => movie.id).join(',');
-    assert.notEqual(base, salted);
+test('a short classic pool is filled from the other pool instead of shipping a short Hero', () => {
+    const picked = selectHeroMovies({ hot: hotPool(6), classic: classicPool(1) }, { now: NOW });
+    assert.equal(picked.length, 5);
+    assert.equal(new Set(ids(picked)).size, 5);
+    assert.deepEqual(picked.slice(0, 3).map((movie) => movie.heroSlot), ['hot', 'hot', 'classic']);
 });
 
-test('a pool at or below five movies is returned whole instead of being dropped', () => {
-    const pool = buildPool(5).map(normalizeHeroMovie);
-    assert.equal(selectHeroMovies(pool, { now: new Date(), viewerId: 'user-1' }).length, 5);
-});
-
-test('auto mode returns five movies plus the seed metadata clients cache on', async () => {
+test('auto mode leads with now-showing releases and carries the daily metadata', async () => {
     await withStubs({}, async () => {
         const payload = await getPublicHomeHero({
-            now: new Date('2026-03-10T02:00:00.000Z'),
-            viewerId: 'user-1',
+            now: NOW,
+            loadNowShowing: nowShowingOf(Array.from({ length: 10 }, (_, index) => buildHot(index + 1))),
         });
         assert.equal(payload.movies.length, 5);
         assert.equal(payload.settings.effectiveMode, 'auto');
-        assert.equal(payload.meta.source, 'seeded-poster-rotation');
-        assert.equal(payload.dateKey, '2026-03-10');
-        assert.equal(payload.meta.seedWindowDays, 3);
+        assert.equal(payload.meta.source, 'daily-poster-rotation');
+        assert.equal(payload.meta.hotSource, 'now-showing');
         assert.equal(payload.meta.hotCount, 2);
-        assert.equal(payload.rotation.type, 'seeded-poster');
-        assert.equal(payload.personalized, true);
-        assert.match(payload.meta.seed, /^hero:w\d+:user-1:default$/);
-        assert.equal(
-            payload.nextRefreshAt,
-            new Date(Date.parse(payload.meta.seedWindowStartsAt) + (3 * 86400000)).toISOString(),
-        );
+        assert.equal(payload.meta.classicCount, 3);
+        assert.equal(payload.dateKey, '2026-03-10');
+        assert.equal(payload.rotation.type, 'daily-poster');
+        // The next rotation is the coming Vietnam midnight.
+        assert.equal(payload.nextRefreshAt, '2026-03-10T17:00:00.000Z');
+        assert.equal('personalized' in payload, false, 'one line-up for everyone');
+        // Only the six hottest releases are ever candidates for the pair.
+        const hottestSix = new Set(Array.from({ length: 6 }, (_, index) => `hot-${index + 1}`));
+        assert.ok(payload.movies.slice(0, 2).every((movie) => hottestSix.has(movie.id)));
+    });
+});
+
+test('recent releases from the database stand in when now-showing is down', async () => {
+    const recent = [buildHot(1), buildHot(2), buildHot(3)].map((movie) => ({ ...movie, _id: `recent-${movie._id}` }));
+    await withStubs({ recent }, async () => {
+        const payload = await getPublicHomeHero({
+            now: NOW,
+            loadNowShowing: async () => { throw Object.assign(new Error('down'), { code: 'TMDB_UNAVAILABLE' }); },
+        });
+        assert.equal(payload.meta.hotSource, 'recent-releases');
+        assert.ok(payload.movies.slice(0, 2).every((movie) => movie.id.startsWith('recent-')));
+        assert.equal(payload.movies.length, 5);
     });
 });
 
 test('manual mode is authoritative and preserves the saved order', async () => {
-    const movieIds = ['movie-9', 'movie-3', 'movie-7', 'movie-1', 'movie-5'];
+    const manualMovies = [9, 3, 7, 1, 5].map((index) => buildClassic(index));
+    const movieIds = manualMovies.map((movie) => movie._id);
     await withStubs({
+        classics: manualMovies,
         config: { homeHero: { mode: 'manual', movieIds }, updatedAt: new Date('2026-03-01T00:00:00Z') },
     }, async () => {
-        const payload = await getPublicHomeHero({ now: new Date('2026-03-10T02:00:00.000Z') });
+        const payload = await getPublicHomeHero({ now: NOW, loadNowShowing: nowShowingOf([]) });
         assert.equal(payload.settings.effectiveMode, 'manual');
         assert.equal(payload.meta.source, 'manual-selection');
-        assert.deepEqual(payload.movies.map((movie) => movie.id), movieIds);
+        assert.deepEqual(ids(payload.movies), movieIds);
     });
 });
 
 test('manual mode falls back to the daily rotation when a saved movie disappears', async () => {
     await withStubs({
-        movies: buildPool(20),
         config: {
-            homeHero: { mode: 'manual', movieIds: ['movie-1', 'movie-2', 'gone-1', 'gone-2', 'gone-3'] },
+            homeHero: { mode: 'manual', movieIds: ['classic-1', 'classic-2', 'gone-1', 'gone-2', 'gone-3'] },
             updatedAt: new Date('2026-03-01T00:00:00Z'),
         },
     }, async () => {
-        const payload = await getPublicHomeHero({ now: new Date('2026-03-10T02:00:00.000Z') });
+        const payload = await getPublicHomeHero({
+            now: NOW,
+            loadNowShowing: nowShowingOf(Array.from({ length: 6 }, (_, index) => buildHot(index + 1))),
+        });
         assert.equal(payload.movies.length, 5);
         assert.equal(payload.settings.effectiveMode, 'auto');
-        assert.equal(payload.meta.source, 'seeded-poster-rotation');
-        // Signed out: shared seed, so the response stays publicly cacheable.
-        assert.equal(payload.personalized, false);
+        assert.equal(payload.meta.source, 'daily-poster-rotation');
     });
 });
 
-test('a pool that cannot fill five slots is a 503, never a short Hero', async () => {
-    await withStubs({ movies: buildPool(3) }, async () => {
+test('pools that cannot fill five slots are a 503, never a short Hero', async () => {
+    await withStubs({ classics: [buildClassic(1)] }, async () => {
         await assert.rejects(
-            () => getPublicHomeHero({ now: new Date('2026-03-10T02:00:00.000Z') }),
+            () => getPublicHomeHero({ now: NOW, loadNowShowing: nowShowingOf([buildHot(1)]) }),
             (error) => {
                 assert.equal(error.statusCode, 503);
                 assert.equal(error.code, 'HERO_POOL_TOO_SMALL');
@@ -250,7 +273,7 @@ test('updateHomeHero rejects an incomplete manual selection without writing Site
     let wrote = false;
     await withStubs({ onUpdate: () => { wrote = true; } }, async () => {
         await assert.rejects(
-            () => updateHomeHero({ mode: 'manual', movieIds: ['movie-1', 'movie-2'] }),
+            () => updateHomeHero({ mode: 'manual', movieIds: ['classic-1', 'classic-2'] }),
             (error) => {
                 assert.equal(error.statusCode, 400);
                 assert.equal(error.code, 'MANUAL_HERO_INVALID');
@@ -262,9 +285,9 @@ test('updateHomeHero rejects an incomplete manual selection without writing Site
 });
 
 test('updateHomeHero reports which manual movies no longer exist', async () => {
-    await withStubs({ movies: buildPool(3) }, async () => {
+    await withStubs({ classics: [1, 2, 3].map(buildClassic) }, async () => {
         await assert.rejects(
-            () => updateHomeHero({ mode: 'manual', movieIds: ['movie-1', 'movie-2', 'movie-3', 'gone-1', 'gone-2'] }),
+            () => updateHomeHero({ mode: 'manual', movieIds: ['classic-1', 'classic-2', 'classic-3', 'gone-1', 'gone-2'] }),
             (error) => {
                 assert.equal(error.code, 'MANUAL_HERO_INVALID');
                 assert.deepEqual(error.invalidMovies, ['gone-1', 'gone-2']);
@@ -275,14 +298,14 @@ test('updateHomeHero reports which manual movies no longer exist', async () => {
 });
 
 test('getAdminHomeHero exposes the live line-up, the saved selection, and the pool', async () => {
-    const movieIds = ['movie-2', 'movie-4', 'movie-6', 'movie-8', 'movie-10'];
+    const movieIds = ['classic-2', 'classic-4', 'classic-6', 'classic-8', 'classic-10'];
     await withStubs({
         config: { homeHero: { mode: 'manual', movieIds }, updatedAt: new Date('2026-03-01T00:00:00Z') },
     }, async () => {
-        const hero = await getAdminHomeHero({ now: new Date('2026-03-10T02:00:00.000Z') });
+        const hero = await getAdminHomeHero({ now: NOW, loadNowShowing: nowShowingOf([]) });
         assert.equal(hero.liveMovies.length, 5);
         assert.deepEqual(hero.manualSelection.movieIds, movieIds);
-        assert.deepEqual(hero.selectedMovies.map((movie) => movie.id), movieIds);
+        assert.deepEqual(ids(hero.selectedMovies), movieIds);
         assert.ok(hero.availableMovies.length >= 5);
         assert.equal(hero.meta.effectiveMode, 'manual');
     });
@@ -291,7 +314,7 @@ test('getAdminHomeHero exposes the live line-up, the saved selection, and the po
 test('the Hero ETag tracks movie order, seed, and mode', () => {
     const base = {
         settings: { configuredMode: 'auto', effectiveMode: 'auto' },
-        meta: { source: 'seeded-poster-rotation', seed: 'hero:w6000:user-1:default' },
+        meta: { source: 'daily-poster-rotation', seed: 'hero:2026-03-10:default' },
         dateKey: '2026-03-10',
         movies: [{ id: 'a' }, { id: 'b' }],
     };
@@ -299,7 +322,7 @@ test('the Hero ETag tracks movie order, seed, and mode', () => {
 
     assert.equal(createHeroEtag(base), etag);
     assert.notEqual(createHeroEtag({ ...base, movies: [{ id: 'b' }, { id: 'a' }] }), etag);
-    assert.notEqual(createHeroEtag({ ...base, meta: { ...base.meta, seed: 'hero:w6001:user-1:default' } }), etag);
+    assert.notEqual(createHeroEtag({ ...base, meta: { ...base.meta, seed: 'hero:2026-03-11:default' } }), etag);
     assert.notEqual(
         createHeroEtag({ ...base, settings: { configuredMode: 'manual', effectiveMode: 'manual' } }),
         etag,

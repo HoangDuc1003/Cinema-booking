@@ -2,21 +2,34 @@ import { createHash } from 'node:crypto';
 import Movie from '../models/Movie.js';
 import Show from '../models/Show.js';
 import SiteConfig from '../models/SiteConfig.js';
-import { deleteByPattern, deleteKeys } from './cacheService.js';
-import { getDeterministicPermutation } from './catalogRefreshService.js';
-import { redisKeys } from './redisKeys.js';
+import { deleteByPattern, deleteKeys, rememberJson } from './cacheService.js';
+import { getPublicHomeNowShowing } from './homeNowShowingService.js';
+import { redisKeys, redisTtl } from './redisKeys.js';
+import { hashSeed } from './seededRandom.js';
+import { TMDB_MOVIE_GENRES } from './tmdbConfig.js';
+import { fetchTmdbJson } from './tmdbService.js';
 
 const HERO_CONFIG_KEY = 'homeHero';
-const HERO_LIMIT = 5;
-// Two slots always go to the hottest movies; the rest are seeded per viewer.
-const HERO_HOT_COUNT = 2;
-const HERO_SEED_WINDOW_DAYS = 3;
+export const HERO_LIMIT = 5;
+// The line-up is two of the newest, hottest releases followed by three classics.
+export const HERO_HOT_COUNT = 2;
+export const HERO_CLASSIC_COUNT = 3;
+// The hot pair rotates daily through this many of the hottest releases, so the
+// headline changes every day without dropping to a lukewarm title.
+const HERO_HOT_POOL_SIZE = 6;
+const HERO_CLASSIC_POOL_LIMIT = 60;
+// Mirrors the catalog's classics bucket: at least 15 years old, well rated, and
+// seen by enough people that the rating means something.
+const CLASSIC_MIN_AGE_YEARS = 15;
+const CLASSIC_MIN_RATING = 7.5;
+const CLASSIC_MIN_VOTES = 1000;
+// Fallback definition of "new" when the now-showing list is unavailable.
+const RECENT_RELEASE_DAYS = 180;
 const HERO_RANDOM_HISTORY_MS = 2 * 24 * 60 * 60 * 1000;
 const HERO_TIME_ZONE = 'Asia/Ho_Chi_Minh';
 const HERO_TIME_ZONE_OFFSET_MS = 7 * 60 * 60 * 1000;
 const MS_PER_DAY = 86400000;
 const HERO_POOL_LIMIT = 150;
-const ANONYMOUS_VIEWER = 'anon';
 const MOVIE_SELECT = '_id title overview poster_path backdrop_path release_date vote_average vote_count popularity runtime genres updatedAt';
 
 const createHttpError = (status, message, code) => {
@@ -64,10 +77,16 @@ const getVietnamDayOrdinal = (date = new Date()) => {
 // Vietnam midnight that starts the given local day, as a UTC instant.
 const vietnamMidnightOf = (dayOrdinal) => new Date((dayOrdinal * MS_PER_DAY) - HERO_TIME_ZONE_OFFSET_MS);
 
-const normalizeGenres = (genres) => (Array.isArray(genres) ? genres : [])
-    .slice(0, 3)
-    .map((genre) => (typeof genre === 'string' ? { id: genre, name: genre } : genre))
-    .filter((genre) => genre?.name);
+const normalizeGenres = (genres, genreIds) => {
+    const source = Array.isArray(genres) && genres.length
+        ? genres
+        // Now-showing entries come from a TMDB list, which carries IDs only.
+        : (Array.isArray(genreIds) ? genreIds : []).map((id) => ({ id, name: TMDB_MOVIE_GENRES[id] }));
+    return source
+        .slice(0, 3)
+        .map((genre) => (typeof genre === 'string' ? { id: genre, name: genre } : genre))
+        .filter((genre) => genre?.name);
+};
 
 /**
  * The public Hero shape. Poster-only by design: the Hero renders a still image,
@@ -88,8 +107,8 @@ export const normalizeHeroMovie = (movie) => {
         vote_average: Number.isFinite(Number(movie.vote_average)) ? Number(movie.vote_average) : null,
         vote_count: Number.isFinite(Number(movie.vote_count)) ? Number(movie.vote_count) : 0,
         popularity: Number.isFinite(Number(movie.popularity)) ? Number(movie.popularity) : 0,
-        runtime: Number.isFinite(Number(movie.runtime)) ? Number(movie.runtime) : null,
-        genres: normalizeGenres(movie.genres),
+        runtime: Number(movie.runtime) > 0 ? Number(movie.runtime) : null,
+        genres: normalizeGenres(movie.genres, movie.genre_ids),
         cta: { movieId: id },
     };
 };
@@ -98,7 +117,7 @@ export const createHeroEtag = (payload) => {
     const identity = JSON.stringify({
         configuredMode: payload?.settings?.configuredMode || payload?.settings?.mode || 'auto',
         effectiveMode: payload?.settings?.effectiveMode || payload?.meta?.effectiveMode || 'auto',
-        source: payload?.meta?.source || 'seeded-poster-rotation',
+        source: payload?.meta?.source || 'daily-poster-rotation',
         version: payload?.version ?? 0,
         dateKey: payload?.dateKey || '',
         seed: payload?.meta?.seed || '',
@@ -152,34 +171,9 @@ const loadAvailablePosterMovies = async () => {
     return [...movies.values()];
 };
 
-/**
- * Identifies the 3-day seed window containing `date`. Windows are counted in
- * whole Vietnam days, so one always turns over exactly at local midnight.
- */
-export const getHeroSeedWindow = (date = new Date()) => {
-    const dayOrdinal = getVietnamDayOrdinal(date);
-    const index = Math.floor(dayOrdinal / HERO_SEED_WINDOW_DAYS);
-    return {
-        index,
-        key: `w${index}`,
-        startsAt: vietnamMidnightOf(index * HERO_SEED_WINDOW_DAYS),
-        endsAt: vietnamMidnightOf((index + 1) * HERO_SEED_WINDOW_DAYS),
-    };
-};
-
-export const normalizeViewerId = (viewerId) => {
-    const id = String(viewerId ?? '').trim();
-    // Signed-out visitors all share one seed; there is nothing to personalise on.
-    return id && id !== 'undefined' && id !== 'null' ? id : ANONYMOUS_VIEWER;
-};
-
-/**
- * The seed is per viewer and per 3-day window: one account keeps the same
- * line-up for three days, then it rolls at Vietnam midnight. `salt` lets an
- * admin force a reshuffle without waiting for the window to turn over.
- */
-export const getHeroSeed = ({ now = new Date(), salt = '', viewerId } = {}) => (
-    `hero:${getHeroSeedWindow(now).key}:${normalizeViewerId(viewerId)}:${salt || 'default'}`
+/** The line-up is one per Vietnam day; `salt` lets an admin reshuffle early. */
+export const getHeroSeed = ({ now = new Date(), salt = '' } = {}) => (
+    `hero:${getHeroPosterDateKey(now)}:${salt || 'default'}`
 );
 
 const toNumber = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
@@ -193,32 +187,148 @@ const compareHotness = (left, right) => (
     || String(left.id).localeCompare(String(right.id))
 );
 
+const hasArt = (movie) => Boolean(movie?.backdrop_path || movie?.poster_path);
+
 /**
- * Picks the five hero posters: the two hottest movies, then three drawn by the
- * viewer's seed. The hot pair is the same for everyone, so the headline titles
- * stay consistent, while the remaining three vary per account.
- *
- * Candidate IDs are sorted before shuffling so the same pool plus the same seed
- * always yields the same three movies, whatever order MongoDB returned them in.
+ * Today's `count` movies from a pool. Each movie gets a stable place in a cycle
+ * (ranked by a hash of its ID, so a movie joining or leaving the pool barely
+ * disturbs the rest) and every day advances `count` places. Two consecutive days
+ * therefore never share a movie while the pool holds at least twice `count`.
  */
-export const selectHeroMovies = (movies, { now = new Date(), salt = '', viewerId } = {}) => {
-    if (movies.length <= HERO_LIMIT) return movies.slice(0, HERO_LIMIT);
+export const pickDailyRotation = (movies, { count, now = new Date(), key = 'default' }) => {
+    if (movies.length <= count) return movies.slice(0, count);
+    const order = [...movies].sort((left, right) => (
+        hashSeed(`${key}:${left.id}`) - hashSeed(`${key}:${right.id}`)
+        || String(left.id).localeCompare(String(right.id))
+    ));
+    const start = (getVietnamDayOrdinal(now) * count) % order.length;
+    return Array.from({ length: count }, (_, offset) => order[(start + offset) % order.length]);
+};
 
-    const hottest = [...movies].sort(compareHotness).slice(0, HERO_HOT_COUNT);
-    const hotIds = new Set(hottest.map((movie) => String(movie.id)));
-    const remaining = new Map(
-        movies.filter((movie) => !hotIds.has(String(movie.id)))
-            .map((movie) => [String(movie.id), movie]),
-    );
-    const shuffledIds = getDeterministicPermutation(
-        [...remaining.keys()].sort(),
-        getHeroSeed({ now, salt, viewerId }),
-    );
-    const seeded = shuffledIds
-        .slice(0, HERO_LIMIT - HERO_HOT_COUNT)
-        .map((id) => remaining.get(id));
+/**
+ * Picks the five hero posters: two of the newest, hottest releases first (the
+ * hotter of the two leads), then three classics. Both halves rotate daily at
+ * Vietnam midnight and the line-up is the same for everyone, so every poster is
+ * a movie the showtime schedule covers.
+ *
+ * If one pool runs short, the other fills the gap rather than shipping a short
+ * Hero; a pool that cannot fill five slots between them is the caller's 503.
+ */
+export const selectHeroMovies = ({ hot = [], classic = [] } = {}, { now = new Date(), salt = '' } = {}) => {
+    const saltKey = salt || 'default';
+    const hotPicks = pickDailyRotation(hot, { count: HERO_HOT_COUNT, now, key: `hero:hot:${saltKey}` })
+        .sort(compareHotness);
+    const taken = new Set(hotPicks.map((movie) => String(movie.id)));
+    const classicPool = classic.filter((movie) => !taken.has(String(movie.id)));
+    const classicPicks = pickDailyRotation(classicPool, {
+        count: HERO_CLASSIC_COUNT,
+        now,
+        key: `hero:classic:${saltKey}`,
+    });
+    classicPicks.forEach((movie) => taken.add(String(movie.id)));
 
-    return [...hottest, ...seeded];
+    const lineUp = [
+        ...hotPicks.map((movie) => ({ ...movie, heroSlot: 'hot' })),
+        ...classicPicks.map((movie) => ({ ...movie, heroSlot: 'classic' })),
+    ];
+    const leftovers = [...hot, ...classic].filter((movie) => !taken.has(String(movie.id)));
+    for (const movie of leftovers) {
+        if (lineUp.length >= HERO_LIMIT) break;
+        if (taken.has(String(movie.id))) continue;
+        taken.add(String(movie.id));
+        lineUp.push({ ...movie, heroSlot: 'fill' });
+    }
+    return lineUp.slice(0, HERO_LIMIT);
+};
+
+const releaseDateKeyDaysAgo = (now, days) => getHeroPosterDateKey(new Date(now.getTime() - (days * MS_PER_DAY)));
+
+// Now-showing entries carry no runtime and only genre IDs. The two posters that
+// actually make the Hero borrow both from the cached TMDB details the movie page
+// already uses; any failure just leaves those fields out.
+const enrichHotMovie = async (movie) => {
+    if (movie.runtime && movie.genres.length) return movie;
+    try {
+        const { value } = await rememberJson(
+            redisKeys.tmdbMovie(movie.id),
+            redisTtl.movie,
+            () => fetchTmdbJson(`/movie/${movie.id}`, { language: 'en-US', append_to_response: 'credits' }),
+        );
+        const details = normalizeHeroMovie({ ...value, _id: movie.id });
+        return {
+            ...movie,
+            runtime: movie.runtime || details?.runtime || null,
+            genres: movie.genres.length ? movie.genres : (details?.genres || []),
+        };
+    } catch (error) {
+        console.warn(JSON.stringify({
+            event: 'hero-movie-details-unavailable',
+            movieId: movie.id,
+            errorCode: error?.code || error?.name || 'UNKNOWN',
+        }));
+        return movie;
+    }
+};
+
+/**
+ * Newest and hottest: the now-showing list, which is already the current VN
+ * releases ranked by popularity. When it is unavailable, recent releases from the
+ * database stand in so the Hero still leads with new titles.
+ */
+const loadHotPool = async ({ now, loadNowShowing }) => {
+    try {
+        const result = await loadNowShowing({ limit: 20, now });
+        const movies = (result?.value?.results || []).map(normalizeHeroMovie).filter(hasArt);
+        if (movies.length >= HERO_HOT_COUNT) {
+            return { movies: movies.slice(0, HERO_HOT_POOL_SIZE), source: 'now-showing' };
+        }
+    } catch (error) {
+        console.warn(JSON.stringify({
+            event: 'hero-hot-pool-now-showing-unavailable',
+            errorCode: error?.code || error?.name || 'UNKNOWN',
+        }));
+    }
+
+    const recent = await Movie.find({
+        release_date: { $gte: releaseDateKeyDaysAgo(now, RECENT_RELEASE_DAYS), $lte: getHeroPosterDateKey(now) },
+    })
+        .select(MOVIE_SELECT)
+        .sort({ popularity: -1, release_date: -1, _id: 1 })
+        .limit(HERO_HOT_POOL_SIZE)
+        .lean();
+    return { movies: recent.map(normalizeHeroMovie).filter(hasArt), source: 'recent-releases' };
+};
+
+const loadClassicPool = async ({ now }) => {
+    const cutoff = `${Number(getHeroPosterDateKey(now).slice(0, 4)) - CLASSIC_MIN_AGE_YEARS}-12-31`;
+    const released = { $gte: '1900-01-01', $lte: cutoff };
+    const strict = await Movie.find({
+        release_date: released,
+        vote_average: { $gte: CLASSIC_MIN_RATING },
+        vote_count: { $gte: CLASSIC_MIN_VOTES },
+    })
+        .select(MOVIE_SELECT)
+        .sort({ vote_count: -1, _id: 1 })
+        .limit(HERO_CLASSIC_POOL_LIMIT)
+        .lean();
+    const movies = strict.map(normalizeHeroMovie).filter(hasArt);
+    if (movies.length >= HERO_CLASSIC_COUNT) return movies;
+
+    // A thin catalog still gets old titles, best rated first, before anything else.
+    const relaxed = await Movie.find({ release_date: released })
+        .select(MOVIE_SELECT)
+        .sort({ vote_average: -1, _id: 1 })
+        .limit(HERO_CLASSIC_POOL_LIMIT)
+        .lean();
+    return relaxed.map(normalizeHeroMovie).filter(hasArt);
+};
+
+export const loadHeroPools = async ({ now = new Date(), loadNowShowing = getPublicHomeNowShowing } = {}) => {
+    const [hot, classic] = await Promise.all([
+        loadHotPool({ now, loadNowShowing }),
+        loadClassicPool({ now }),
+    ]);
+    return { hot: hot.movies, classic, hotSource: hot.source };
 };
 
 const invalidateHeroCaches = async () => {
@@ -259,93 +369,91 @@ export const getHomeHeroConfig = async () => {
     return toSettings(created);
 };
 
-const buildHeroPayload = ({ settings, movies, effectiveMode, now, viewerId }) => {
+const buildHeroPayload = ({ settings, movies, effectiveMode, now, hotSource }) => {
     const dateKey = getHeroPosterDateKey(now);
-    const window = getHeroSeedWindow(now);
-    const viewer = normalizeViewerId(viewerId);
-    const personalized = effectiveMode === 'auto' && viewer !== ANONYMOUS_VIEWER;
-    const seed = getHeroSeed({ now, salt: settings.seedSalt, viewerId: viewer });
-    const nextRefreshAt = window.endsAt.toISOString();
-    const version = `${effectiveMode}:${window.key}:${viewer}:${settings.updatedAt?.getTime?.() || settings.updatedAt || 'initial'}`;
+    const seed = getHeroSeed({ now, salt: settings.seedSalt });
+    const nextRefreshAt = vietnamMidnightOf(getVietnamDayOrdinal(now) + 1).toISOString();
+    const hotCount = effectiveMode === 'manual' ? 0 : movies.filter((movie) => movie.heroSlot === 'hot').length;
+    const classicCount = effectiveMode === 'manual' ? 0 : movies.filter((movie) => movie.heroSlot === 'classic').length;
+    const version = `${effectiveMode}:${dateKey}:${settings.updatedAt?.getTime?.() || settings.updatedAt || 'initial'}`;
     const meta = {
         version,
         dateKey,
         seed,
-        seedWindow: window.key,
-        seedWindowDays: HERO_SEED_WINDOW_DAYS,
-        seedWindowStartsAt: window.startsAt.toISOString(),
         timezone: HERO_TIME_ZONE,
         generatedAt: now.toISOString(),
         nextRefreshAt,
-        source: effectiveMode === 'manual' ? 'manual-selection' : 'seeded-poster-rotation',
+        source: effectiveMode === 'manual' ? 'manual-selection' : 'daily-poster-rotation',
         configuredMode: settings.mode,
         effectiveMode,
-        hotCount: effectiveMode === 'manual' ? 0 : HERO_HOT_COUNT,
-        // The controller reads this to decide whether the response may be cached
-        // by anything shared: a per-account line-up must never be.
-        personalized,
+        hotCount,
+        classicCount,
+        hotSource: effectiveMode === 'manual' ? null : hotSource,
     };
     return {
         version,
-        batchId: `poster-${window.key}`,
-        batchKey: window.key,
+        batchId: `poster-${dateKey}`,
+        batchKey: dateKey,
         generatedAt: meta.generatedAt,
         nextRefreshAt,
         timezone: HERO_TIME_ZONE,
         dateKey,
-        personalized,
         settings: { ...settings, effectiveMode },
         movies,
-        rotation: {
-            type: 'seeded-poster',
-            dateKey,
-            seed,
-            windowDays: HERO_SEED_WINDOW_DAYS,
-            hotCount: effectiveMode === 'manual' ? 0 : HERO_HOT_COUNT,
-        },
+        rotation: { type: 'daily-poster', dateKey, seed, hotCount, classicCount },
         meta,
         cache: 'bypass',
     };
 };
 
 /**
- * The home Hero is poster-only: the two hottest movies plus three drawn by the
- * viewer's own seed, which rolls every three days at Vietnam midnight. Manual
- * mode overrides all five and is identical for everyone.
+ * The home Hero is poster-only and the same for every visitor: two of the newest,
+ * hottest releases, then three classics, rotating at Vietnam midnight. Manual
+ * mode overrides all five.
  */
-export const getPublicHomeHero = async ({ now = new Date(), viewerId, preloaded = null } = {}) => {
-    const [settings, availableMovies] = preloaded || await Promise.all([
-        getHomeHeroConfig(),
-        loadAvailablePosterMovies(),
-    ]);
+export const getPublicHomeHero = async ({
+    now = new Date(),
+    preloaded = null,
+    loadNowShowing = getPublicHomeNowShowing,
+} = {}) => {
+    const { settings, pools } = preloaded || {
+        settings: await getHomeHeroConfig(),
+        pools: null,
+    };
 
     let movies = [];
     let effectiveMode = 'auto';
+    let hotSource = null;
     if (settings.mode === 'manual' && settings.movieIds.length === HERO_LIMIT) {
         movies = await loadMoviesByIds(settings.movieIds);
         if (movies.length === HERO_LIMIT) effectiveMode = 'manual';
     }
     if (movies.length !== HERO_LIMIT) {
-        movies = selectHeroMovies(availableMovies, { now, salt: settings.seedSalt, viewerId });
+        const heroPools = pools || await loadHeroPools({ now, loadNowShowing });
+        hotSource = heroPools.hotSource;
+        movies = selectHeroMovies(heroPools, { now, salt: settings.seedSalt });
+        movies = await Promise.all(movies.map((movie) => (
+            movie.heroSlot === 'hot' ? enrichHotMovie(movie) : movie
+        )));
         effectiveMode = 'auto';
     }
     if (movies.length !== HERO_LIMIT) {
         throw createHttpError(503, 'Five poster-ready movies are required for the home hero.', 'HERO_POOL_TOO_SMALL');
     }
 
-    return buildHeroPayload({ settings, movies, effectiveMode, now, viewerId });
+    return buildHeroPayload({ settings, movies, effectiveMode, now, hotSource });
 };
 
-export const getAdminHomeHero = async ({ now = new Date() } = {}) => {
-    // Loaded once and handed to getPublicHomeHero. Letting it reload would repeat
-    // both the 150-document pool query and the config upsert on every admin request.
-    const preloaded = await Promise.all([
+export const getAdminHomeHero = async ({ now = new Date(), loadNowShowing = getPublicHomeNowShowing } = {}) => {
+    // Loaded once and handed to getPublicHomeHero, so an admin request does not
+    // repeat the pool queries. The wider 150-movie pool is for manual picks.
+    const [settings, pools, availableMovies] = await Promise.all([
         getHomeHeroConfig(),
+        loadHeroPools({ now, loadNowShowing }),
         loadAvailablePosterMovies(),
     ]);
-    const [settings, availableMovies] = preloaded;
     const [liveHero, selectedMovies] = await Promise.all([
-        getPublicHomeHero({ now, preloaded }),
+        getPublicHomeHero({ now, preloaded: { settings, pools } }),
         loadMoviesByIds(settings.movieIds),
     ]);
     return {
@@ -394,9 +502,9 @@ export const updateHomeHero = async ({ mode, movieIds }) => {
  * for the next Vietnam midnight. Line-ups shown in the last two days are avoided
  * while the pool is large enough to allow it.
  */
-export const randomizeHomeHero = async ({ now = new Date() } = {}) => {
-    const availableMovies = await loadAvailablePosterMovies();
-    if (availableMovies.length < HERO_LIMIT) {
+export const randomizeHomeHero = async ({ now = new Date(), loadNowShowing = getPublicHomeNowShowing } = {}) => {
+    const pools = await loadHeroPools({ now, loadNowShowing });
+    if (selectHeroMovies(pools, { now }).length < HERO_LIMIT) {
         throw createHttpError(400, `At least ${HERO_LIMIT} movies are required to randomize the Hero.`, 'HERO_POOL_TOO_SMALL');
     }
     const timestamp = now.getTime();
@@ -412,9 +520,7 @@ export const randomizeHomeHero = async ({ now = new Date() } = {}) => {
     let selected = [];
     for (let attempt = 0; attempt < 12; attempt += 1) {
         seedSalt = `${timestamp}-${attempt}`;
-        // Previewed against the anonymous seed: that is the line-up signed-out
-        // visitors get, and the salt shifts every account's draw alongside it.
-        selected = selectHeroMovies(availableMovies, { now, salt: seedSalt });
+        selected = selectHeroMovies(pools, { now, salt: seedSalt });
         if (selected.every((movie) => !recentlyUsed.has(String(movie.id)))) break;
     }
     const movieIds = selected.map((movie) => String(movie.id));
@@ -433,7 +539,7 @@ export const randomizeHomeHero = async ({ now = new Date() } = {}) => {
         { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true },
     ).lean();
     await invalidateHeroCaches();
-    return getAdminHomeHero({ now });
+    return getAdminHomeHero({ now, loadNowShowing });
 };
 
 export default {
