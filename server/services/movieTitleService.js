@@ -73,7 +73,7 @@ export const resolveViewerCountry = (req) => {
 
 // One request per movie covers every language and country, so viewers from
 // different countries share a single cached lookup.
-const loadMovieTranslations = async (movieId) => {
+export const loadMovieTranslations = async (movieId) => {
     const { value } = await rememberJson(
         redisKeys.tmdbMovieTitles(movieId),
         redisTtl.movieTitles,

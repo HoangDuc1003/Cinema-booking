@@ -6,7 +6,8 @@ import { deleteByPattern, deleteKeys, rememberJson } from './cacheService.js';
 import { getPublicHomeNowShowing } from './homeNowShowingService.js';
 import { redisKeys, redisTtl } from './redisKeys.js';
 import { hashSeed } from './seededRandom.js';
-import { TMDB_MOVIE_GENRES } from './tmdbConfig.js';
+import { languageForCountry, loadMovieTranslations, pickMovieText } from './movieTitleService.js';
+import { TMDB_MOVIE_GENRES, TMDB_REGION } from './tmdbConfig.js';
 import { fetchTmdbJson } from './tmdbService.js';
 
 const HERO_CONFIG_KEY = 'homeHero';
@@ -241,6 +242,49 @@ export const selectHeroMovies = ({ hot = [], classic = [] } = {}, { now = new Da
     return lineUp.slice(0, HERO_LIMIT);
 };
 
+// The site serves Vietnam, so a classic only makes the Hero when TMDB has its
+// title and synopsis in Vietnamese; otherwise it would be the one English poster.
+const HERO_TRANSLATION_LANGUAGE = languageForCountry(TMDB_REGION);
+// Each round swaps out at most three classics, so this bounds the lookups.
+const MAX_CLASSIC_TRANSLATION_ROUNDS = 8;
+
+export const hasHeroTranslation = async (movie, { loadTranslations = loadMovieTranslations } = {}) => {
+    try {
+        const text = pickMovieText(await loadTranslations(String(movie.id)), HERO_TRANSLATION_LANGUAGE);
+        return Boolean(text.title && text.overview);
+    } catch (error) {
+        // An unreachable TMDB must not empty the Hero, so an unknown counts as translated.
+        console.warn(JSON.stringify({
+            event: 'hero-translation-check-unavailable',
+            movieId: movie.id,
+            errorCode: error?.code || error?.name || 'UNKNOWN',
+        }));
+        return true;
+    }
+};
+
+/**
+ * selectHeroMovies, but every classic in the result has a Vietnamese title and
+ * synopsis. Untranslated classics are dropped from the pool and the rotation
+ * runs again, so the daily cycle is kept for everything that remains.
+ */
+export const selectTranslatedHeroMovies = async (pools, options = {}, { isTranslated = hasHeroTranslation } = {}) => {
+    const rejected = new Set();
+    let lineUp = selectHeroMovies(pools, options);
+    for (let round = 0; round < MAX_CLASSIC_TRANSLATION_ROUNDS; round += 1) {
+        const classics = lineUp.filter((movie) => movie.heroSlot !== 'hot');
+        const checks = await Promise.all(classics.map((movie) => isTranslated(movie)));
+        const untranslated = classics.filter((_, index) => !checks[index]);
+        if (!untranslated.length) return lineUp;
+        untranslated.forEach((movie) => rejected.add(String(movie.id)));
+        const classic = pools.classic.filter((movie) => !rejected.has(String(movie.id)));
+        // Keep the last good line-up rather than shipping a short Hero.
+        if (classic.length < HERO_CLASSIC_COUNT) return lineUp;
+        lineUp = selectHeroMovies({ ...pools, classic }, options);
+    }
+    return lineUp;
+};
+
 const releaseDateKeyDaysAgo = (now, days) => getHeroPosterDateKey(new Date(now.getTime() - (days * MS_PER_DAY)));
 
 // Now-showing entries carry no runtime and only genre IDs. The two posters that
@@ -415,6 +459,7 @@ export const getPublicHomeHero = async ({
     now = new Date(),
     preloaded = null,
     loadNowShowing = getPublicHomeNowShowing,
+    isTranslated = hasHeroTranslation,
 } = {}) => {
     const { settings, pools } = preloaded || {
         settings: await getHomeHeroConfig(),
@@ -431,7 +476,7 @@ export const getPublicHomeHero = async ({
     if (movies.length !== HERO_LIMIT) {
         const heroPools = pools || await loadHeroPools({ now, loadNowShowing });
         hotSource = heroPools.hotSource;
-        movies = selectHeroMovies(heroPools, { now, salt: settings.seedSalt });
+        movies = await selectTranslatedHeroMovies(heroPools, { now, salt: settings.seedSalt }, { isTranslated });
         movies = await Promise.all(movies.map((movie) => (
             movie.heroSlot === 'hot' ? enrichHotMovie(movie) : movie
         )));
