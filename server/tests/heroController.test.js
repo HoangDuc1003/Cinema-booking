@@ -60,12 +60,29 @@ test('Home Hero controller returns cache headers, stable metadata, meta identity
     assert.equal(res.headers.ETag, '"hero-controller-test"');
     assert.equal(res.headers['X-Cache'], 'hit');
     assert.match(res.headers['Cache-Control'], /stale-while-revalidate/);
-    assert.equal(res.headers.Vary, 'Origin');
+    assert.equal(res.headers.Vary, 'Origin, X-Vercel-IP-Country');
     assert.equal(res.body.success, true);
     assert.deepEqual(res.body.movies, payload.movies);
     assert.equal(res.body.nextRefreshAt, payload.nextRefreshAt);
-    assert.deepEqual(res.body.meta, payload.meta);
+    assert.deepEqual(res.body.meta, { ...payload.meta, titleLanguage: 'en-US' });
     assert.equal(res.body.meta.source, 'daily-poster-rotation');
+});
+
+test('Home Hero controller translates only the titles for the viewer country and keys the ETag by language', async () => {
+    const handler = createGetHomeHeroHandler({
+        loadHero: async () => payload,
+        makeEtag: () => '"hero-controller-test"',
+        localizeTitles: async (movies, language) => movies.map((movie) => ({ ...movie, title: `${language}:${movie.id}` })),
+    });
+    const res = createResponse();
+    await handler({ get: (name) => (name.toLowerCase() === 'x-vercel-ip-country' ? 'jp' : undefined) }, res);
+
+    assert.equal(res.headers.ETag, '"hero-controller-test.ja-JP"');
+    assert.equal(res.headers['Content-Language'], 'ja-JP');
+    assert.equal(res.body.meta.titleLanguage, 'ja-JP');
+    assert.equal(res.body.movies[0].title, `ja-JP:${payload.movies[0].id}`);
+    assert.equal(res.body.movies[0].overview, payload.movies[0].overview);
+    assert.deepEqual(res.body.movies[0].genres, payload.movies[0].genres);
 });
 
 test('Home Hero controller returns 304 without a response body for a matching ETag', async () => {

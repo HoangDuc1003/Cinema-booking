@@ -23,8 +23,8 @@ test('Home Now Showing uses a versioned discovery cache and still revalidates fr
     ]);
     assert.match(provider, /readHomeNowShowingCache/);
     assert.match(provider, /fetchHomeNowShowing/);
-    assert.match(cache, /home-now-showing-cache-v2/);
-    assert.match(cache, /HOME_NOW_SHOWING_CACHE_SCHEMA_VERSION = 2/);
+    assert.match(cache, /home-now-showing-cache-v3/);
+    assert.match(cache, /HOME_NOW_SHOWING_CACHE_SCHEMA_VERSION = 3/);
 });
 
 test('Trailer candidates come from Now Showing then Hero and resolve in one bounded batch', async () => {

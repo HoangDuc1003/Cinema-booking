@@ -22,6 +22,12 @@ import { requestIdFor } from '../middleware/requestContext.js';
 import { LockBusyError } from '../services/lockService.js';
 import { isScheduledMovie } from '../services/scheduleMovieService.js';
 import {
+    DEFAULT_TITLE_LANGUAGE,
+    languageForCountry,
+    localizeMovieTitles,
+    resolveViewerCountry,
+} from '../services/movieTitleService.js';
+import {
     getBookableNowShowingMovies,
     ensureScheduledShowtimes,
     isGeneratedScheduleKey,
@@ -94,23 +100,34 @@ export const getTmdbPopular = async (req, res) => {
         return res.status(502).json({ success: false, message: 'Unable to load popular movies.' });
     }
 };
+// Titles follow the viewer country, so the same line-up has one ETag per language
+// and shared caches keep one copy per country.
+const TITLE_VARY = 'Origin, X-Vercel-IP-Country';
+const etagForLanguage = (etag, language) => (
+    language === DEFAULT_TITLE_LANGUAGE ? etag : etag.replace(/"$/, `.${language}"`)
+);
+
 export const createGetHomeHeroHandler = ({
     loadHero = getPublicHomeHero,
     makeEtag = createHeroEtag,
     etagMatches = matchesHeroEtag,
+    localizeTitles = localizeMovieTitles,
 } = {}) => async (req, res) => {
     try {
         const payload = await loadHero();
-        const etag = makeEtag(payload);
+        const titleLanguage = languageForCountry(resolveViewerCountry(req));
+        const etag = etagForLanguage(makeEtag(payload), titleLanguage);
         res.set('ETag', etag);
         // One line-up for everyone, so the CDN may hold it. Stale serving is kept
         // short so the midnight rotation is not masked for a whole day.
         res.set('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=600');
-        res.set('Vary', 'Origin');
+        res.set('Vary', TITLE_VARY);
+        res.set('Content-Language', titleLanguage);
         setCacheHeader(res, payload.cache);
         if (etagMatches(req.get('if-none-match'), etag)) {
             return res.status(304).end();
         }
+        const movies = await localizeTitles(payload.movies, titleLanguage);
         return res.json({
             success: true,
             version: payload.version,
@@ -120,9 +137,9 @@ export const createGetHomeHeroHandler = ({
             nextRefreshAt: payload.nextRefreshAt,
             timezone: payload.timezone,
             settings: payload.settings,
-            movies: payload.movies,
+            movies,
             rotation: payload.rotation,
-            meta: payload.meta,
+            meta: { ...payload.meta, titleLanguage },
             cache: payload.cache,
         });
     } catch (error) {
@@ -135,6 +152,7 @@ export const createGetHomeNowShowingHandler = ({
     loadHome = getPublicHomeNowShowing,
     makeEtag = createHomeNowShowingEtag,
     etagMatches = matchesHeroEtag,
+    localizeTitles = localizeMovieTitles,
 } = {}) => async (req, res) => {
     const requestId = requestIdFor(req);
     const startedAt = performance.now();
@@ -171,12 +189,14 @@ export const createGetHomeNowShowingHandler = ({
             });
         }
 
-        const etag = makeEtag(value);
+        const titleLanguage = languageForCountry(resolveViewerCountry(req));
+        const etag = etagForLanguage(makeEtag(value), titleLanguage);
         const catalog = value.meta?.catalog || {};
         res.set('ETag', etag);
         res.set('Cache-Control', HOME_BROWSER_CACHE_CONTROL);
         res.set('Vercel-CDN-Cache-Control', HOME_CDN_CACHE_CONTROL);
-        res.set('Vary', 'Origin');
+        res.set('Vary', TITLE_VARY);
+        res.set('Content-Language', titleLanguage);
         setCacheHeader(res, result.cache || 'bypass');
         res.set('X-Data-Source', value.meta?.source || 'unknown');
         res.set('X-Catalog-Version', String(catalog.version ?? ''));
@@ -208,7 +228,8 @@ export const createGetHomeNowShowingHandler = ({
             cache: result.cache || 'bypass',
             status: 200,
         }));
-        return res.json({ success: true, data: value });
+        const results = await localizeTitles(value.results, titleLanguage);
+        return res.json({ success: true, data: { ...value, results, meta: { ...value.meta, titleLanguage } } });
     } catch (error) {
         const timing = { ...(req.nitroTiming || {}), totalMs: performance.now() - startedAt };
         res.set('Cache-Control', 'private, no-store');

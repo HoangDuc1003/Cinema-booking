@@ -1,5 +1,6 @@
-export const HOME_NOW_SHOWING_CACHE_KEY = 'nitrocine:home-now-showing-cache-v2';
-export const HOME_NOW_SHOWING_CACHE_SCHEMA_VERSION = 2;
+// v3: movie text is English; only titles follow the viewer country.
+export const HOME_NOW_SHOWING_CACHE_KEY = 'nitrocine:home-now-showing-cache-v3';
+export const HOME_NOW_SHOWING_CACHE_SCHEMA_VERSION = 3;
 export const HOME_NOW_SHOWING_FRESH_TTL_MS = 5 * 60 * 1000;
 export const HOME_NOW_SHOWING_MAX_STALE_MS = 48 * 60 * 60 * 1000;
 

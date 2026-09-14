@@ -115,6 +115,28 @@ export const AppProvider = ({ children }) => {
     }
   }, [user, fetchIsAdmin, fetchFavoriteMovies]);
 
+  // Clerk takes the Google picture only when an account is created with Google.
+  // An account linked to Google later keeps the default avatar, so ask the server
+  // to copy it over. Once per browser session per user, whatever the outcome.
+  const needsGoogleAvatar = Boolean(user && !user.hasImage && user.externalAccounts?.some(
+    (account) => ['google', 'oauth_google'].includes(account.provider) && account.imageUrl,
+  ));
+  useEffect(() => {
+    if (!needsGoogleAvatar) return;
+    const attemptKey = `nitro_avatar_sync:${user.id}`;
+    try {
+      if (sessionStorage.getItem(attemptKey)) return;
+      sessionStorage.setItem(attemptKey, '1');
+    } catch {
+      // Storage blocked: the server refuses to overwrite a real picture, so a repeat is harmless.
+    }
+    api.post('/api/user/sync-avatar')
+      .then(({ data }) => (data?.updated ? user.reload() : null))
+      .catch(() => {
+        // Logged by the API interceptor; the default avatar simply stays.
+      });
+  }, [needsGoogleAvatar, user]);
+
   // FIX: Separate effect for admin route protection.
   useEffect(() => {
     if (user && !isAdmin && location.pathname.startsWith('/admin')) {
