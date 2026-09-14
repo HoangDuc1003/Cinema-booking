@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
     languageForCountry,
-    localizeMovieTitles,
-    pickTitle,
+    localizeMovieText,
+    pickMovieText,
     resolveViewerCountry,
 } from '../services/movieTitleService.js';
 
@@ -12,7 +12,7 @@ const movies = [
     { _id: '2', id: '2', title: 'Parasite', overview: 'Another', genres: [] },
 ];
 
-test('a country maps to its title language, and unknown countries read English', () => {
+test('a country maps to its language, and unknown countries read English', () => {
     assert.equal(languageForCountry('VN'), 'vi-VN');
     assert.equal(languageForCountry('jp'), 'ja-JP');
     assert.equal(languageForCountry('US'), 'en-US');
@@ -40,38 +40,49 @@ test('the country comes from the Vercel header; the query override is ignored in
     }
 });
 
-test('an exact regional title wins, then any title in the same language', () => {
-    const titles = { 'zh-TW': '神隱少女', zh: '千与千寻', 'vi-VN': 'Vùng Đất Linh Hồn', vi: 'Vùng Đất Linh Hồn' };
-    assert.equal(pickTitle(titles, 'zh-TW'), '神隱少女');
-    assert.equal(pickTitle(titles, 'zh-HK'), '千与千寻');
-    assert.equal(pickTitle(titles, 'ja-JP'), '');
+test('an exact regional translation wins, then the same language, then the local release title', () => {
+    const data = {
+        translations: {
+            'zh-TW': { title: '神隱少女', overview: '台灣簡介' },
+            zh: { title: '千与千寻', overview: '简介' },
+            'vi-VN': { title: '', overview: 'Mô tả tiếng Việt' },
+            vi: { title: '', overview: 'Mô tả tiếng Việt' },
+        },
+        alternativeTitles: { VN: 'Vùng Đất Linh Hồn' },
+    };
+    assert.deepEqual(pickMovieText(data, 'zh-TW'), { title: '神隱少女', overview: '台灣簡介' });
+    assert.deepEqual(pickMovieText(data, 'zh-HK'), { title: '千与千寻', overview: '简介' });
+    // No translated title, but the film was released in Vietnam under a local title.
+    assert.deepEqual(pickMovieText(data, 'vi-VN'), { title: 'Vùng Đất Linh Hồn', overview: 'Mô tả tiếng Việt' });
+    assert.deepEqual(pickMovieText(data, 'ja-JP'), { title: '', overview: '' });
 });
 
-test('only the title changes; missing translations and failed lookups keep English', async () => {
-    const localized = await localizeMovieTitles(movies, 'vi-VN', {
-        loadTitles: async (movieId) => {
+test('title and synopsis change; genres stay, and gaps or failed lookups keep English', async () => {
+    const localized = await localizeMovieText(movies, 'vi-VN', {
+        loadTranslations: async (movieId) => {
             if (movieId === '2') throw Object.assign(new Error('TMDB down'), { code: 'TMDB_UNAVAILABLE' });
-            return { 'vi-VN': 'Vùng Đất Linh Hồn', vi: 'Vùng Đất Linh Hồn' };
+            return { translations: { vi: { title: 'Vùng Đất Linh Hồn', overview: '' } }, alternativeTitles: {} };
         },
     });
     assert.equal(localized[0].title, 'Vùng Đất Linh Hồn');
-    assert.equal(localized[0].overview, 'English synopsis');
+    assert.equal(localized[0].overview, 'English synopsis', 'an empty translated synopsis keeps English');
     assert.deepEqual(localized[0].genres, movies[0].genres);
     assert.equal(localized[1].title, 'Parasite');
+    assert.equal(localized[1].overview, 'Another');
     assert.equal(movies[0].title, 'Spirited Away', 'the input is not mutated');
 });
 
 test('English viewers cost no lookups, and order is preserved', async () => {
     let lookups = 0;
-    const english = await localizeMovieTitles(movies, 'en-US', { loadTitles: async () => { lookups += 1; return {}; } });
+    const english = await localizeMovieText(movies, 'en-US', { loadTranslations: async () => { lookups += 1; return {}; } });
     assert.equal(english, movies);
     assert.equal(lookups, 0);
 
     const many = Array.from({ length: 9 }, (_, index) => ({ id: String(index + 1), title: `Movie ${index + 1}` }));
-    const localized = await localizeMovieTitles(many, 'ja-JP', {
-        loadTitles: async (movieId) => {
+    const localized = await localizeMovieText(many, 'ja-JP', {
+        loadTranslations: async (movieId) => {
             await new Promise((resolve) => setTimeout(resolve, 10 - Number(movieId)));
-            return { ja: `映画 ${movieId}` };
+            return { translations: { ja: { title: `映画 ${movieId}`, overview: '' } } };
         },
     });
     assert.deepEqual(localized.map((movie) => movie.title), many.map((movie) => `映画 ${movie.id}`));

@@ -24,7 +24,7 @@ import { isScheduledMovie } from '../services/scheduleMovieService.js';
 import {
     DEFAULT_TITLE_LANGUAGE,
     languageForCountry,
-    localizeMovieTitles,
+    localizeMovieText,
     resolveViewerCountry,
 } from '../services/movieTitleService.js';
 import {
@@ -100,7 +100,7 @@ export const getTmdbPopular = async (req, res) => {
         return res.status(502).json({ success: false, message: 'Unable to load popular movies.' });
     }
 };
-// Titles follow the viewer country, so the same line-up has one ETag per language
+// Titles and synopses follow the viewer country, so the same line-up has one ETag per language
 // and shared caches keep one copy per country.
 const TITLE_VARY = 'Origin, X-Vercel-IP-Country';
 const etagForLanguage = (etag, language) => (
@@ -111,7 +111,7 @@ export const createGetHomeHeroHandler = ({
     loadHero = getPublicHomeHero,
     makeEtag = createHeroEtag,
     etagMatches = matchesHeroEtag,
-    localizeTitles = localizeMovieTitles,
+    localizeText = localizeMovieText,
 } = {}) => async (req, res) => {
     try {
         const payload = await loadHero();
@@ -127,7 +127,7 @@ export const createGetHomeHeroHandler = ({
         if (etagMatches(req.get('if-none-match'), etag)) {
             return res.status(304).end();
         }
-        const movies = await localizeTitles(payload.movies, titleLanguage);
+        const movies = await localizeText(payload.movies, titleLanguage);
         return res.json({
             success: true,
             version: payload.version,
@@ -152,7 +152,7 @@ export const createGetHomeNowShowingHandler = ({
     loadHome = getPublicHomeNowShowing,
     makeEtag = createHomeNowShowingEtag,
     etagMatches = matchesHeroEtag,
-    localizeTitles = localizeMovieTitles,
+    localizeText = localizeMovieText,
 } = {}) => async (req, res) => {
     const requestId = requestIdFor(req);
     const startedAt = performance.now();
@@ -228,7 +228,7 @@ export const createGetHomeNowShowingHandler = ({
             cache: result.cache || 'bypass',
             status: 200,
         }));
-        const results = await localizeTitles(value.results, titleLanguage);
+        const results = await localizeText(value.results, titleLanguage);
         return res.json({ success: true, data: { ...value, results, meta: { ...value.meta, titleLanguage } } });
     } catch (error) {
         const timing = { ...(req.nitroTiming || {}), totalMs: performance.now() - startedAt };

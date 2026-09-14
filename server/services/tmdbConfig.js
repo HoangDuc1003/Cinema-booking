@@ -1,7 +1,7 @@
 // Shared by the now-showing list, the Hero and the showtime sync. Kept in its own
 // module so those services can import each other's data without an import cycle.
 export const TMDB_REGION = 'VN';
-// Movie text is English everywhere. Only titles follow the viewer (movieTitleService).
+// Source text is English. Titles and synopses are then localized for the viewer (movieTitleService).
 export const TMDB_LANGUAGE = 'en-US';
 
 // TMDB list endpoints return genre IDs only. The movie genre list is fixed, so a

@@ -5,8 +5,8 @@ import { fetchTmdbJson } from './tmdbService.js';
 export const DEFAULT_TITLE_LANGUAGE = 'en-US';
 const MAX_CONCURRENT_LOOKUPS = 4;
 
-// Country (ISO 3166-1, as Vercel reports it) to the language its movie titles are
-// published in. Anything not listed reads English.
+// Country (ISO 3166-1, as Vercel reports it) to the language its movie titles and
+// synopses are published in. Anything not listed reads English.
 const COUNTRY_LANGUAGES = Object.freeze({
     VN: 'vi-VN',
     JP: 'ja-JP',
@@ -71,41 +71,60 @@ export const resolveViewerCountry = (req) => {
     return /^[A-Z]{2}$/.test(country) ? country : '';
 };
 
-// One request per movie covers every language, so viewers from different
-// countries share a single cached lookup.
-const loadTranslatedTitles = async (movieId) => {
+// One request per movie covers every language and country, so viewers from
+// different countries share a single cached lookup.
+const loadMovieTranslations = async (movieId) => {
     const { value } = await rememberJson(
         redisKeys.tmdbMovieTitles(movieId),
         redisTtl.movieTitles,
         async () => {
-            const payload = await fetchTmdbJson(`/movie/${movieId}/translations`);
-            const titles = {};
-            for (const translation of payload?.translations || []) {
-                const title = String(translation?.data?.title || '').trim();
+            const payload = await fetchTmdbJson(`/movie/${movieId}`, {
+                append_to_response: 'translations,alternative_titles',
+            });
+            const translations = {};
+            for (const translation of payload?.translations?.translations || []) {
                 const language = String(translation?.iso_639_1 || '').toLowerCase();
                 const region = String(translation?.iso_3166_1 || '').toUpperCase();
-                if (!title || !language) continue;
-                titles[`${language}-${region}`] = title;
-                // The first title seen for a language is the fallback for its other regions.
-                titles[language] ??= title;
+                const text = {
+                    title: String(translation?.data?.title || '').trim(),
+                    overview: String(translation?.data?.overview || '').trim(),
+                };
+                if (!language || (!text.title && !text.overview)) continue;
+                translations[`${language}-${region}`] = text;
+                // The first translation seen for a language fills in for its other regions.
+                translations[language] ??= text;
             }
-            return titles;
+            // Release titles by country. Many older films were released under a local
+            // title that nobody entered as a translation, so this catches those.
+            const alternativeTitles = {};
+            for (const entry of payload?.alternative_titles?.titles || []) {
+                const country = String(entry?.iso_3166_1 || '').toUpperCase();
+                const title = String(entry?.title || '').trim();
+                if (country && title) alternativeTitles[country] ??= title;
+            }
+            return { translations, alternativeTitles };
         },
     );
     return value || {};
 };
 
-export const pickTitle = (titles, language) => {
-    const [base] = language.split('-');
-    return titles[language] || titles[base] || '';
+/** Picks the title and synopsis for `language`; an empty field means "keep English". */
+export const pickMovieText = ({ translations = {}, alternativeTitles = {} } = {}, language) => {
+    const [base, country = ''] = language.split('-');
+    const exact = translations[language] || {};
+    const sameLanguage = translations[base] || {};
+    return {
+        title: exact.title || sameLanguage.title || alternativeTitles[country.toUpperCase()] || '',
+        overview: exact.overview || sameLanguage.overview || '',
+    };
 };
 
 /**
- * Returns the movies with `title` in `language`. Only the title changes: the
- * synopsis, genres and everything else stay English. A movie with no translation,
- * or whose lookup fails, keeps its English title.
+ * Returns the movies with their title and synopsis in `language`. Genres and
+ * everything else stay English. A field with no translation, or a movie whose
+ * lookup fails, keeps its English text.
  */
-export const localizeMovieTitles = async (movies, language, { loadTitles = loadTranslatedTitles } = {}) => {
+export const localizeMovieText = async (movies, language, { loadTranslations = loadMovieTranslations } = {}) => {
     if (!Array.isArray(movies) || !movies.length || language === DEFAULT_TITLE_LANGUAGE) return movies;
 
     const localized = new Array(movies.length);
@@ -117,11 +136,17 @@ export const localizeMovieTitles = async (movies, language, { loadTitles = loadT
             const movie = movies[index];
             const movieId = String(movie?._id ?? movie?.id ?? '');
             try {
-                const title = /^\d+$/.test(movieId) ? pickTitle(await loadTitles(movieId), language) : '';
-                localized[index] = title ? { ...movie, title } : movie;
+                const text = /^\d+$/.test(movieId)
+                    ? pickMovieText(await loadTranslations(movieId), language)
+                    : { title: '', overview: '' };
+                localized[index] = {
+                    ...movie,
+                    title: text.title || movie.title,
+                    overview: text.overview || movie.overview,
+                };
             } catch (error) {
                 console.warn(JSON.stringify({
-                    event: 'movie-title-translation-unavailable',
+                    event: 'movie-translation-unavailable',
                     movieId,
                     language,
                     errorCode: error?.code || error?.name || 'UNKNOWN',

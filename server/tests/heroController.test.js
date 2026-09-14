@@ -68,11 +68,11 @@ test('Home Hero controller returns cache headers, stable metadata, meta identity
     assert.equal(res.body.meta.source, 'daily-poster-rotation');
 });
 
-test('Home Hero controller translates only the titles for the viewer country and keys the ETag by language', async () => {
+test('Home Hero controller translates title and synopsis for the viewer country, keeps genres, and keys the ETag by language', async () => {
     const handler = createGetHomeHeroHandler({
         loadHero: async () => payload,
         makeEtag: () => '"hero-controller-test"',
-        localizeTitles: async (movies, language) => movies.map((movie) => ({ ...movie, title: `${language}:${movie.id}` })),
+        localizeText: async (movies, language) => movies.map((movie) => ({ ...movie, title: `${language}:${movie.id}`, overview: `${language} synopsis` })),
     });
     const res = createResponse();
     await handler({ get: (name) => (name.toLowerCase() === 'x-vercel-ip-country' ? 'jp' : undefined) }, res);
@@ -81,7 +81,7 @@ test('Home Hero controller translates only the titles for the viewer country and
     assert.equal(res.headers['Content-Language'], 'ja-JP');
     assert.equal(res.body.meta.titleLanguage, 'ja-JP');
     assert.equal(res.body.movies[0].title, `ja-JP:${payload.movies[0].id}`);
-    assert.equal(res.body.movies[0].overview, payload.movies[0].overview);
+    assert.equal(res.body.movies[0].overview, 'ja-JP synopsis');
     assert.deepEqual(res.body.movies[0].genres, payload.movies[0].genres);
 });
 

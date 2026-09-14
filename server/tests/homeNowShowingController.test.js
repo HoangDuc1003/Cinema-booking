@@ -114,15 +114,15 @@ test('TMDB Home failure returns a controlled 503 without exposing internal detai
     assert.doesNotMatch(JSON.stringify(response.body), /must-not-escape|Bearer/i);
 });
 
-test('titles follow the viewer country; everything else stays English and the ETag differs per language', async () => {
+test('title and synopsis follow the viewer country; genres stay English and the ETag differs per language', async () => {
     const value = createValue(['100', '101']);
     value.results[0].overview = 'An English synopsis.';
     const calls = [];
     const handler = createGetHomeNowShowingHandler({
         loadHome: async () => ({ value, cache: 'miss' }),
-        localizeTitles: async (movies, language) => {
+        localizeText: async (movies, language) => {
             calls.push(language);
-            return language === 'vi-VN' ? movies.map((movie) => ({ ...movie, title: `Phim ${movie.id}` })) : movies;
+            return language === 'vi-VN' ? movies.map((movie) => ({ ...movie, title: `Phim ${movie.id}`, overview: `Mô tả ${movie.id}` })) : movies;
         },
     });
     const headerGet = (country) => (name) => (name.toLowerCase() === 'x-vercel-ip-country' ? country : undefined);
@@ -134,7 +134,8 @@ test('titles follow the viewer country; everything else stays English and the ET
 
     assert.deepEqual(calls, ['vi-VN', 'en-US']);
     assert.equal(vietnam.body.data.results[0].title, 'Phim 100');
-    assert.equal(vietnam.body.data.results[0].overview, 'An English synopsis.');
+    assert.equal(vietnam.body.data.results[0].overview, 'Mô tả 100');
+    assert.equal(unitedStates.body.data.results[0].overview, 'An English synopsis.');
     assert.equal(vietnam.body.data.meta.titleLanguage, 'vi-VN');
     assert.equal(vietnam.headers['Content-Language'], 'vi-VN');
     assert.equal(unitedStates.body.data.results[0].title, 'Movie 100');
