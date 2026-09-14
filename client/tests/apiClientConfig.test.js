@@ -52,6 +52,9 @@ test('apiClient retries one transient read but never replays a mutation', async 
     }
     return { data: { success: true }, status: 200, statusText: 'OK', headers: {}, config };
   };
+  // The retry delay uses an unref'd timer, and nothing else keeps this test's
+  // event loop alive; on some Node versions the runner would end the test first.
+  const keepAlive = setInterval(() => {}, 1000);
   try {
     const response = await apiClient.get('/api/health');
     assert.equal(response.status, 200);
@@ -68,6 +71,7 @@ test('apiClient retries one transient read but never replays a mutation', async 
     await assert.rejects(apiClient.post('/api/admin/hero/refresh'), /database unavailable/);
     assert.equal(attempts, 1);
   } finally {
+    clearInterval(keepAlive);
     apiClient.defaults.adapter = originalAdapter;
   }
 });

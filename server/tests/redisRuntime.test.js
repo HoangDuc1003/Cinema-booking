@@ -44,12 +44,20 @@ test('Redis health fails fast when a configured endpoint is unreachable', () => 
 test('optional public cache timeout does not change required command invalidation semantics', async () => {
     let destroyed = false;
     const client = { destroy: () => { destroyed = true; } };
-    await assert.rejects(
-        runWithCommandTimeout(client, () => new Promise(() => {}), {
-            timeoutMs: 20,
-            invalidateOnTimeout: false,
-        }),
-        /Redis command timed out/,
-    );
+    // The timeout timer is unref'd so it never holds a serverless process open.
+    // Nothing else keeps this test's event loop alive, and on some Node versions
+    // the runner would end the test before the timer fires.
+    const keepAlive = setInterval(() => {}, 1000);
+    try {
+        await assert.rejects(
+            runWithCommandTimeout(client, () => new Promise(() => {}), {
+                timeoutMs: 20,
+                invalidateOnTimeout: false,
+            }),
+            /Redis command timed out/,
+        );
+    } finally {
+        clearInterval(keepAlive);
+    }
     assert.equal(destroyed, false);
 });
