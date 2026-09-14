@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import axios from 'axios';
-import mongoose from 'mongoose';
 import CatalogBatch from '../models/CatalogBatch.js';
 import Movie from '../models/Movie.js';
 import SiteConfig from '../models/SiteConfig.js';
@@ -11,8 +10,6 @@ import {
     getISOWeekKey,
     calculateCurrentSlot,
     buildWeeklyCatalogBatch,
-    activateCatalogBatch,
-    rotateActiveCatalogSlot,
     getPublicHomePayload
 } from '../services/catalogRefreshService.js';
 import { redisKeys } from '../services/redisKeys.js';

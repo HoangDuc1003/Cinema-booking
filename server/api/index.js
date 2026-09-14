@@ -14,11 +14,9 @@ import {
     getPaymentConfigStatus,
     validateClerkConfig,
 } from '../configs/runtimeConfig.js';
-import { connectCloudinary, getCloudinaryConfigStatus } from '../configs/cloudinary.js';
 import { createCorsMiddleware, handleCorsError } from '../middleware/corsPolicy.js';
+import { errorHandler, notFoundHandler } from '../middleware/errorHandler.js';
 import { requestContext } from '../middleware/requestContext.js';
-
-connectCloudinary();
 
 process.on('unhandledRejection', (reason) => {
     console.error('[Unhandled rejection]', reason);
@@ -70,7 +68,6 @@ app.get('/api/health/ready', async (req, res) => {
     const redis = await getRedisHealth();
     const paymentConfig = getPaymentConfigStatus();
     const clerkConfig = getClerkConfigStatus();
-    const cloudinaryConfig = getCloudinaryConfigStatus();
     let clientUrl = paymentConfig.clientUrl;
     try {
         clientUrl = { configured: Boolean(getConfiguredClientUrl()) };
@@ -91,8 +88,7 @@ app.get('/api/health/ready', async (req, res) => {
             clerk: clerkConfig,
             tmdb: { configured: Boolean(process.env.TMDB_API_KEY) },
             clientUrl,
-            cloudinary: cloudinaryConfig,
-            hero: { mode: 'daily-poster-rotation', timezone: 'Asia/Ho_Chi_Minh' },
+            hero:{ mode: 'daily-poster-rotation', timezone: 'Asia/Ho_Chi_Minh' },
         },
     });
 });
@@ -135,12 +131,18 @@ app.use(async (req, res, next) => {
     }
 });
 
+// Inngest loads asynchronously, so its handler is attached to a router that is
+// already in place. Mounting it later with app.use would put it behind the 404
+// handler below and every Inngest call would be answered "not found".
+const inngestRouter = express.Router();
+app.use('/api/inngest', inngestRouter);
+
 const mountInngest = async () => {
     try {
         const { inngest, functions } = await import('../inngest/index.js');
         if (functions?.length) {
             const { serve } = await import('inngest/express');
-            app.use('/api/inngest', serve({ client: inngest, functions }));
+            inngestRouter.use(serve({ client: inngest, functions }));
             console.log('[Inngest] Functions mounted');
         }
     } catch (error) {
@@ -157,6 +159,9 @@ app.use('/api/show', showRouter);
 app.use('/api/booking', bookingRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/user', userRouter);
+
+app.use(notFoundHandler);
+app.use(errorHandler);
 
 if (!process.env.VERCEL) {
     const port = process.env.PORT || 3000;

@@ -24,7 +24,8 @@ import { protectAdmin } from '../middleware/auth.js';
 const showRouter = express.Router();
 
 showRouter.get('/now-playing',protectAdmin,getNowPlayingMovies)
-showRouter.get('/import-trending', protectAdmin, importTrendingMovies)
+// Writes movies to the database, so it is a POST: a GET must never change data.
+showRouter.post('/import-trending', protectAdmin, importTrendingMovies)
 showRouter.post('/add',protectAdmin ,addShow)
 showRouter.post('/sync-now-playing', protectAdmin, syncNowPlayingShowsAdmin)
 showRouter.get('/hero', getHomeHero)

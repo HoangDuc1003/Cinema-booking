@@ -5,11 +5,9 @@ import {
   fetchMovieShowtimes,
   fetchSimilarMovies,
 } from '../services/tmdb';
-import BlurCircle from '../components/BlurCircle'
 import { StarIcon, Heart, PlayCircleIcon, RefreshCw } from 'lucide-react'
 import timeFormat from '../lib/timeFormat'
 import MovieGrid from '../components/MovieGrid';
-import MovieCard from '../components/MovieCard';
 import DateSelect from '../components/DateSelect';
 import Loading from '../components/Loading';
 import MovieTrailerModal from '../components/MovieTrailerModal';

@@ -52,7 +52,6 @@ const AppRoutes = ({ includeAdmin = false, user = null }) => (
       <Route path="add-shows" element={<AddShows />} />
       <Route path="hero" element={<HeroSettings />} />
       <Route path="list-shows" element={<ListShows />} />
-      <Route path="add-bookings" element={<AddShows />} />
       <Route path="list-bookings" element={<ListBookings />} />
     </Route>}
   </Routes>

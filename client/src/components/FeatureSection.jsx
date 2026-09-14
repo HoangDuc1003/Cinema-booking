@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { ArrowRightIcon, StarIcon, Calendar, Clock } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
 import BlurCircle from './BlurCircle';

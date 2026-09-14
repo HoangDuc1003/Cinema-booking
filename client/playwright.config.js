@@ -30,7 +30,6 @@ export default defineConfig({
     timeout: 30_000,
     env: {
       VITE_E2E_PROFILE_TEST: 'true',
-      VITE_HERO_VIDEO_ALLOWED_HOSTS: '127.0.0.1',
       VITE_ENABLE_MOCK_DATA: env.VITE_ENABLE_MOCK_DATA || 'false',
       VITE_BASE_URL: '',
     },

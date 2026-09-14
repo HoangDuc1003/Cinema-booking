@@ -493,7 +493,7 @@ export const deleteBooking = async (req, res) => {
 };
 
 export const payAllBookings = async (req, res) => {
-    let validBookings = [];
+    const validBookings = [];
     try {
         const { userId } = req.auth();
         const unpaidBookings = await Booking.find({ user: userId, isPaid: false })

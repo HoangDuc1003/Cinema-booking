@@ -1,43 +1,41 @@
-# --- System Files ---
+# --- System files ---
 .DS_Store
 Thumbs.db
 *.sw?
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
 
-# --- Node/Dependencies ---
+# --- Dependencies ---
 node_modules/
-**/node_modules/
 
-# --- Environment / Secrets ---
+# --- Environment / secrets ---
 .env
 .env.local
 .env.*.local
-**/.env
 
-# --- Build / Output ---
+# --- Build and test output ---
 dist/
 dist-ssr/
 build/
-out/
+coverage/
 **/test-results/
 **/playwright-report/
 
 # --- Logs ---
-logs
+logs/
 *.log
 npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
 
-# --- Editor ---
+# --- Editors ---
 .vscode/*
 !.vscode/extensions.json
 .idea/
-# --- Skill ---
-.codex
-.claude
+
+# --- Local AI assistant workspaces and personal notes (kept on disk, not published) ---
+.agents/
+.claude/
+.codex/
+skills/
+AGENTS.md
+**/AGENTS.md
+CLAUDE.md
+PROJECT.md
+deloy/

@@ -5,7 +5,7 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  globalIgnores(['dist', 'test-results', 'playwright-report']),
   {
     files: ['**/*.{js,jsx}'],
     extends: [
@@ -18,7 +18,8 @@ export default defineConfig([
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
     rules: {
-      'no-unused-vars': 'off',
+      // React 19 needs no `import React`; older files still have it, so it is tolerated.
+      'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^(React$|_)', caughtErrors: 'none', ignoreRestSiblings: true }],
     }
   },
 ])

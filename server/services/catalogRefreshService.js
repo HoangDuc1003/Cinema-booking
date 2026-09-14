@@ -584,7 +584,7 @@ async function recordPreLeaseFailure({ runId, source, requestedBy, dryRun, weekK
     return current;
 }
 
-async function allocateVersionedBatch({ weekKey, runId, fencingToken, source }) {
+async function allocateVersionedBatch({ weekKey, runId, fencingToken }) {
     for (let attempt = 1; attempt <= 3; attempt += 1) {
         const session = await mongoose.startSession();
         try {
@@ -928,7 +928,7 @@ export async function refreshWeeklyCatalog({
                 },
                 { $set: { status: 'failed', failureReason: 'STALE_REFRESH_RUN' } },
             );
-            batch = await allocateVersionedBatch({ weekKey, runId, fencingToken: lock.fencingToken, source });
+            batch = await allocateVersionedBatch({ weekKey, runId, fencingToken: lock.fencingToken });
             if (['active', 'retired'].includes(batch.status)) {
                 const run = await updateRun(runId, lock.fencingToken, {
                     status: 'succeeded',

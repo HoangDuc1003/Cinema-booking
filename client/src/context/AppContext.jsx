@@ -1,8 +1,8 @@
-import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react"
+import { createContext, useContext, useEffect, useState, useCallback } from "react"
 import { useUser, useAuth } from "@clerk/react";
 import { useLocation, useNavigate } from "react-router-dom";
 import toast from 'react-hot-toast'
-import { apiClient as api, getNormalizedApiBase } from '../lib/apiClient.js';
+import { apiClient as api } from '../lib/apiClient.js';
 
 // eslint-disable-next-line react-refresh/only-export-components
 export const AppContext = createContext()
@@ -11,7 +11,6 @@ export const AppProvider = ({ children }) => {
   const [isAdmin, setIsAdmin] = useState(false)
   const [shows, setShows] = useState([])
   const [favoriteMovies, setFavoriteMovies] = useState([])
-  const adminCheckRef = useRef(false);
   
   // Default TMDB image base URL
   const image_base_url = import.meta.env.VITE_TMDB_IMAGE_BASE_URL || "https://image.tmdb.org/t/p/original";

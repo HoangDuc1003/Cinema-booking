@@ -16,7 +16,7 @@ Catalog v2 requires MongoDB replica-set/Atlas transactions, Redis, Inngest, and 
 2. Run `npm run migrate:catalog-v2` once as a deployment job with index privileges. The script is idempotent and fails on data conflicts, unsupported transactions, legacy index residue, or an invalid index shape.
 3. Run `npm run seed:catalog -- --dry-run --run-id=<stable-id>`. A dry run may append audit/control-plane state, but must not mutate `CatalogBatch`, `Movie`, `SiteConfig`, or catalog payload caches.
 4. On the disposable replica set, run `npm test` with integration tests enabled. Require the 150-ID, same-week versioning, transaction fault-injection, historical Movie/Show/Booking, and mocked-Favorite assertions to pass.
-5. Run a real staging seed with `npm run seed:catalog -- --run-id=<stable-id>` and verify Home, Manual/Auto Hero, cache keys, native/poster behavior, and Admin polling.
+5. Run a real staging seed with `npm run seed:catalog -- --run-id=<stable-id>` and verify Home, Manual/Auto Hero, cache keys, poster images, and Admin polling.
 6. Seed production manually during low traffic and repeat runtime verification.
 7. Enable weekly refresh and 08:00/20:00 rotation only after every prior gate passes.
 
