@@ -36,12 +36,12 @@ test('official YouTube Trailer outranks language preference and all teaser fallb
     assert.equal(selected.key, 'officialEn1');
 });
 
-test('language preference breaks ties within the same structured trailer class', () => {
+test('English breaks ties within the same structured trailer class', () => {
     const selected = selectBestTmdbTrailer([
-        video({ key: 'englishKey1', official: true, iso_639_1: 'en' }),
         video({ key: 'vietnamKey1', official: true, iso_639_1: 'vi' }),
+        video({ key: 'englishKey1', official: true, iso_639_1: 'en' }),
     ]);
-    assert.equal(selected.key, 'vietnamKey1');
+    assert.equal(selected.key, 'englishKey1');
 });
 
 test('Trailer falls back to Teaser and ignores non-YouTube or malformed candidates', () => {
@@ -71,7 +71,7 @@ test('normalized trailer exposes only a validated provider key and privacy-aware
     assert.doesNotMatch(JSON.stringify(normalized), /TMDB_API_KEY|Bearer|api_key/i);
 });
 
-test('trailer lookup requests Vietnamese videos with English and language-neutral fallbacks', async () => {
+test('trailer lookup requests English videos with a language-neutral fallback', async () => {
     let request;
     const service = createTmdbTrailerService({
         fetchJson: async (path, params) => {
@@ -94,8 +94,8 @@ test('trailer lookup requests Vietnamese videos with English and language-neutra
     assert.deepEqual(request, {
         path: '/movie/123/videos',
         params: {
-            language: 'vi-VN',
-            include_video_language: 'vi,en,null',
+            language: 'en-US',
+            include_video_language: 'en,null',
         },
     });
     assert.equal(result.status, 'available');

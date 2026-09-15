@@ -6,6 +6,7 @@ import {
     getFavorites,
     getProfiles,
     getUserBookings,
+    syncAvatar,
     updateFavorite,
     updateProfile,
 } from '../controllers/userController.js';
@@ -19,5 +20,6 @@ userRouter.get('/profiles', requireAuth(), getProfiles)
 userRouter.post('/profiles', requireAuth(), createProfile)
 userRouter.patch('/profiles/:profileId', requireAuth(), updateProfile)
 userRouter.delete('/profiles/:profileId', requireAuth(), deleteProfile)
+userRouter.post('/sync-avatar', requireAuth(), syncAvatar)
 
 export default userRouter;

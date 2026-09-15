@@ -3,7 +3,8 @@ import { buildHeroImageCandidates } from './heroImages.js';
 export const HERO_MAX_MOVIES = 5;
 export const HERO_CACHE_KEY = 'nitrocine:hero-catalog-cache-v2';
 // 5: the line-up became one daily rotation for everyone (hot pair + classics).
-export const HERO_CACHE_VERSION = 5;
+// 6: title and synopsis follow the viewer country; the rest is English.
+export const HERO_CACHE_VERSION = 6;
 export const HERO_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 export const getNow = () => performance.now();

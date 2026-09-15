@@ -8,6 +8,7 @@ import {
     sanitizeProfiles,
     updateProfileCollection,
 } from "../services/userProfileService.js";
+import { AvatarSyncError, syncGoogleAvatar } from "../services/avatarSyncService.js";
 
 const PROFILE_METADATA_KEY = 'nitrocineProfiles';
 const MAX_FAVORITES = 200;
@@ -173,5 +174,22 @@ export const getFavorites = async (req, res) => {
         return res.json({ success: true, movies });
     } catch (error) {
         return failUserRequest(res, 'get-favorites-failed', error, 'Unable to load favorite movies.');
+    }
+};
+
+// POST /api/user/sync-avatar - Use the linked Google picture while the Clerk avatar is still the default
+export const syncAvatar = async (req, res) => {
+    try {
+        const { userId } = req.auth();
+        if (!userId) {
+            return res.status(401).json({ success: false, message: "Not authorized" });
+        }
+
+        const result = await syncGoogleAvatar({ userId, users: clerkClient.users });
+        return res.json({ success: true, ...result });
+    } catch (error) {
+        // A missing or unusable Google picture is not worth a 500: the default avatar stays.
+        const status = error instanceof AvatarSyncError ? 422 : 500;
+        return failUserRequest(res, 'sync-avatar-failed', error, 'Unable to update the profile picture.', status);
     }
 };

@@ -4,7 +4,7 @@ import { fetchTmdbJson } from './tmdbService.js';
 
 export const MAX_TRAILER_MOVIES = 10;
 const YOUTUBE_KEY_PATTERN = /^[A-Za-z0-9_-]{11}$/;
-const DEFAULT_LANGUAGES = Object.freeze(['vi', 'en']);
+const DEFAULT_LANGUAGES = Object.freeze(['en']);
 const TRAILER_TYPES = new Set(['Trailer', 'Teaser']);
 
 export const normalizeTrailerMovieIds = (movieIds, limit = MAX_TRAILER_MOVIES) => {
@@ -109,8 +109,8 @@ export const createTmdbTrailerService = ({
 
         try {
             const payload = await fetchJson(`/movie/${movieId}/videos`, {
-                language: 'vi-VN',
-                include_video_language: 'vi,en,null',
+                language: 'en-US',
+                include_video_language: 'en,null',
             });
             const selected = selectBestTmdbTrailer(payload?.results, { preferredLanguages });
             const result = normalizeSelectedTrailer(movieId, selected);

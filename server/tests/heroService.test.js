@@ -11,7 +11,9 @@ import {
     matchesHeroEtag,
     normalizeHeroMovie,
     pickDailyRotation,
+    hasHeroTranslation,
     selectHeroMovies,
+    selectTranslatedHeroMovies,
     updateHomeHero,
 } from '../services/heroService.js';
 
@@ -337,4 +339,47 @@ test('If-None-Match accepts weak and comma-separated Hero ETags', () => {
     assert.equal(matchesHeroEtag('*', etag), true);
     assert.equal(matchesHeroEtag('"hero-other"', etag), false);
     assert.equal(matchesHeroEtag('', etag), false);
+});
+
+test('a classic without a Vietnamese title and synopsis is swapped for a translated one', async () => {
+    const pools = { hot: hotPool(), classic: classicPool() };
+    const firstPick = selectHeroMovies(pools, { now: NOW }).filter((movie) => movie.heroSlot === 'classic');
+    const untranslated = new Set([firstPick[0].id, firstPick[2].id]);
+    const checked = [];
+
+    const picked = await selectTranslatedHeroMovies(pools, { now: NOW }, {
+        isTranslated: async (movie) => { checked.push(movie.id); return !untranslated.has(movie.id); },
+    });
+
+    assert.equal(picked.length, 5);
+    assert.deepEqual(picked.map((movie) => movie.heroSlot), ['hot', 'hot', 'classic', 'classic', 'classic']);
+    assert.ok(picked.every((movie) => !untranslated.has(movie.id)));
+    assert.ok(checked.every((id) => id.startsWith('classic-')), 'hot releases are not checked');
+    // Deterministic: the same day gives the same line-up.
+    const again = await selectTranslatedHeroMovies(pools, { now: NOW }, { isTranslated: async (movie) => !untranslated.has(movie.id) });
+    assert.deepEqual(ids(again), ids(picked));
+});
+
+test('when too few classics are translated the Hero still ships five posters', async () => {
+    const picked = await selectTranslatedHeroMovies(
+        { hot: hotPool(), classic: classicPool(4) },
+        { now: NOW },
+        { isTranslated: async () => false },
+    );
+    assert.equal(picked.length, 5);
+});
+
+test('translation check needs both title and synopsis, and an unreachable TMDB does not reject', async () => {
+    const movie = { id: '42' };
+    const vi = (text) => async () => ({ translations: { 'vi-VN': text, vi: text }, alternativeTitles: {} });
+    assert.equal(await hasHeroTranslation(movie, { loadTranslations: vi({ title: 'Người Mặt Nạ Sắt', overview: 'Mô tả' }) }), true);
+    assert.equal(await hasHeroTranslation(movie, { loadTranslations: vi({ title: 'Người Mặt Nạ Sắt', overview: '' }) }), false);
+    assert.equal(await hasHeroTranslation(movie, { loadTranslations: async () => ({ translations: {}, alternativeTitles: { VN: 'Tên VN' } }) }), false);
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+        assert.equal(await hasHeroTranslation(movie, { loadTranslations: async () => { throw new Error('down'); } }), true);
+    } finally {
+        console.warn = warn;
+    }
 });
