@@ -25,7 +25,9 @@ test('Redis health fails fast when a configured endpoint is unreachable', () => 
                 REDIS_COMMAND_TIMEOUT_MS: '100',
             },
             encoding: 'utf8',
-            timeout: 5000,
+            // Only a hang guard: fail-fast is asserted on elapsedMs below. Node's cold
+            // start alone can exceed 5s while the full suite runs in parallel.
+            timeout: 30_000,
         },
     );
     assert.equal(result.status, 0, result.stderr || result.error?.message);

@@ -43,7 +43,9 @@ test('public MongoDB reads skip booking index verification while mutations retai
             cwd: fileURLToPath(new URL('..', import.meta.url)),
             env: { ...process.env, MONGODB_URI: '' },
             encoding: 'utf8',
-            timeout: 5000,
+            // Cold-starting Node and loading mongoose takes well over 5s when the whole
+            // suite runs in parallel on Windows; the timeout only guards against a hang.
+            timeout: 30_000,
         },
     );
 
