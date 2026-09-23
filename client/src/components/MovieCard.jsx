@@ -4,15 +4,7 @@ import toast from 'react-hot-toast';
 import { Link } from 'react-router-dom';
 import timeFormat from '../lib/timeFormat';
 import { useSaveData } from './hero/useHeroEnvironment';
-
-const readStoredFavorites = () => {
-  try {
-    const value = JSON.parse(localStorage.getItem('nitro_favorites') || '[]');
-    return Array.isArray(value) ? value : [];
-  } catch {
-    return [];
-  }
-};
+import { isFavorite, toggleFavorite as toggleStoredFavorite, useFavorites } from '../lib/favorites';
 
 const MovieCard = ({ movie, ctaLabel = 'Book tickets' }) => {
   const [hasImageError, setHasImageError] = useState(false);
@@ -73,13 +65,7 @@ const MovieCard = ({ movie, ctaLabel = 'Book tickets' }) => {
     return null;
   })();
 
-  const [isFavorited, setIsFavorited] = useState(false);
-
-  useEffect(() => {
-    const favorites = readStoredFavorites();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setIsFavorited(favorites.some((favorite) => String(favorite.id || favorite._id) === String(movieId)));
-  }, [movieId]);
+  const isFavorited = isFavorite(useFavorites(), movie);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -88,18 +74,9 @@ const MovieCard = ({ movie, ctaLabel = 'Book tickets' }) => {
 
   const toggleFavorite = (e) => {
     e.stopPropagation();
-    const favorites = readStoredFavorites();
-    let newFavorites;
-    if (isFavorited) {
-      newFavorites = favorites.filter((favorite) => String(favorite.id || favorite._id) !== String(movieId));
-      toast.success('Removed from favorites');
-    } else {
-      newFavorites = [...favorites, movie];
-      toast.success('Added to favorites');
-    }
-    localStorage.setItem('nitro_favorites', JSON.stringify(newFavorites));
-    setIsFavorited(!isFavorited);
-    window.dispatchEvent(new Event('favoritesUpdated'));
+    const favorited = toggleStoredFavorite(movie);
+    if (favorited === null) toast.error('Your browser blocked saving favorites.');
+    else toast.success(favorited ? 'Added to favorites' : 'Removed from favorites');
   };
 
   const ratingValue = Number(movie.vote_average ?? movie.rating);

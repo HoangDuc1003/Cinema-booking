@@ -12,6 +12,7 @@ import DateSelect from '../components/DateSelect';
 import Loading from '../components/Loading';
 import MovieTrailerModal from '../components/MovieTrailerModal';
 import toast from 'react-hot-toast';
+import { isFavorite, toggleFavorite as toggleStoredFavorite, useFavorites } from '../lib/favorites';
 
 const MovieDetails = () => {
   const [movies, setMovies] = useState([]);
@@ -28,32 +29,16 @@ const MovieDetails = () => {
   const [showtimeReloadToken, setShowtimeReloadToken] = useState(0);
   const [recommendationReloadToken, setRecommendationReloadToken] = useState(0);
   const navigate = useNavigate();
-  const [isFavorited, setIsFavorited] = useState(false);
+  const favorites = useFavorites();
+  const isFavorited = Boolean(show) && isFavorite(favorites, show);
   const [trailerOpen, setTrailerOpen] = useState(false);
 
   const toggleFavorite = useCallback((e) => {
     e.stopPropagation();
     if (!show) return;
-    const favorites = JSON.parse(localStorage.getItem('nitro_favorites') || '[]');
-    let newFavorites;
-    if (isFavorited) {
-      newFavorites = favorites.filter(f => f.id !== show.id);
-      toast.success('Removed from favorites');
-    } else {
-      newFavorites = [...favorites, show];
-      toast.success('Added to favorites');
-    }
-    localStorage.setItem('nitro_favorites', JSON.stringify(newFavorites));
-    setIsFavorited(!isFavorited);
-    window.dispatchEvent(new Event('favoritesUpdated'));
-  }, [show, isFavorited]);
-
-  useEffect(() => {
-    if (show) {
-      const favorites = JSON.parse(localStorage.getItem('nitro_favorites') || '[]');
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setIsFavorited(favorites.some(f => f.id === show.id));
-    }
+    const favorited = toggleStoredFavorite(show);
+    if (favorited === null) toast.error('Your browser blocked saving favorites.');
+    else toast.success(favorited ? 'Added to favorites' : 'Removed from favorites');
   }, [show]);
 
   useEffect(() => {
