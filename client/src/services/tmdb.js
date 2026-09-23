@@ -1,5 +1,4 @@
 // Service: TMDB API helpers
-import { dummyShowsData } from '../assets/assets';
 import { extractYouTubeVideoId } from '../lib/youtubeVideo.js';
 import {
     fetchWithTimeout as requestWithTimeout,
@@ -31,7 +30,14 @@ const sharedBackendRequests = new Map();
 let lastHeroResponse = null;
 let lastHeroEtag = '';
 
-const fallbackMovies = (limit = dummyShowsData.length) => dummyShowsData.slice(0, limit);
+// Mock movies are a development aid only. The literal `import.meta.env.DEV` guard lets
+// Vite drop the module from production builds instead of shipping it in the main bundle.
+const loadMockMovies = async () => {
+    if (!import.meta.env.DEV) return [];
+    const { dummyShowsData } = await import('../mocks/dummyShows.js');
+    return dummyShowsData;
+};
+const fallbackMovies = async (limit) => (await loadMockMovies()).slice(0, limit);
 
 const hasUsableImage = (movie) => Boolean(movie?.poster_path || movie?.backdrop_path || movie?.poster);
 const onlyMoviesWithImages = (movies = []) => movies.filter(hasUsableImage);
@@ -405,8 +411,8 @@ const fetchSharedBackendResponse = (key, loader, signal) => {
     });
 };
 
-const developmentMockResult = (limit) => ({
-    movies: onlyMoviesWithImages(fallbackMovies(limit).map(normalizeMovieCard)),
+const developmentMockResult = async (limit) => ({
+    movies: onlyMoviesWithImages((await fallbackMovies(limit)).map(normalizeMovieCard)),
     meta: { reason: 'explicit-development-mock' },
     source: 'development-mock',
 });
@@ -618,7 +624,7 @@ export const fetchPopularMovies = async (options = {
     } catch (error) {
         if (options?.signal?.aborted || error?.name === 'AbortError') throw error;
         if (options?.fallbackMode !== 'none' && MOCK_DATA_ENABLED) {
-            return onlyMoviesWithImages(fallbackMovies(20));
+            return onlyMoviesWithImages(await fallbackMovies(20));
         }
         throw error;
     }
@@ -659,7 +665,7 @@ export const fetchMovieDetails = async (id, { signal, fallbackMode = 'mock' } = 
     } catch (e) {
         if (signal?.aborted || e?.name === 'AbortError') throw e;
         if (fallbackMode !== 'none' && MOCK_DATA_ENABLED) {
-            return dummyShowsData.find((movie) => String(movie._id || movie.id) === String(id)) || null;
+            return (await loadMockMovies()).find((movie) => String(movie._id || movie.id) === String(id)) || null;
         }
         throw e;
     }
@@ -719,7 +725,7 @@ export const fetchUpcomingMovies = async ({ signal, fallbackMode = 'mock' } = {}
     } catch (error) {
         if (signal?.aborted || error?.name === 'AbortError') throw error;
         if (fallbackMode !== 'none' && MOCK_DATA_ENABLED) {
-            return onlyMoviesWithImages(fallbackMovies(12));
+            return onlyMoviesWithImages(await fallbackMovies(12));
         }
         throw error;
     }
@@ -736,7 +742,7 @@ export const fetchNowPlayingMovies = async ({ signal, fallbackMode = 'mock' } = 
     } catch (error) {
         if (signal?.aborted || error?.name === 'AbortError') throw error;
         if (fallbackMode !== 'none' && MOCK_DATA_ENABLED) {
-            return onlyMoviesWithImages(fallbackMovies(12));
+            return onlyMoviesWithImages(await fallbackMovies(12));
         }
         throw error;
     }
