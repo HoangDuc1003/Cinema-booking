@@ -62,13 +62,15 @@ const App = () => {
   const isAdminRoute = useLocation().pathname.startsWith('/admin')
   const { user } = useAppContext()
 
+  // overflow-x-clip, not -hidden: `hidden` turns overflow-y into `auto`, which made
+  // <main> an inner scroll box with a second scrollbar beside the page's own.
   return (
-    <div className='flex flex-col min-h-screen overflow-x-hidden w-full bg-black text-white'>
+    <div className='flex flex-col min-h-screen overflow-x-clip w-full bg-black text-white'>
       <Toaster />
 
       {!isAdminRoute && <Navbar />}
 
-      <main className='flex-grow w-full overflow-x-hidden'>
+      <main className='flex-grow w-full overflow-x-clip'>
         <Suspense fallback={<PageFallback />}>
           <AppRoutes includeAdmin user={user} />
         </Suspense>
