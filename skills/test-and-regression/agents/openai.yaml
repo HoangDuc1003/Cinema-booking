@@ -1,4 +1,0 @@
-interface:
-  display_name: "Test and Regression"
-  short_description: "Design focused tests and regression checks"
-  default_prompt: "Use $test-and-regression to verify a NitroCine change with focused regression coverage."
