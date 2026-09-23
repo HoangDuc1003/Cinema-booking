@@ -227,13 +227,13 @@ const MovieDetails = () => {
           <div className="absolute inset-0 bg-gradient-to-b from-[#03060a]/20 via-transparent to-[#03060a]" />
         </div>
 
-      <div className="relative z-10 px-6 md:px-6 lg:px-40 pt-[140px] pb-12">
+      <div className="relative z-10 px-6 md:px-6 lg:px-40 pt-[200px] pb-12">
           <div className='flex flex-col md:flex-row gap-8 max-w-6xl mx-auto'>
             <div className="relative overflow-hidden rounded-xl cursor-pointer group w-auto h-130 flex-shrink-0">
               <img
                 src={imageUrl}
                 alt={show.title}
-                className='max-md:mx-auto rounded-2xl h-130 w-[340px] md:w-[320px] object-cover group-hover:scale-105 transition-transform duration-500'
+                className='max-md:mx-auto rounded-2xl h-130 w-[340px] md:w-[340px] object-cover group-hover:scale-105 transition-transform duration-500'
               />
               <div className="absolute top-0 left-[-150%] w-1/2 h-full z-10 block transform -skew-x-12 bg-linear-to-r from-transparent
                 via-white/40 to-transparent transition-all duration-700 group-hover:left-[150%]">
