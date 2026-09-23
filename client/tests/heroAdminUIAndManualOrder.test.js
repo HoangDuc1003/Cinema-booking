@@ -15,12 +15,12 @@ test('Hero admin is limited to selecting and ordering exactly five posters', asy
   assert.doesNotMatch(source, /HeroVideoUploader|HeroVideoReadiness|native trailer|sound settings|hero\/refresh/i);
 });
 
-test('Poster-only Hero preserves the server-provided five-movie order', async () => {
+test('Hero preserves the server-provided five-movie order', async () => {
   const source = await read('../src/components/HeroSection.jsx');
 
   assert.match(source, /validateMovieCandidates\(orderedMovies, controller\.signal\)/);
   assert.match(source, /saveHeroMoviesCache\(preparedMovies,/);
   assert.match(source, /setMovies\(preparedMovies\)/);
-  assert.match(source, /data-hero-media="poster"/);
-  assert.doesNotMatch(source, /HeroVideoRenderer|HeroNativeVideo|heroVideoSource|heroTrailerMode|<video|<iframe/);
+  assert.match(source, /data-hero-media=\{trailerVisible \? 'video' : 'poster'\}/);
+  assert.doesNotMatch(source, /HeroVideoRenderer|HeroNativeVideo|heroVideoSource|heroTrailerMode|<iframe/);
 });

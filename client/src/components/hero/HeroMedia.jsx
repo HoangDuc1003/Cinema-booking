@@ -4,6 +4,9 @@ const HeroMedia = ({
   title,
   posterCandidates = [],
   posterVisible,
+  // An optional trailer layer, drawn over the poster but under the gradients so
+  // the text keeps its contrast.
+  children,
 }) => {
   const candidates = [...new Set(posterCandidates.filter(Boolean))];
   const candidateKey = candidates.join('|');
@@ -33,6 +36,7 @@ const HeroMedia = ({
           />
         )}
       </div>
+      {children}
       <div className="hero-media__breath" aria-hidden="true" />
       <div className="hero-media__gradient hero-media__gradient--side" aria-hidden="true" />
       <div className="hero-media__gradient hero-media__gradient--bottom" aria-hidden="true" />

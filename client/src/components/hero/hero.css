@@ -270,6 +270,58 @@
 .hero-poster.is-ready { opacity: 1; }
 .hero-poster.is-loading { opacity: 0; }
 
+/* ─── Native trailer (`HeroTrailerVideo`) ─── */
+/* Above the poster, below the gradients, invisible until a real frame is drawn. */
+.hero-trailer-video {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  background: transparent;
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(var(--hero-trailer-zoom, 1));
+  transition: opacity 700ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.hero-trailer-video.is-visible {
+  opacity: 1;
+}
+
+/* The poster is hidden behind the video, so its slow pan would only burn CPU. */
+.hero-section.is-trailer-playing .hero-poster {
+  animation-play-state: paused;
+}
+
+/* Once the trailer is on, the synopsis steps back so the picture carries the slide.
+   An animation, not a transition: the entrance animation holds opacity with
+   `forwards`, which a plain declaration cannot override. */
+.hero-section.is-trailer-playing .hero-overview {
+  animation: hero-overview-recede 700ms cubic-bezier(0.22, 1, 0.36, 1) 2.5s forwards;
+}
+
+@keyframes hero-overview-recede {
+  from { opacity: 1; max-height: 6rem; margin-bottom: 1.35rem; }
+  to { opacity: 0; max-height: 0; margin-bottom: 0; }
+}
+
+.hero-sound-toggle {
+  position: absolute;
+  z-index: 16;
+  right: var(--hero-safe-right);
+  bottom: calc(var(--hero-safe-bottom) + 2rem);
+  cursor: pointer;
+  animation: hero-sound-toggle-in 400ms ease both;
+}
+
+@keyframes hero-sound-toggle-in {
+  from { opacity: 0; transform: translate3d(0, 6px, 0); }
+  to { opacity: 1; transform: none; }
+}
+
 .hero-media__breath,
 .hero-media__gradient {
   position: absolute;

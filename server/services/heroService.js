@@ -3,6 +3,7 @@ import Movie from '../models/Movie.js';
 import Show from '../models/Show.js';
 import SiteConfig from '../models/SiteConfig.js';
 import { deleteByPattern, deleteKeys, rememberJson } from './cacheService.js';
+import { attachHeroVideos } from './heroVideoService.js';
 import { getPublicHomeNowShowing } from './homeNowShowingService.js';
 import { redisKeys, redisTtl } from './redisKeys.js';
 import { hashSeed } from './seededRandom.js';
@@ -123,6 +124,8 @@ export const createHeroEtag = (payload) => {
         dateKey: payload?.dateKey || '',
         seed: payload?.meta?.seed || '',
         movies: (payload?.movies || []).map((movie) => movie.id || movie._id),
+        // A newly configured trailer must not be answered with a 304.
+        videos: (payload?.movies || []).map((movie) => movie.trailerVideo?.src || ''),
         settingsUpdatedAt: payload?.settings?.updatedAt || null,
         nextRefreshAt: payload?.nextRefreshAt || null,
     });
@@ -486,7 +489,7 @@ export const getPublicHomeHero = async ({
         throw createHttpError(503, 'Five poster-ready movies are required for the home hero.', 'HERO_POOL_TOO_SMALL');
     }
 
-    return buildHeroPayload({ settings, movies, effectiveMode, now, hotSource });
+    return buildHeroPayload({ settings, movies: attachHeroVideos(movies), effectiveMode, now, hotSource });
 };
 
 export const getAdminHomeHero = async ({ now = new Date(), loadNowShowing = getPublicHomeNowShowing } = {}) => {

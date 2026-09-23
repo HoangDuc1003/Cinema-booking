@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 const read = (path) => readFile(new URL(path, import.meta.url), 'utf8');
 
-test('Home keeps the YouTube TrailerSection outside the poster-only Hero', async () => {
+test('Home keeps the YouTube TrailerSection outside the Hero, whose trailers are native video only', async () => {
   const [home, trailer, hero] = await Promise.all([
     read('../src/pages/Home.jsx'),
     read('../src/components/TrailerSection.jsx'),
@@ -17,7 +17,9 @@ test('Home keeps the YouTube TrailerSection outside the poster-only Hero', async
   assert.match(trailer, /youtube-nocookie\.com\/embed/);
   assert.match(trailer, /<iframe/);
   assert.doesNotMatch(trailer, /resolveConfiguredHeroVideoSource|HeroMediaAsset|<video/);
-  assert.doesNotMatch(hero, /<video|<iframe|youtube-nocookie|HeroVideoRenderer/);
+  // The Hero plays trailers through its own chrome-free <video>, never an embed.
+  assert.match(hero, /<HeroTrailerVideo/);
+  assert.doesNotMatch(hero, /<iframe|youtube-nocookie|HeroVideoRenderer/);
 });
 
 test('TrailerSection uses one batch lookup and validates the YouTube key before embedding', async () => {

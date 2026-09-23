@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, Volume2, VolumeX } from 'lucide-react';
 import HeroContent from './hero/HeroContent';
 import HeroMedia from './hero/HeroMedia';
 import HeroPosterRail from './hero/HeroPosterRail';
+import HeroTrailerVideo from './hero/HeroTrailerVideo';
 import { buildHeroImageCandidates } from './hero/heroImages';
 import {
   HERO_MAX_MOVIES,
@@ -13,7 +14,7 @@ import {
   saveHeroMoviesCache,
   validateMovieCandidates,
 } from './hero/heroCatalogLoader';
-import { useMediaQuery } from './hero/useHeroEnvironment';
+import { useMediaQuery, useSaveData, useSlowNetwork } from './hero/useHeroEnvironment';
 import { scrollToTrailer } from '../lib/scrollToTrailer';
 import { useHomeData } from '../context/HomeDataContext';
 import './hero/hero.css';
@@ -62,6 +63,18 @@ const HeroSection = ({ onTrailerRequest }) => {
   const transitionTimersRef = useRef(new Set());
   const isMobileScreen = useMediaQuery('(max-width: 767px)');
   const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
+  const saveData = useSaveData();
+  const slowNetwork = useSlowNetwork();
+  const sectionRef = useRef(null);
+  const [inView, setInView] = useState(true);
+  const [pageVisible, setPageVisible] = useState(() => document.visibilityState !== 'hidden');
+  const [trailerVisible, setTrailerVisible] = useState(false);
+  const [failedTrailers, setFailedTrailers] = useState(() => new Set());
+  // Muted until the viewer asks: browsers only autoplay video without sound.
+  const [soundOn, setSoundOn] = useState(false);
+  // Trailers are skipped where they would cost more than they give: small
+  // screens, data saver, very slow networks, and reduced motion.
+  const trailersAllowed = !isMobileScreen && !reducedMotion && !saveData && !slowNetwork;
 
   useEffect(() => {
     moviesRef.current = movies;
@@ -76,7 +89,10 @@ const HeroSection = ({ onTrailerRequest }) => {
     const availableMovies = moviesRef.current;
     if (!availableMovies.length) return;
     const normalizedIndex = ((targetIndex % availableMovies.length) + availableMovies.length) % availableMovies.length;
-    const commit = () => setCurrentIndex(normalizedIndex);
+    const commit = () => {
+      setTrailerVisible(false);
+      setCurrentIndex(normalizedIndex);
+    };
 
     if (!animate || reducedMotion) {
       commit();
@@ -151,13 +167,43 @@ const HeroSection = ({ onTrailerRequest }) => {
     return () => controller.abort();
   }, [clearTransitionTimers, heroStatus, sharedHero]);
 
+  const currentTrailer = movies[currentIndex]?.trailerVideo;
+  const activeTrailer = trailersAllowed && currentTrailer?.src && !failedTrailers.has(currentTrailer.src)
+    ? currentTrailer
+    : null;
+
+  // A slide with a trailer moves on when the trailer ends; only poster slides
+  // use the timer.
   useEffect(() => {
-    if (reducedMotion || movies.length < 2) return undefined;
+    if (reducedMotion || movies.length < 2 || activeTrailer) return undefined;
     const interval = window.setInterval(() => {
       switchMovie(currentIndex + 1);
     }, HERO_AUTO_CAROUSEL_MS);
     return () => window.clearInterval(interval);
-  }, [currentIndex, movies.length, reducedMotion, switchMovie]);
+  }, [activeTrailer, currentIndex, movies.length, reducedMotion, switchMovie]);
+
+  // Trailers pause off screen and in background tabs instead of streaming unseen.
+  useEffect(() => {
+    const node = sectionRef.current;
+    if (!node || typeof IntersectionObserver === 'undefined') return undefined;
+    const observer = new IntersectionObserver(
+      ([entry]) => setInView(entry.isIntersecting && entry.intersectionRatio >= 0.4),
+      { threshold: [0, 0.4, 1] },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [movies.length]);
+
+  useEffect(() => {
+    const update = () => setPageVisible(document.visibilityState !== 'hidden');
+    document.addEventListener('visibilitychange', update);
+    return () => document.removeEventListener('visibilitychange', update);
+  }, []);
+
+  const markTrailerFailed = useCallback((src) => {
+    setTrailerVisible(false);
+    setFailedTrailers((previous) => new Set(previous).add(src));
+  }, []);
 
   useEffect(() => {
     let timer;
@@ -236,18 +282,46 @@ const HeroSection = ({ onTrailerRequest }) => {
 
   return (
     <section
-      className="hero-section"
+      ref={sectionRef}
+      className={`hero-section ${trailerVisible ? 'is-trailer-playing' : ''}`}
       aria-label="Featured movie"
       data-catalog-source={catalogSource}
       data-catalog-version={catalogMeta?.version || ''}
-      data-hero-media="poster"
+      data-hero-media={trailerVisible ? 'video' : 'poster'}
     >
       <HeroMedia
         key={`media-${currentMovieKey}-${posterCandidates.join('|')}`}
         title={currentMovie.title || currentMovie.name}
         posterCandidates={posterCandidates}
         posterVisible
-      />
+      >
+        {activeTrailer && (
+          <HeroTrailerVideo
+            key={`${currentMovieKey}-${activeTrailer.src}`}
+            src={activeTrailer.src}
+            type={activeTrailer.type}
+            zoom={activeTrailer.zoom}
+            playing={inView && pageVisible && !isTransitioning}
+            muted={!soundOn}
+            onVisibleChange={setTrailerVisible}
+            onFinish={() => switchMovie(currentIndex + 1)}
+            onFail={() => markTrailerFailed(activeTrailer.src)}
+            onSoundBlocked={() => setSoundOn(false)}
+          />
+        )}
+      </HeroMedia>
+
+      {activeTrailer && trailerVisible && (
+        <button
+          type="button"
+          onClick={() => setSoundOn((value) => !value)}
+          aria-pressed={soundOn}
+          aria-label={soundOn ? 'Mute trailer' : 'Unmute trailer'}
+          className="hero-sound-toggle trailer-glass-button"
+        >
+          {soundOn ? <Volume2 className="h-5 w-5" aria-hidden="true" /> : <VolumeX className="h-5 w-5" aria-hidden="true" />}
+        </button>
+      )}
 
       {isTransitioning && (
         <>

@@ -26,6 +26,15 @@ npm run sync:now-playing
 
 The alternative admin-only endpoint is `POST /api/show/sync-now-playing`. It must not be exposed to unauthenticated clients. If the Hero or Now Showing cannot be loaded, nothing is closed; if neither can, the sync stops and existing schedules are kept.
 
+## Hero trailers
+
+On desktop the Hero can play a muted, control-free trailer over each poster. TMDB only links YouTube, so the video files are configured on the server:
+
+- `HERO_TRAILER_VIDEOS`: JSON mapping a TMDB movie ID to an https `.mp4`, `.m4v` or `.webm` URL, or to `{ "src": "...", "zoom": 1.33 }` to crop letterboxing (zoom is clamped to 1–1.5).
+- `HERO_VIDEO_ALLOWED_HOSTS`: comma-separated hosts those URLs may use, for example `res.cloudinary.com`. Any other host is dropped.
+
+Movies without a valid entry keep their poster. Use only trailers you are licensed to serve. `HERO_DEMO_VIDEOS=true` fills gaps with open-licence clips for local testing and is ignored in production.
+
 ## Release and rollback
 
 1. Deploy server and client with the same release commit.
