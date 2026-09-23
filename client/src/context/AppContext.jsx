@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback } from "react"
+import { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react"
 import { useUser, useAuth } from "@clerk/react";
 import { useLocation, useNavigate } from "react-router-dom";
 import toast from 'react-hot-toast'
@@ -8,12 +8,9 @@ import { apiClient as api } from '../lib/apiClient.js';
 export const AppContext = createContext()
 
 export const AppProvider = ({ children }) => {
-  const [isAdmin, setIsAdmin] = useState(false)
-  const [shows, setShows] = useState([])
-  const [favoriteMovies, setFavoriteMovies] = useState([])
-  
-  // Default TMDB image base URL
-  const image_base_url = import.meta.env.VITE_TMDB_IMAGE_BASE_URL || "https://image.tmdb.org/t/p/original";
+  // The admin answer is kept with the user it was checked for, so a pending or
+  // stale check is never mistaken for "not an admin" by the route guard below.
+  const [adminCheck, setAdminCheck] = useState({ userId: null, isAdmin: false })
   
   const { user } = useUser()
   const { getToken } = useAuth()
@@ -66,54 +63,29 @@ export const AppProvider = ({ children }) => {
     };
   }, [getToken]);
 
-  const fetchShows = useCallback(async () => {
-    try {
-      const { data } = await api.get('/api/show/all');
-      if (data && data.success) {
-        setShows(data.shows || []);
-      }
-    } catch (error) {
-      // Handled by interceptor
-    }
-  }, []);
+  const userId = user?.id ?? null;
 
-  // FIX: Removed location.pathname and navigate from dependencies.
-  // This function now ONLY checks admin status — it doesn't handle redirects.
+  // Only checks admin status; redirects are the route guard's job.
   const fetchIsAdmin = useCallback(async () => {
-    if (!user) return; 
-    
+    if (!userId) return;
+    let isAdmin = false;
     try {
       const { data } = await api.get('/api/admin/is-admin');
-      
-      setIsAdmin(data?.isAdmin || false);
-    } catch (error) {
-      setIsAdmin(false);
+      isAdmin = data?.isAdmin === true;
+    } catch {
+      // A 401/403 is the expected answer for non-admins and is logged by the interceptor.
     }
-  }, [user]);
-
-  const fetchFavoriteMovies = useCallback(async () => {
-    if (!user) return; 
-
-    try {
-      const { data } = await api.get('/api/user/favorites');
-      if (data && data.success) {
-        setFavoriteMovies(data.movies || []);
-      }
-    } catch (error) {
-      console.log(error)
-    }
-  }, [user]);
+    setAdminCheck({ userId, isAdmin });
+  }, [userId]);
 
   useEffect(() => {
-    if (user) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      fetchIsAdmin();
-      fetchFavoriteMovies();
-    } else {
-      setIsAdmin(false);
-      setFavoriteMovies([]);
-    }
-  }, [user, fetchIsAdmin, fetchFavoriteMovies]);
+    // The state update happens after the request resolves, not synchronously.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchIsAdmin();
+  }, [fetchIsAdmin]);
+
+  const adminChecked = Boolean(userId) && adminCheck.userId === userId;
+  const isAdmin = adminChecked && adminCheck.isAdmin;
 
   // Clerk takes the Google picture only when an account is created with Google.
   // An account linked to Google later keeps the default avatar, so ask the server
@@ -137,27 +109,26 @@ export const AppProvider = ({ children }) => {
       });
   }, [needsGoogleAvatar, user]);
 
-  // FIX: Separate effect for admin route protection.
+  // Waits for the check to finish: redirecting while it is still pending bounced
+  // real admins, and keying only on `isAdmin` let a confirmed non-admin stay.
+  const onAdminRoute = location.pathname.startsWith('/admin');
   useEffect(() => {
-    if (user && !isAdmin && location.pathname.startsWith('/admin')) {
+    if (onAdminRoute && adminChecked && !isAdmin) {
       navigate('/');
       toast.error("You are not authorized to access the admin dashboard");
     }
-  }, [isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [onAdminRoute, adminChecked, isAdmin, navigate]);
 
-  const value = {
-    axios: api, 
+  // Memoised so navigating (which re-renders this provider) does not re-render every consumer.
+  const value = useMemo(() => ({
+    axios: api,
     user,
     getToken,
     navigate,
     isAdmin,
-    shows,
-    favoriteMovies,
-    image_base_url, 
-    fetchShows, 
+    adminChecked,
     fetchIsAdmin,
-    fetchFavoriteMovies
-  }
+  }), [user, getToken, navigate, isAdmin, adminChecked, fetchIsAdmin])
 
   return (
     <AppContext.Provider value={value}>

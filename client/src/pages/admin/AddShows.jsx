@@ -8,7 +8,7 @@ import { useAppContext } from '../../context/AppContext';
 import toast from 'react-hot-toast'
 
 const AddShows = () => {
-  const {axios,getToken,fetchShows} = useAppContext();
+  const {axios,getToken} = useAppContext();
   const currency = import.meta.env.VITE_CURRENCY || "$";
   const [nowPlayingMovies, setNowPlayingMovies] = useState([]);
   const [selectedMovie, setSelectedMovie] = useState(null);
@@ -101,7 +101,6 @@ const AddShows = () => {
         setDateTimeSelection({})
         setShowPrice("")
         setSelectedMovie(null)
-        await fetchShows()
       }else{
         toast.error(data.message)
       }
