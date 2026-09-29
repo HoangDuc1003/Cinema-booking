@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&display=swap');
+/* The Outfit font is linked from index.html so it loads in parallel with this file. */
 @import "tailwindcss";
 
 @theme {

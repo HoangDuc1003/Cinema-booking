@@ -13,6 +13,7 @@ import Loading from '../components/Loading';
 import MovieTrailerModal from '../components/MovieTrailerModal';
 import toast from 'react-hot-toast';
 import { isFavorite, toggleFavorite as toggleStoredFavorite, useFavorites } from '../lib/favorites';
+import { getTmdbImageUrl } from '../components/hero/heroImages';
 
 const MovieDetails = () => {
   const [movies, setMovies] = useState([]);
@@ -119,12 +120,19 @@ const MovieDetails = () => {
     return () => controller.abort();
   }, [id, recommendationReloadToken]);
 
-  const imageUrl = useMemo(() => {
-    if (!show?.poster_path) return '';
-    const path = show.poster_path;
-    if (path.startsWith('http')) return path;
-    return `https://image.tmdb.org/t/p/original${path}`;
-  }, [show?.poster_path]);
+  // Shown 340px wide and as a blurred backdrop; w780 covers both on a 2x screen,
+  // and the backdrop reuses the same download.
+  const imageUrl = useMemo(() => getTmdbImageUrl(show?.poster_path, 'w780'), [show?.poster_path]);
+
+  const languageName = useMemo(() => {
+    const code = String(show?.original_language || '').trim();
+    if (!code) return '';
+    try {
+      return new Intl.DisplayNames(['en'], { type: 'language' }).of(code) || code;
+    } catch {
+      return code;
+    }
+  }, [show?.original_language]);
 
   // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const releaseYear = useMemo(() =>
@@ -143,36 +151,26 @@ const MovieDetails = () => {
     document.getElementById('dateSelect')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, []);
 
-  useEffect(() => {
-    if (recommendationStatus !== 'ready' || movies.length === 0) return;
-    
-    const carousel = document.getElementById('similar-movies-carousel');
-    if (!carousel) return;
-    
-    const intervalTime = 3000; // 3 seconds
-    
-    const scrollInterval = setInterval(() => {
-      if (carousel.matches(':hover')) return;
-      
-      const firstChild = carousel.children[0];
-      if (!firstChild) return;
-      
-      const itemWidth = firstChild.getBoundingClientRect().width + 16; // item width + 16px gap
-      const jumpDistance = itemWidth * 4;
-      const maxScroll = carousel.scrollWidth - carousel.clientWidth;
-      
-      if (carousel.scrollLeft >= maxScroll - 20) {
-        carousel.scrollTo({ left: 0, behavior: 'smooth' });
-      } else {
-        carousel.scrollBy({ left: jumpDistance, behavior: 'smooth' });
-      }
-    }, intervalTime);
-    
-    return () => clearInterval(scrollInterval);
-  }, [recommendationStatus, movies.length]);
-
   if (isLoading) return <Loading />;
-  if (hasError) return <Loading message="Error loading movie details..." />;
+  // A spinner here would promise a result that is not coming; say so and offer a retry.
+  if (hasError) {
+    return (
+      <main className="flex min-h-screen items-center justify-center px-6 pt-24">
+        <div className="catalog-state-panel" role="alert">
+          <h2>Movie details are unavailable</h2>
+          <p>We could not load this movie right now. Check your connection and try again.</p>
+          <button
+            type="button"
+            className="catalog-state-panel__button"
+            onClick={() => setShowtimeReloadToken((value) => value + 1)}
+          >
+            <RefreshCw aria-hidden="true" />
+            Try again
+          </button>
+        </div>
+      </main>
+    );
+  }
 
   return show ? (
     <main className='relative isolate min-h-screen bg-[#03060a] pb-20'>
@@ -241,7 +239,9 @@ const MovieDetails = () => {
             </div>
 
             <div className='relative flex flex-col gap-3'>
-              <p className='text-primary font-bold tracking-wider text-sm'>ENGLISH</p>
+              {languageName && (
+                <p className='text-primary font-bold tracking-wider text-sm uppercase'>{languageName}</p>
+              )}
               <h1 className='text-4xl md:text-5xl font-extrabold max-w-xl text-balance'>{show.title}</h1>
 
               <div className='flex items-center gap-2 text-gray-300'>
@@ -254,7 +254,10 @@ const MovieDetails = () => {
               </p>
 
               <p>
-                {timeFormat(show.runtime)} • {genreNames} • {releaseYear}
+                {/* TMDB reports 0 for an unknown runtime; leave it out rather than print "0h 0m". */}
+                {[show.runtime > 0 ? timeFormat(show.runtime) : '', genreNames, releaseYear]
+                  .filter(Boolean)
+                  .join(' • ')}
               </p>
 
               <div className='flex items-center flex-wrap gap-4 mt-4'>

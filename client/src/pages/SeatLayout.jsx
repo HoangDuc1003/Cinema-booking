@@ -8,6 +8,7 @@ import { useAppContext } from '../context/AppContext'
 import Loading from '../components/Loading'
 import isoTimeFormat from '../lib/isoTimeFormat'
 import { fetchMovieShowtimes } from '../services/tmdb'
+import { getTmdbImageUrl } from '../components/hero/heroImages'
 
 const customStyles = `
     @keyframes syncPulse {
@@ -121,7 +122,6 @@ const SeatLayout = () => {
   const [reloadToken, setReloadToken] = useState(0)
   const [isBooking, setIsBooking] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false) // Tracking real-time sync
-  const imageBaseUrl = "https://image.tmdb.org/t/p/original"
 
   // Seat configuration - Memoized
   const seatRows = React.useMemo(() => [
@@ -614,8 +614,11 @@ const SeatLayout = () => {
             <div className="p-6 bg-linear-to-br from-white/10 to-white/5 rounded-2xl border border-white/10 backdrop-blur-sm">
               <div className="flex items-start gap-4">
                 <img
-                  src={`${imageBaseUrl}${show.poster_path}`}
+                  // A 64px thumbnail: the full-size poster was ~400 KB for nothing.
+                  src={getTmdbImageUrl(show.poster_path, 'w185') || undefined}
                   alt={show.title}
+                  loading="lazy"
+                  decoding="async"
                   className="w-16 h-24 rounded-lg object-cover border border-white/20"
                 />
                 <div className="flex-1">

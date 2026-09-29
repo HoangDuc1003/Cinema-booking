@@ -16,10 +16,13 @@ const MobileCarouselCard = ({ movie }) => {
   const movieId = movie._id || movie.id;
   const movieHref = `/movies/${movieId}`;
 
-  const releaseYear = movie.release_date ? new Date(movie.release_date).getFullYear() : '2026';
+  // Unknown details are left out: invented placeholders (a "8.5" rating, a
+  // "2h 15m" runtime) read as real facts about the movie.
+  const releaseYear = movie.release_date ? new Date(movie.release_date).getFullYear() : '';
   const ratingValue = Number(movie.vote_average ?? movie.rating);
-  const rating = Number.isFinite(ratingValue) && ratingValue > 0 ? ratingValue.toFixed(1) : '8.5';
-  const runtime = movie.runtime || movie.duration ? timeFormat(movie.runtime || movie.duration) : '2h 15m';
+  const rating = Number.isFinite(ratingValue) && ratingValue > 0 ? ratingValue.toFixed(1) : '';
+  const runtimeMinutes = Number(movie.runtime || movie.duration);
+  const runtime = runtimeMinutes > 0 ? timeFormat(runtimeMinutes) : '';
 
   const posterSrc = getImageUrl(movie.poster_path || movie.backdrop_path || movie.poster);
 
@@ -32,23 +35,26 @@ const MobileCarouselCard = ({ movie }) => {
     <article className="group relative flex-shrink-0 w-[190px] rounded-2xl overflow-hidden bg-black/40 border border-white/10 shadow-lg select-none">
       <Link to={movieHref} onClick={handleNavigate} className="block relative aspect-[2/3] w-full overflow-hidden">
         <img
-          src={posterSrc}
+          src={posterSrc || undefined}
           alt={movie.title || movie.name}
           loading="lazy"
+          decoding="async"
           className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
         />
 
-        <div className="absolute top-2.5 left-2.5 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/70 backdrop-blur-md border border-white/15 text-[11px] font-bold text-yellow-400">
-          <StarIcon className="w-3 h-3 fill-yellow-400 text-yellow-400" />
-          <span>{rating}</span>
-        </div>
+        {rating && (
+          <div className="absolute top-2.5 left-2.5 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/70 backdrop-blur-md border border-white/15 text-[11px] font-bold text-yellow-400">
+            <StarIcon className="w-3 h-3 fill-yellow-400 text-yellow-400" aria-hidden="true" />
+            <span>{rating}</span>
+          </div>
+        )}
 
         <div className="absolute inset-0 z-20 flex flex-col justify-end p-3 bg-gradient-to-t from-black/95 via-black/70 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300">
           <h3 className="text-sm font-bold text-white line-clamp-1 mb-1">{movie.title || movie.name}</h3>
 
           <div className="flex items-center gap-2 text-[10px] text-gray-300 font-medium mb-2.5">
-            <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{releaseYear}</span>
-            <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{runtime}</span>
+            {releaseYear && <span className="flex items-center gap-1"><Calendar className="w-3 h-3" aria-hidden="true" />{releaseYear}</span>}
+            {runtime && <span className="flex items-center gap-1"><Clock className="w-3 h-3" aria-hidden="true" />{runtime}</span>}
           </div>
 
           <span
@@ -64,7 +70,7 @@ const MobileCarouselCard = ({ movie }) => {
         <h4 className="text-xs font-semibold text-white truncate">{movie.title || movie.name}</h4>
         <div className="flex items-center justify-between text-[10px] text-gray-400 mt-0.5">
           <span>{releaseYear}</span>
-          <span className="text-primary font-medium">{movie.genres?.[0]?.name || 'Cinematic'}</span>
+          {movie.genres?.[0]?.name && <span className="text-primary font-medium">{movie.genres[0].name}</span>}
         </div>
       </div>
     </article>

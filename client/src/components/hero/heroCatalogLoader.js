@@ -54,37 +54,47 @@ export const canLoadImage = (url, signal, timeoutMs = 6_000) => new Promise((res
   image.src = url;
 });
 
+// Under Save-Data or on 2G the Hero leads with the lighter TMDB size (a
+// fraction of the bytes) and keeps the full-size file only as a fallback.
+const prefersLightArt = () => {
+  const connection = typeof navigator !== 'undefined' ? navigator.connection : null;
+  return Boolean(connection?.saveData)
+    || ['slow-2g', '2g'].includes(String(connection?.effectiveType || '').toLowerCase());
+};
+
 export const validateMovieCandidates = async (movies, signal) => {
   if (signal?.aborted) return [];
+  const lightFirst = prefersLightArt();
+  const inOrder = (full, light) => (lightFirst ? [...light, ...full] : [...full, ...light]);
   const prepareMovie = (movie) => {
-    const desktopCandidates = [
-      ...buildHeroImageCandidates([
+    const desktopCandidates = inOrder(
+      buildHeroImageCandidates([
         movie.backdrop_original,
         movie.backdrop_path,
         movie.backdrop_w1280,
         movie.poster_path,
       ], 'original'),
-      ...buildHeroImageCandidates([
+      buildHeroImageCandidates([
         movie.backdrop_original,
         movie.backdrop_w1280,
         movie.backdrop_path,
         movie.poster_path,
       ], 'w1280'),
-    ];
-    const mobileCandidates = [
-      ...buildHeroImageCandidates([
+    );
+    const mobileCandidates = inOrder(
+      buildHeroImageCandidates([
         movie.poster_path,
         movie.backdrop_original,
         movie.backdrop_w1280,
         movie.backdrop_path,
       ], 'original'),
-      ...buildHeroImageCandidates([
+      buildHeroImageCandidates([
         movie.poster_path,
         movie.backdrop_original,
         movie.backdrop_w1280,
         movie.backdrop_path,
       ], 'w780'),
-    ];
+    );
     const heroImageUrl = desktopCandidates[0] || mobileCandidates[0] || '';
     const heroMobileImageUrl = mobileCandidates[0] || heroImageUrl;
     const fallbackUrl = heroImageUrl || heroMobileImageUrl;

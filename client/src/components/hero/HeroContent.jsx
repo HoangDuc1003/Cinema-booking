@@ -49,7 +49,7 @@ const HeroContent = ({
           <span><CalendarIcon aria-hidden="true" />{year}</span>
           {/* Fresh releases can arrive before TMDB has a runtime; say nothing rather than "N/A". */}
           {runtime && runtime !== 'N/A' && <span><ClockIcon aria-hidden="true" />{runtime}</span>}
-          <span><Star className="hero-rating-icon" aria-hidden="true" />{rating}</span>
+          {rating && rating !== 'N/A' && <span><Star className="hero-rating-icon" aria-hidden="true" />{rating}</span>}
         </div>
 
         <p className="hero-overview hero-fade-up d3">{movie.overview}</p>

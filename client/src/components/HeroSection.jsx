@@ -22,7 +22,19 @@ import './hero/hero.css';
 const HERO_POSTER_SWAP_DELAY_MS = 400;
 const HERO_POSTER_TRANSITION_MS = 1_200;
 const HERO_AUTO_CAROUSEL_MS = 5_000;
+// A trailer slide moves on after this much playback, so a two-minute trailer
+// never parks the Hero on one movie. Shorter trailers simply end first.
+const HERO_TRAILER_DWELL_MS = 12_000;
+// Slack for a short trailer to finish on its own before the clock steps in, so
+// a stream that stalls near the end still cannot freeze the slide.
+const HERO_TRAILER_END_GRACE_MS = 2_000;
 const VIETNAM_TIME_ZONE = 'Asia/Ho_Chi_Minh';
+
+const getRailThumbnailUrls = (movie) => buildHeroImageCandidates([
+  movie.heroImageUrl,
+  movie.backdrop_path,
+  movie.poster_path,
+], 'w300');
 
 const isSameMovieOrder = (left, right) => (
   left.length === right.length
@@ -69,7 +81,14 @@ const HeroSection = ({ onTrailerRequest }) => {
   const [inView, setInView] = useState(true);
   const [pageVisible, setPageVisible] = useState(() => document.visibilityState !== 'hidden');
   const [trailerVisible, setTrailerVisible] = useState(false);
+  // Length of the trailer on screen, keyed by its element so a new slide never
+  // borrows the previous one.
+  const [trailerLength, setTrailerLength] = useState({ key: '', ms: 0 });
   const [failedTrailers, setFailedTrailers] = useState(() => new Set());
+  // Pointer or keyboard focus on the poster rail holds the carousel still.
+  const [railEngaged, setRailEngaged] = useState(false);
+  // Time already spent on the current slide, carried across pauses.
+  const slideClockRef = useRef({ key: '', elapsed: 0 });
   // Muted until the viewer asks: browsers only autoplay video without sound.
   const [soundOn, setSoundOn] = useState(false);
   // Trailers are skipped where they would cost more than they give: small
@@ -171,16 +190,51 @@ const HeroSection = ({ onTrailerRequest }) => {
   const activeTrailer = trailersAllowed && currentTrailer?.src && !failedTrailers.has(currentTrailer.src)
     ? currentTrailer
     : null;
+  const trailerKey = activeTrailer
+    ? `${getHeroMovieKey(movies[currentIndex], currentIndex)}-${activeTrailer.src}`
+    : '';
+  const knownTrailerMs = trailerKey && trailerLength.key === trailerKey ? trailerLength.ms : 0;
+  const trailerEndsFirst = knownTrailerMs > 0 && knownTrailerMs <= HERO_TRAILER_DWELL_MS;
 
-  // A slide with a trailer moves on when the trailer ends; only poster slides
-  // use the timer.
+  // How long this slide stays up. A poster slide gets the carousel interval; a
+  // trailer slide plays up to HERO_TRAILER_DWELL_MS, or to its own end when that
+  // comes sooner.
+  const slideDwellMs = activeTrailer
+    ? (trailerEndsFirst ? knownTrailerMs : HERO_TRAILER_DWELL_MS)
+    : HERO_AUTO_CAROUSEL_MS;
+  const autoAdvance = !reducedMotion && movies.length > 1;
+  // The clock only runs while someone can see the slide. A trailer counts from
+  // its first painted frame, and one the viewer unmuted plays out in full.
+  const slideClockRunning = autoAdvance
+    && inView
+    && pageVisible
+    && !isTransitioning
+    && !railEngaged
+    && (!activeTrailer || (trailerVisible && !soundOn));
+  const slideClockKey = `${currentIndex}:${trailerKey || 'poster'}`;
+
   useEffect(() => {
-    if (reducedMotion || movies.length < 2 || activeTrailer) return undefined;
-    const interval = window.setInterval(() => {
+    const clock = slideClockRef.current;
+    if (clock.key !== slideClockKey) {
+      clock.key = slideClockKey;
+      clock.elapsed = 0;
+    }
+    if (!slideClockRunning) return undefined;
+    const advanceAfterMs = slideDwellMs + (trailerEndsFirst ? HERO_TRAILER_END_GRACE_MS : 0);
+    const startedAt = performance.now();
+    const timer = window.setTimeout(() => {
       switchMovie(currentIndex + 1);
-    }, HERO_AUTO_CAROUSEL_MS);
-    return () => window.clearInterval(interval);
-  }, [activeTrailer, currentIndex, movies.length, reducedMotion, switchMovie]);
+    }, Math.max(0, advanceAfterMs - clock.elapsed));
+    return () => {
+      window.clearTimeout(timer);
+      clock.elapsed += performance.now() - startedAt;
+    };
+  }, [currentIndex, slideClockKey, slideClockRunning, slideDwellMs, switchMovie, trailerEndsFirst]);
+
+  const handleTrailerReady = useCallback((durationSeconds) => {
+    const ms = Number.isFinite(durationSeconds) && durationSeconds > 0 ? durationSeconds * 1_000 : 0;
+    setTrailerLength({ key: trailerKey, ms });
+  }, [trailerKey]);
 
   // Trailers pause off screen and in background tabs instead of streaming unseen.
   useEffect(() => {
@@ -245,7 +299,7 @@ const HeroSection = ({ onTrailerRequest }) => {
         </section>
       );
     }
-    return <section className="hero-section" aria-label="Loading featured movies" />;
+    return <section className="hero-section" aria-label="Loading featured movies" data-catalog-source={catalogSource} />;
   }
 
   const currentMovie = movies[currentIndex] || movies[0];
@@ -297,13 +351,14 @@ const HeroSection = ({ onTrailerRequest }) => {
       >
         {activeTrailer && (
           <HeroTrailerVideo
-            key={`${currentMovieKey}-${activeTrailer.src}`}
+            key={trailerKey}
             src={activeTrailer.src}
             type={activeTrailer.type}
             zoom={activeTrailer.zoom}
             playing={inView && pageVisible && !isTransitioning}
             muted={!soundOn}
             onVisibleChange={setTrailerVisible}
+            onReady={handleTrailerReady}
             onFinish={() => switchMovie(currentIndex + 1)}
             onFail={() => markTrailerFailed(activeTrailer.src)}
             onSoundBlocked={() => setSoundOn(false)}
@@ -337,7 +392,7 @@ const HeroSection = ({ onTrailerRequest }) => {
         movie={currentMovie}
         year={currentMovie.release_date?.slice(0, 4) || 'N/A'}
         runtime={formatRuntime(currentMovie.runtime)}
-        rating={Number.isFinite(currentMovie.vote_average) ? currentMovie.vote_average.toFixed(1) : 'N/A'}
+        rating={Number(currentMovie.vote_average) > 0 ? Number(currentMovie.vote_average).toFixed(1) : 'N/A'}
         onBook={navigateToMovie}
         onTrailer={showTrailer}
         onDetails={navigateToMovie}
@@ -346,12 +401,14 @@ const HeroSection = ({ onTrailerRequest }) => {
       <HeroPosterRail
         movies={movies}
         currentIndex={currentIndex}
-        getThumbnailUrls={(movie) => buildHeroImageCandidates([
-          movie.heroImageUrl,
-          movie.backdrop_path,
-          movie.poster_path,
-        ], 'w300')}
-        onSelect={(index) => switchMovie(index)}
+        getThumbnailUrls={getRailThumbnailUrls}
+        onSelect={switchMovie}
+        onEngagedChange={setRailEngaged}
+        progress={autoAdvance ? {
+          key: slideClockKey,
+          durationMs: slideDwellMs,
+          running: slideClockRunning,
+        } : null}
       />
     </section>
   );

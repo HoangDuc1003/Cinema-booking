@@ -31,9 +31,16 @@ test('HeroSection only plays trailers where they are worth the cost', async () =
 
   assert.match(source, /trailersAllowed = !isMobileScreen && !reducedMotion && !saveData && !slowNetwork/);
   assert.match(source, /playing=\{inView && pageVisible && !isTransitioning\}/);
-  // A trailer slide advances when the trailer ends, not on the poster timer.
-  assert.match(source, /reducedMotion \|\| movies\.length < 2 \|\| activeTrailer/);
+  // A trailer slide advances when the trailer ends or after a capped dwell,
+  // whichever comes first, so a long trailer never parks the Hero on one movie.
+  assert.match(source, /HERO_TRAILER_DWELL_MS = 12_000/);
+  assert.match(source, /trailerEndsFirst \? knownTrailerMs : HERO_TRAILER_DWELL_MS/);
   assert.match(source, /onFinish=\{\(\) => switchMovie\(currentIndex \+ 1\)\}/);
+  // Its clock starts at the first painted frame; a trailer the viewer unmuted plays out.
+  assert.match(source, /\(!activeTrailer \|\| \(trailerVisible && !soundOn\)\)/);
+  // Nothing advances unseen: off screen, in a hidden tab, mid-transition, or
+  // while the viewer is on the poster rail.
+  assert.match(source, /inView\s+&& pageVisible\s+&& !isTransitioning\s+&& !railEngaged/);
   // A trailer that fails is not retried, and the slide falls back to its poster.
   assert.match(source, /onFail=\{\(\) => markTrailerFailed\(activeTrailer\.src\)\}/);
   assert.match(source, /muted=\{!soundOn\}/);

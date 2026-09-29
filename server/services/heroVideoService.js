@@ -6,15 +6,14 @@ const VIDEO_TYPES = Object.freeze({ '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.
 
 // Open-licence clips (Blender Foundation, CC BY 3.0) for trying the mechanism
 // locally before real, licensed trailers exist. Never served in production.
+// download.blender.org now answers file requests with a browser challenge page
+// that a <video> cannot pass, so its trailers only ever fell back to the poster.
 export const DEMO_HERO_VIDEOS = Object.freeze([
-    // Letterboxed 2.35:1 inside 16:9, so it is zoomed until the black bars are gone.
-    { src: 'https://download.blender.org/durian/trailer/sintel_trailer-720p.mp4', zoom: 1.34 },
-    'https://download.blender.org/peach/trailer/trailer_iphone.m4v',
     'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_2MB.mp4',
     'https://test-videos.co.uk/vids/sintel/mp4/h264/720/Sintel_720_10s_2MB.mp4',
     'https://test-videos.co.uk/vids/jellyfish/mp4/h264/720/Jellyfish_720_10s_2MB.mp4',
 ]);
-const DEMO_HOSTS = Object.freeze(['download.blender.org', 'test-videos.co.uk']);
+const DEMO_HOSTS = Object.freeze(['test-videos.co.uk']);
 
 const isProduction = (env) => String(env.NODE_ENV || '').toLowerCase() === 'production'
     || String(env.VERCEL_ENV || '').toLowerCase() === 'production';

@@ -5,6 +5,7 @@ import Loading from './Loading';
 import { useHomeData } from '../context/HomeDataContext';
 import { fetchHomeTrailers } from '../services/tmdb';
 import { useMediaQuery, useSaveData } from './hero/useHeroEnvironment';
+import { getTmdbImageUrl } from './hero/heroImages';
 
 const MAX_TRAILER_CANDIDATES = 10;
 const EMPTY_MOVIES = Object.freeze([]);
@@ -77,8 +78,11 @@ const mergeCandidateMovies = ({ featuredMovie, heroMovies, nowShowingMovies }) =
   return [featuredMovie, ...merged].slice(0, MAX_TRAILER_CANDIDATES);
 };
 
-const imageFor = (movie) => (
-  movie?.backdrop_path || movie?.poster_path || movie?.heroImageUrl || ''
+// Catalog movies carry bare TMDB paths ("/abc.jpg"); used as-is they resolve
+// against this site and render as broken images.
+const imageFor = (movie, size = 'w780') => getTmdbImageUrl(
+  movie?.backdrop_path || movie?.poster_path || movie?.heroImageUrl || '',
+  size,
 );
 
 const TrailerUnavailable = ({ movie, allUnavailable = false }) => (
@@ -401,9 +405,9 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'home-trailer-sectio
                 aria-label={`Play the ${current.movie.title || current.movie.name} trailer`}
                 className="trailer-preview"
               >
-                {(current.trailer.thumbnailUrl || imageFor(current.movie)) && (
+                {(current.trailer.thumbnailUrl || imageFor(current.movie, 'w1280')) && (
                   <img
-                    src={current.trailer.thumbnailUrl || imageFor(current.movie)}
+                    src={current.trailer.thumbnailUrl || imageFor(current.movie, 'w1280')}
                     alt=""
                     aria-hidden="true"
                     className="trailer-preview__art"
@@ -462,7 +466,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'home-trailer-sectio
               {items.map((item) => {
                 const selected = item.movieId === current?.movieId;
                 const title = item.movie.title || item.movie.name || 'Movie';
-                const thumbnail = item.trailer?.thumbnailUrl || imageFor(item.movie);
+                const thumbnail = item.trailer?.thumbnailUrl || imageFor(item.movie, 'w300');
                 return (
                   <button
                     key={item.movieId}

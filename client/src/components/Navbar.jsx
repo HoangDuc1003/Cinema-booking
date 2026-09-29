@@ -12,7 +12,7 @@ const Navbar = () => {
   const { user } = useUser();
   const { openSignIn } = useClerk();
   const navigate = useNavigate();
-  const location = useLocation(); 
+  const location = useLocation();
   const tickingRef = useRef(false);
 
   
@@ -24,6 +24,16 @@ const Navbar = () => {
     { name: 'Releases', path: '/releases' },
     { name: 'Favorites', path: '/favorite' },
   ];
+
+  // Escape closes the phone menu, as it would any overlay.
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') setIsOpen(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [isOpen]);
 
   // Change navbar style on scroll
   useEffect(() => {
@@ -50,22 +60,29 @@ const Navbar = () => {
     }`}>
       
       <Link to='/' className='group transition-transform duration-300 hover:scale-105' >
-        <img src={assets.logo} alt="logo" className='w-36 md:w-50 h-auto' />
+        <img src={assets.logo} alt="NitroCine" className='w-36 md:w-50 h-auto' />
         </Link>
-        
-        <div className={`max-md:fixed max-md:top-0 max-md:left-0 max-md:right-0 max-md:font-medium 
+
+        {/* The closed phone menu is slid off screen; `invisible` also takes its
+            links out of the tab order and the accessibility tree until it opens. */}
+        <nav
+          id="app-mobile-nav"
+          aria-label="Main"
+          className={`max-md:fixed max-md:top-0 max-md:left-0 max-md:right-0 max-md:font-medium
         max-md:text-lg z-50 flex flex-col md:flex-row items-center max-md:justify-center gap-8 md:px-8 py-1.75
         app-mobile-nav md:rounded-full backdrop-blur-xl bg-black md:bg-white/10
         md:border border-gray-300/20 md:shadow-xl overflow-hidden transition-all duration-500 ease-out ${isOpen?
-        'max-md:w-full max-md:translate-x-0 max-md:opacity-100':'max-md:w-0 max-md:-translate-x-full max-md:opacity-0'}`}>
-          
-          <button className="app-mobile-nav__close md:hidden absolute top-6 right-6 p-2 rounded-full bg-white/10 hover:bg-white/20 transition-all
+        'max-md:visible max-md:w-full max-md:translate-x-0 max-md:opacity-100':'max-md:invisible max-md:w-0 max-md:-translate-x-full max-md:opacity-0'}`}>
+
+          <button type="button" aria-label="Close menu" className="app-mobile-nav__close md:hidden absolute top-6 right-6 p-2 rounded-full bg-white/10 hover:bg-white/20 transition-all
           duration-300 group" onClick={()=>setIsOpen(false)}>
-             <XIcon className='w-6 h-6 cursor-pointer text-white group-hover:rotate-90 transition-transform duration-300' />
+             <XIcon aria-hidden="true" className='w-6 h-6 cursor-pointer text-white group-hover:rotate-90 transition-transform duration-300' />
           </button>
 
           {navLinks.map((link) => {
-            const isActive = location.pathname === link.path; 
+            // A movie page still belongs to Movies.
+            const isActive = location.pathname === link.path
+              || (link.path !== '/' && location.pathname.startsWith(`${link.path}/`));
             return (
               <Link 
                 key={link.name}
@@ -86,13 +103,21 @@ const Navbar = () => {
               </Link>
             );
           })}
-        </div>
+        </nav>
 
         <div className='flex items-center gap-8'>
-          <SearchIcon onClick={()=>{navigate('/movies'),scrollTo(0,0)}} className='max-md:hidden w-6 h-6 cursor-pointer hover:text-primary transition-colors'/>
+          <button
+            type="button"
+            aria-label="Search movies"
+            onClick={() => { navigate('/movies'); window.scrollTo(0, 0); }}
+            className='max-md:hidden cursor-pointer hover:text-primary transition-colors'
+          >
+            <SearchIcon aria-hidden="true" className='w-6 h-6' />
+          </button>
           {
             !user ? (
-                  <button onClick={openSignIn} className='px-4 py-1 sm:px-7 sm:py-2
+                  // Wrapped: handing the click event to openSignIn passes it in as sign-in options.
+                  <button type="button" onClick={() => openSignIn()} className='px-4 py-1 sm:px-7 sm:py-2
                    bg-primary hover:bg-primary-dull transition-all duration-300 hover:scale-105 rounded-full 
                   font-medium cursor-pointer'>Login</button>
             ):(
@@ -106,8 +131,16 @@ const Navbar = () => {
           }
         </div>
 
-        <MenuIcon className = 'max-md:ml-4 md:hidden w-8 h-8 cursor-pointer hover:text-primary transition-colors'
-        onClick={()=>setIsOpen(!isOpen)}/>
+        <button
+          type="button"
+          aria-label="Open menu"
+          aria-expanded={isOpen}
+          aria-controls="app-mobile-nav"
+          onClick={() => setIsOpen(!isOpen)}
+          className='max-md:ml-4 md:hidden cursor-pointer hover:text-primary transition-colors'
+        >
+          <MenuIcon aria-hidden="true" className='w-8 h-8' />
+        </button>
     </div>
   )
 }

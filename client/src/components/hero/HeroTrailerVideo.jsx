@@ -24,6 +24,7 @@ const HeroTrailerVideo = ({
   playing,
   muted,
   onVisibleChange,
+  onReady,
   onFinish,
   onFail,
   onSoundBlocked,
@@ -35,9 +36,9 @@ const HeroTrailerVideo = ({
   const [ending, setEnding] = useState(false);
 
   // Latest callbacks without re-running the effects that own the element.
-  const handlersRef = useRef({ onVisibleChange, onFinish, onFail, onSoundBlocked });
+  const handlersRef = useRef({ onVisibleChange, onReady, onFinish, onFail, onSoundBlocked });
   useEffect(() => {
-    handlersRef.current = { onVisibleChange, onFinish, onFail, onSoundBlocked };
+    handlersRef.current = { onVisibleChange, onReady, onFinish, onFail, onSoundBlocked };
   });
 
   useEffect(() => {
@@ -66,7 +67,10 @@ const HeroTrailerVideo = ({
     }, READY_TIMEOUT_MS);
     const markReady = () => {
       window.clearTimeout(readyTimer);
-      if (!cancelled) setVisible(true);
+      if (cancelled) return;
+      setVisible(true);
+      // The Hero sizes the slide's progress bar from the real length.
+      handlersRef.current.onReady?.(video.duration);
     };
 
     // Prefer the callback that fires once a frame is actually composited;

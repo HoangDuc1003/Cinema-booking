@@ -4,6 +4,15 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="./src/assets/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="description" content="NitroCine: browse what is showing, watch trailers, pick your seats and book movie tickets." />
+    <meta name="theme-color" content="#000000" />
+    <!-- Open the connections early: the Hero poster (TMDB) and the Outfit font
+         are on the critical path, and loading the font here instead of from an
+         @import in the CSS bundle removes one request from that chain. -->
+    <link rel="preconnect" href="https://image.tmdb.org" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&display=swap" />
     <title>NitroCine - Movies</title>
   </head>
   <body>

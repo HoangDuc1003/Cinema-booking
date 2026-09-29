@@ -80,7 +80,8 @@ const MovieCard = ({ movie, ctaLabel = 'Book tickets' }) => {
   };
 
   const ratingValue = Number(movie.vote_average ?? movie.rating);
-  const rating = Number.isFinite(ratingValue) ? ratingValue.toFixed(1) : '0.0';
+  // Unreleased titles have no votes yet; a "0.0" badge reads as a terrible score.
+  const rating = Number.isFinite(ratingValue) && ratingValue > 0 ? ratingValue.toFixed(1) : '';
 
   const getImageUrl = (path) => {
     if (!path) return '';
@@ -130,15 +131,18 @@ const MovieCard = ({ movie, ctaLabel = 'Book tickets' }) => {
           <span className="movie-card__title">{title}</span>
           <span className="movie-card__meta">
             <span><Calendar aria-hidden="true" />{releaseYear}</span>
-            {runtimeMinutes != null && <span><Clock aria-hidden="true" />{timeFormat(runtimeMinutes)}</span>}
+            {/* TMDB sends 0 when it has no runtime yet. */}
+            {runtimeMinutes > 0 && <span><Clock aria-hidden="true" />{timeFormat(runtimeMinutes)}</span>}
           </span>
         </span>
       </Link>
 
-      <span className="movie-card__rating" aria-label={`Rating ${rating}`}>
-        <StarIcon aria-hidden="true" />
-        {rating}
-      </span>
+      {rating && (
+        <span className="movie-card__rating" aria-label={`Rating ${rating}`}>
+          <StarIcon aria-hidden="true" />
+          {rating}
+        </span>
+      )}
 
       <button
         type="button"

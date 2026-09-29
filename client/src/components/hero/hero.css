@@ -691,7 +691,37 @@
   background: #fff;
 }
 
+/* The active pill doubles as the slide countdown: a white fill runs across a
+   dim track, and freezes in place whenever the carousel is held. */
+.hero-poster-rail__progress span.is-counting {
+  position: relative;
+  overflow: hidden;
+  width: 2.6rem;
+  background: rgba(255, 255, 255, 0.26);
+}
+
+.hero-poster-rail__fill {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: #fff;
+  transform: scaleX(0);
+  transform-origin: left center;
+  animation-name: hero-rail-fill;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+.hero-poster-rail__progress.is-paused .hero-poster-rail__fill {
+  animation-play-state: paused;
+}
+
+@keyframes hero-rail-fill {
+  to { transform: scaleX(1); }
+}
+
 .hero-poster-rail__items {
+  position: relative;
   display: flex;
   align-items: end;
   gap: 0.65rem;
