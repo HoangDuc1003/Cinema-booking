@@ -204,7 +204,7 @@
   border: 1px solid rgba(248, 69, 101, 0.55);
   border-radius: 999px;
   padding: 0.75rem 1.25rem;
-  background: #f84565;
+  background: #d63854;
   color: white;
   font-weight: 800;
   transition: transform 240ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 240ms cubic-bezier(0.16, 1, 0.3, 1);

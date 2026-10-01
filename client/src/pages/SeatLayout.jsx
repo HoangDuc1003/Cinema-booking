@@ -9,6 +9,7 @@ import Loading from '../components/Loading'
 import isoTimeFormat from '../lib/isoTimeFormat'
 import { fetchMovieShowtimes } from '../services/tmdb'
 import { getTmdbImageUrl } from '../components/hero/heroImages'
+import { formatPrice } from '../lib/formatPrice'
 
 const sameSeatSet = (left, right) => {
   if (left.length !== right.length) return false
@@ -21,13 +22,6 @@ const SEAT_TOAST_STYLE = { background: '#1a1a1a', color: '#fff', border: '1px so
 const seatPriceFor = (type, showPrice) => (
   type === 'front' ? showPrice * 2 : type === 'middle' ? showPrice * 1.5 : showPrice
 )
-
-// Money as the server rounds it (to the cent), with cents shown only when
-// there are some: $10, $7.50 - never $7.5 or $19.485.
-const formatPrice = (amount) => {
-  const cents = Math.round(Number(amount) * 100)
-  return `$${cents % 100 === 0 ? cents / 100 : (cents / 100).toFixed(2)}`
-}
 
 // Memoized Seat Component to prevent re-rendering the whole grid. `onClick` is
 // stable (see `onSeatClick`), so the default shallow compare is enough.

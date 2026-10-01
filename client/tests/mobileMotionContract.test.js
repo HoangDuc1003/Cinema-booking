@@ -175,8 +175,10 @@ test('overlays share one counted scroll lock', () => {
 test('prices are shown to the cent, from one pricing rule', () => {
   const seat = read('pages/SeatLayout.jsx');
 
-  assert.match(seat, /const formatPrice = \(amount\) => \{/);
-  assert.match(seat, /\(cents \/ 100\)\.toFixed\(2\)/);
+  const bookings = read('pages/MyBookings.jsx');
+  assert.match(seat, /import \{ formatPrice \} from '\.\.\/lib\/formatPrice'/);
+  assert.match(bookings, /import \{ formatPrice \} from '\.\.\/lib\/formatPrice'/);
+  assert.doesNotMatch(bookings, /\{currency\}\{/);
   // The total sums the same per-seat rule the labels use.
   assert.match(seat, /sum \+ seatPriceFor\(rowConfig\.type, showPrice\)/);
   assert.doesNotMatch(seat, /total \+= showPrice \* (2|1\.5)/);
@@ -228,4 +230,15 @@ test('the trailer thumbnails control an element that is always rendered', () => 
 
   assert.match(trailer, /<div id=\{`\$\{sectionId\}-player`\}>\s*\{loading \?/);
   assert.equal((trailer.match(/id=\{`\$\{sectionId\}-player`\}/g) || []).length, 1);
+});
+
+test('loading states animate on the compositor only', () => {
+  const css = read('index.css');
+
+  for (const name of ['catalog-shimmer', 'trailer-modal-pulse', 'trailer-modal-ring']) {
+    assert.doesNotMatch(keyframes(css, name), /background-position|box-shadow|filter/, name);
+    assert.match(keyframes(css, name), /transform/, name);
+  }
+  assert.match(ruleBody(css, '.catalog-card-skeleton__art::after'), /animation: catalog-shimmer/);
+  assert.doesNotMatch(ruleBody(css, '.trailer-modal__pulse'), /backdrop-filter/);
 });

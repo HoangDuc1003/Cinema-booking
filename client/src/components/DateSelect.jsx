@@ -99,7 +99,7 @@ const DateSelect = ({
                                         className={`flex shrink-0 snap-start flex-col items-center justify-center h-18 w-14 aspect-square rounded cursor-pointer border
                                             transition-[background-color,border-color,box-shadow,scale] duration-200 ${
                                             selected === dateStr
-                                            ? "bg-primary text-white border-primary hover:scale-105 active:scale-95 shadow-xl shadow-primary/60"
+                                            ? "bg-primary-dull text-white border-primary hover:scale-105 active:scale-95 shadow-xl shadow-primary/60"
                                             : "bg-white/5 border-transparent hover:bg-primary/20 hover:border-primary text-white hover:scale-105 active:scale-95"
                                         }`}
                                     >

@@ -195,7 +195,7 @@ const MovieTrailerModal = ({ movie, open, onClose, onBuyTickets }) => {
               close();
               onBuyTickets?.();
             }}
-            className="inline-flex shrink-0 items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-primary/30 transition hover:bg-primary-dull"
+            className="inline-flex shrink-0 items-center gap-2 rounded-full bg-primary-dull px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-primary/30 transition hover:bg-[#c22d48]"
           >
             <Ticket className="h-4 w-4" aria-hidden="true" />
             Buy Tickets

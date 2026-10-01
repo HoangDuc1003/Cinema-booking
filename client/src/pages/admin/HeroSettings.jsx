@@ -232,7 +232,7 @@ const HeroSettings = () => {
                   type="button"
                   onClick={() => setMode('auto')}
                   aria-pressed={mode === 'auto'}
-                  className={`rounded-md px-4 py-2 text-sm transition-all duration-200 ${mode === 'auto' ? 'bg-primary font-medium text-white shadow-md shadow-primary/30' : 'text-gray-300 hover:bg-white/10'}`}
+                  className={`rounded-md px-4 py-2 text-sm transition-all duration-200 ${mode === 'auto' ? 'bg-primary-dull font-medium text-white shadow-md shadow-primary/30' : 'text-gray-300 hover:bg-white/10'}`}
                 >
                   Daily auto
                 </button>
@@ -240,7 +240,7 @@ const HeroSettings = () => {
                   type="button"
                   onClick={() => setMode('manual')}
                   aria-pressed={mode === 'manual'}
-                  className={`rounded-md px-4 py-2 text-sm transition-all duration-200 ${mode === 'manual' ? 'bg-primary font-medium text-white shadow-md shadow-primary/30' : 'text-gray-300 hover:bg-white/10'}`}
+                  className={`rounded-md px-4 py-2 text-sm transition-all duration-200 ${mode === 'manual' ? 'bg-primary-dull font-medium text-white shadow-md shadow-primary/30' : 'text-gray-300 hover:bg-white/10'}`}
                 >
                   Manual five
                 </button>
@@ -365,7 +365,7 @@ const HeroSettings = () => {
                     <p className="truncate text-sm font-medium">{movie.title || movie.name}</p>
                     <p className="text-xs text-gray-400">{movie.release_date?.slice(0, 4) || 'N/A'}</p>
                   </div>
-                  {isSelected && <span className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-md bg-primary text-white"><CheckIcon className="h-4 w-4" /></span>}
+                  {isSelected && <span className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-md bg-primary-dull text-white"><CheckIcon className="h-4 w-4" /></span>}
                 </button>
               );
             })}

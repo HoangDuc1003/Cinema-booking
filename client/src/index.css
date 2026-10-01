@@ -167,11 +167,23 @@ body {
   background: var(--nitro-surface);
 }
 
+/* The shine is a gradient layer that slides across with transform. Animating
+   background-position instead repainted every skeleton card on every frame -
+   on a phone waiting on a slow network, which is when skeletons show longest. */
 .catalog-card-skeleton__art {
+  position: relative;
   display: block;
   aspect-ratio: 2 / 3;
-  background: linear-gradient(110deg, rgba(255,255,255,0.035) 25%, rgba(255,255,255,0.1) 42%, rgba(255,255,255,0.035) 60%);
-  background-size: 250% 100%;
+  overflow: hidden;
+  background: rgba(255,255,255,0.035);
+}
+
+.catalog-card-skeleton__art::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 20%, rgba(255,255,255,0.065) 45%, transparent 70%);
+  transform: translate3d(-100%, 0, 0);
   animation: catalog-shimmer 1.6s linear infinite;
 }
 
@@ -191,7 +203,7 @@ body {
 }
 
 @keyframes catalog-shimmer {
-  to { background-position: -250% 0; }
+  to { transform: translate3d(100%, 0, 0); }
 }
 
 .catalog-state-panel {
@@ -534,6 +546,7 @@ body {
   }
 
   .catalog-card-skeleton__art,
+  .catalog-card-skeleton__art::after,
   .catalog-grid-item,
   .movie-card,
   .movie-card__poster,
@@ -549,6 +562,8 @@ body {
   }
 
   .catalog-grid-item { opacity: 1 !important; }
+  /* A frozen shine band (or ring, below) reads as a glitch; drop it instead. */
+  .catalog-card-skeleton__art::after { display: none; }
   .movie-card__info,
   .movie-card__cta { opacity: 1 !important; transform: none !important; }
 }
@@ -1030,15 +1045,26 @@ label,
   text-align: center;
 }
 
+/* Breathes with transform and sends out a ring on its own layer. The old
+   version animated box-shadow under a backdrop blur, so every frame repainted
+   the shadow and re-blurred what sat behind it. */
 .trailer-modal__pulse {
+  position: relative;
   width: 4.5rem;
   height: 4.5rem;
   border: 1px solid rgba(255, 255, 255, 0.22);
   border-radius: 999px;
-  background: rgba(10, 12, 18, 0.46);
-  -webkit-backdrop-filter: blur(16px);
-  backdrop-filter: blur(16px);
+  background: rgba(10, 12, 18, 0.62);
   animation: trailer-modal-pulse 1.4s ease-in-out infinite;
+}
+
+.trailer-modal__pulse::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border: 2px solid rgba(248, 69, 101, 0.45);
+  border-radius: inherit;
+  animation: trailer-modal-ring 1.4s ease-out infinite;
 }
 
 @keyframes trailer-modal-fade {
@@ -1052,8 +1078,13 @@ label,
 }
 
 @keyframes trailer-modal-pulse {
-  0%, 100% { transform: scale(0.92); box-shadow: 0 0 0 0 rgba(248, 69, 101, 0.35); }
-  50% { transform: scale(1); box-shadow: 0 0 0 14px rgba(248, 69, 101, 0); }
+  0%, 100% { transform: scale(0.92); }
+  50% { transform: scale(1); }
+}
+
+@keyframes trailer-modal-ring {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(1.4); }
 }
 
 @media (max-width: 640px) {
@@ -1078,11 +1109,14 @@ label,
   .trailer-player,
   .trailer-modal,
   .trailer-modal__panel,
-  .trailer-modal__pulse {
+  .trailer-modal__pulse,
+  .trailer-modal__pulse::after {
     animation: none !important;
     transition: none !important;
     transform: none !important;
   }
+
+  .trailer-modal__pulse::after { display: none; }
 
   /* Motion off, but keep the transform: it is what centres the play button,
      not decoration. */

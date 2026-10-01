@@ -58,7 +58,7 @@ const MobileCarouselCard = ({ movie }) => {
           </div>
 
           <span
-            className="w-full flex items-center justify-center gap-1 py-1.5 px-2 rounded-lg bg-primary text-white text-[11px] font-bold shadow-md active:scale-95"
+            className="w-full flex items-center justify-center gap-1 py-1.5 px-2 rounded-lg bg-primary-dull text-white text-[11px] font-bold shadow-md active:scale-95"
           >
             <ArrowRightIcon className="w-3 h-3" />
             View Details

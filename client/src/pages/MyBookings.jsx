@@ -9,6 +9,7 @@ import { Ticket, Clock, MapPin, CreditCard, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import MovieGrid from '../components/MovieGrid'
 import { fetchPopularMovies } from '../services/tmdb'
+import { formatPrice } from '../lib/formatPrice'
 
 const MyBookings = () => {
   const currency = import.meta.env.VITE_CURRENCY || '$'
@@ -203,12 +204,15 @@ const MyBookings = () => {
                       </div>
                     </div>
 
+                    {/* Phones stack the info over a date-and-actions row, so the
+                        title gets the card's full width instead of ~90px. */}
+                    <div className="flex-1 min-w-0 flex flex-col sm:flex-row">
                     {/* Booking info */}
-                    <div className="flex-1 flex flex-col justify-center px-2.5 sm:px-4 py-2 sm:py-3 min-w-0">
+                    <div className="flex-1 flex flex-col justify-center px-3 sm:px-4 pt-2.5 pb-1.5 sm:py-3 min-w-0">
                       <h3 className="text-sm sm:text-base font-bold text-white truncate mb-1 sm:mb-2 leading-tight">
                         {item.show?.movie?.title || 'Unknown Movie'}
                       </h3>
-                      <div className="flex flex-wrap gap-x-2 sm:gap-x-4 gap-y-0.5 sm:gap-y-1 text-[10px] sm:text-xs text-gray-300">
+                      <div className="flex flex-wrap gap-x-3 sm:gap-x-4 gap-y-0.5 sm:gap-y-1 text-[11px] sm:text-xs text-gray-300">
                         <div className="flex items-center gap-1">
                           <Clock className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-primary shrink-0" />
                           <span>{timeFormat(item.show?.movie?.runtime)}</span>
@@ -223,14 +227,14 @@ const MyBookings = () => {
                         </div>
                         <div className="flex items-center gap-1">
                           <CreditCard className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-primary shrink-0" />
-                          <span className="font-semibold text-white">{currency}{item.amount}</span>
+                          <span className="font-semibold text-white">{formatPrice(item.amount, currency)}</span>
                         </div>
                       </div>
                       {/* Seat chips */}
                       <div className="flex items-center gap-1 sm:gap-1.5 mt-1.5 sm:mt-2 flex-wrap">
                         {(item.bookedSeats || []).slice(0, 6).map(seat => (
                           <span key={seat}
-                            className="px-1.5 sm:px-2 py-0.5 bg-primary/20 text-white text-[9px] sm:text-[10px] font-bold rounded border border-primary/30 backdrop-blur-sm">
+                            className="px-1.5 sm:px-2 py-0.5 bg-primary/20 text-white text-[10px] font-bold rounded border border-primary/30">
                             {seat}
                           </span>
                         ))}
@@ -241,8 +245,8 @@ const MyBookings = () => {
                     </div>
 
                     {/* Date and actions */}
-                    <div className="relative w-32 sm:w-40 shrink-0 flex flex-col items-end justify-between p-2 sm:p-3">
-                      <p className="text-[9px] sm:text-[10px] text-gray-300 text-right leading-tight">
+                    <div className="relative sm:w-40 shrink-0 flex sm:flex-col items-center sm:items-end justify-between gap-2 px-3 pb-2.5 sm:p-3">
+                      <p className="text-[11px] sm:text-[10px] text-gray-300 sm:text-right leading-tight">
                         {item.show?.showDateTime ? dateFormat(item.show.showDateTime) : 'Date N/A'}
                       </p>
                       <div className="flex items-center gap-1.5 sm:gap-2">
@@ -271,6 +275,7 @@ const MyBookings = () => {
                         )}
                       </div>
                     </div>
+                    </div>
                   </div>
                 </div>
               </AnimatedCard>
@@ -288,7 +293,7 @@ const MyBookings = () => {
                   {unpaidBookings.map(b => (
                     <div key={b._id} className="flex justify-between items-center text-sm">
                       <span className="text-gray-300 truncate pr-4">{b.show?.movie?.title || 'Unknown'} (x{b.bookedSeats?.length || 1})</span>
-                      <span className="text-white font-medium whitespace-nowrap">{currency}{b.amount}</span>
+                      <span className="text-white font-medium whitespace-nowrap">{formatPrice(b.amount, currency)}</span>
                     </div>
                   ))}
                 </div>
@@ -296,7 +301,7 @@ const MyBookings = () => {
                 <div className="border-t border-white/10 pt-4 mb-6">
                   <div className="flex justify-between items-center mb-2">
                     <span className="text-gray-400">Subtotal</span>
-                    <span className="text-white font-semibold">{currency}{totalAmount}</span>
+                    <span className="text-white font-semibold">{formatPrice(totalAmount, currency)}</span>
                   </div>
                   <div className="flex justify-between items-center mb-4">
                     <span className="text-gray-400">Fees & Taxes</span>
@@ -304,7 +309,7 @@ const MyBookings = () => {
                   </div>
                   <div className="flex justify-between items-end">
                     <span className="text-lg font-bold text-white">Total</span>
-                    <span className="text-2xl font-bold text-primary">{currency}{totalAmount}</span>
+                    <span className="text-2xl font-bold text-primary">{formatPrice(totalAmount, currency)}</span>
                   </div>
                 </div>
 
