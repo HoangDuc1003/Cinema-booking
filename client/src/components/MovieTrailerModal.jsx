@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Film, Play, RefreshCw, Ticket, X } from 'lucide-react';
 import { fetchHomeTrailers } from '../services/tmdb';
+import useBodyScrollLock from '../hooks/useBodyScrollLock';
 
 const YOUTUBE_EMBED_BASE = 'https://www.youtube-nocookie.com/embed';
 
@@ -64,12 +65,12 @@ const MovieTrailerModal = ({ movie, open, onClose, onBuyTickets }) => {
     onClose?.();
   }, [onClose]);
 
-  // Escape to close, background scroll locked, focus handed back on close.
+  useBodyScrollLock(open);
+
+  // Escape to close, focus handed back on close.
   useEffect(() => {
     if (!open) return undefined;
     const previouslyFocused = document.activeElement;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
     closeRef.current?.focus();
     const onKeyDown = (event) => {
       if (event.key === 'Escape') close();
@@ -77,7 +78,6 @@ const MovieTrailerModal = ({ movie, open, onClose, onBuyTickets }) => {
     window.addEventListener('keydown', onKeyDown);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
-      document.body.style.overflow = previousOverflow;
       if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus();
     };
   }, [close, open]);

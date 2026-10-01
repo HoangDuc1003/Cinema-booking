@@ -71,8 +71,11 @@ test('the phone menu slides with transform and opacity only, and locks the page 
   assert.doesNotMatch(navbar, /max-md:w-0/);
   assert.doesNotMatch(navbar, /transition-all duration-500 ease-out/);
   assert.match(navbar, /max-md:transition-\[translate,opacity\]/);
-  assert.match(navbar, /document\.body\.style\.overflow = 'hidden'/);
+  assert.match(navbar, /useBodyScrollLock\(isOpen\)/);
   assert.match(navbar, /closeButtonRef\.current\?\.focus/);
+  // Tab stays inside the open menu, and leaving it by a link hands focus back.
+  assert.match(navbar, /onKeyDown=\{keepFocusInMenu\}/);
+  assert.match(navbar, /if \(isOpen\) closeMenu\(\{ restoreFocus: true \}\)/);
   // No backdrop blur under a phone's scrolling page; desktop keeps the frosted bar.
   assert.match(navbar, /md:backdrop-blur-md/);
   assert.doesNotMatch(navbar, /'py-3 bg-black\/60 backdrop-blur-md/);
@@ -105,7 +108,7 @@ test('memoised seats call the current click handler, not the one from their firs
   const seat = read('pages/SeatLayout.jsx');
 
   assert.match(seat, /const seatClickRef = useRef\(handleSeatClick\)/);
-  assert.match(seat, /useEffect\(\(\) => \{ seatClickRef\.current = handleSeatClick \}\)/);
+  assert.match(seat, /useLayoutEffect\(\(\) => \{ seatClickRef\.current = handleSeatClick \}\)/);
   assert.match(seat, /onClick=\{onSeatClick\}/);
   // The old comparator ignored `onClick`, which is what pinned stale closures.
   assert.doesNotMatch(seat, /prev\.status === next\.status && prev\.showPrice === next\.showPrice/);
@@ -117,7 +120,7 @@ test('phones check out from a sticky bar and seat taps do not stack toasts', () 
   assert.match(seat, /seat-checkout-bar lg:hidden sticky bottom-0/);
   assert.match(seat, /env\(safe-area-inset-bottom\)/);
   assert.doesNotMatch(seat, /toast\.success\(`Seat/);
-  assert.equal((seat.match(/id: 'seat-feedback'/g) || []).length, 4);
+  assert.equal((seat.match(/id: 'seat-feedback'/g) || []).length, 5);
 });
 
 test('the Hero pauses its loops off screen and drops frosted glass on phones', () => {
@@ -149,5 +152,61 @@ test('API calls wait for Clerk only for a bounded time while it is still loading
   assert.match(context, /const CLERK_LOAD_GRACE_MS = 3000/);
   assert.match(context, /Promise\.race\(\[tokenRequest\.catch\(\(\) => null\), timeout\]\)\.finally\(\(\) => clearTimeout\(timer\)\)/);
   // A loaded Clerk still gets the full wait, so signed-in requests keep their token.
-  assert.match(context, /authLoadedRef\.current\s*\?\s*await getToken\(\)\s*:\s*await tokenWithin\(getToken\(\), CLERK_LOAD_GRACE_MS\)/);
+  assert.match(context, /if \(authLoadedRef\.current\) \{\s*token = await getToken\(\);/);
+  assert.match(context, /token = await tokenWithin\(getToken\(\), CLERK_LOAD_GRACE_MS\);/);
+  // Only the first request pays the grace period; after that, no more waits.
+  assert.match(context, /if \(!authLoadedRef\.current\) clerkWaitExpiredRef\.current = true;/);
+  assert.match(context, /else if \(!clerkWaitExpiredRef\.current\)/);
+});
+
+test('overlays share one counted scroll lock', () => {
+  const hook = read('hooks/useBodyScrollLock.js');
+  const modal = read('components/MovieTrailerModal.jsx');
+  const navbar = read('components/Navbar.jsx');
+
+  assert.match(hook, /if \(activeLocks === 0\) \{\s*overflowBeforeLock = document\.body\.style\.overflow;/);
+  assert.match(hook, /activeLocks -= 1;\s*if \(activeLocks === 0\) document\.body\.style\.overflow = overflowBeforeLock;/);
+  assert.match(modal, /useBodyScrollLock\(open\)/);
+  for (const source of [modal, navbar]) {
+    assert.doesNotMatch(source, /document\.body\.style\.overflow/);
+  }
+});
+
+test('prices are shown to the cent, from one pricing rule', () => {
+  const seat = read('pages/SeatLayout.jsx');
+
+  assert.match(seat, /const formatPrice = \(amount\) => \{/);
+  assert.match(seat, /\(cents \/ 100\)\.toFixed\(2\)/);
+  // The total sums the same per-seat rule the labels use.
+  assert.match(seat, /sum \+ seatPriceFor\(rowConfig\.type, showPrice\)/);
+  assert.doesNotMatch(seat, /total \+= showPrice \* (2|1\.5)/);
+  // No raw number is printed as money any more.
+  assert.doesNotMatch(seat, /\$\$\{calculateTotal\}|\$\{item\.price\}|`\$\$\{showPrice\}`/);
+});
+
+test('changing the showtime drops seats picked for the previous one', () => {
+  const seat = read('pages/SeatLayout.jsx');
+  const start = seat.indexOf('const handleTimeSelect = (time) => {');
+  const handler = seat.slice(start, seat.indexOf('setSelectedTime(time)', start));
+
+  assert.match(handler, /showIdOf\(time\) !== showIdOf\(selectedTime\)/);
+  assert.match(handler, /setSelectedSeats\(\[\]\)/);
+  assert.match(handler, /setOccupiedSeats\(\[\]\)/);
+  assert.match(handler, /setShowPrice\(0\)/);
+});
+
+test('press feedback never overrides an element\'s own transitions', () => {
+  const css = read('index.css');
+  const layer = css.slice(css.indexOf('@layer components {'));
+
+  assert.notEqual(css.indexOf('@layer components {'), -1);
+  assert.match(layer.slice(0, 300), /\.tap-press \{\s*transition: scale 140ms/);
+  assert.match(layer.slice(0, 400), /\.tap-press:active \{\s*scale: 0\.96;/);
+});
+
+test('the rail indicator is repainted on resize as well as on scroll', () => {
+  const feature = read('components/FeatureSection.jsx');
+
+  assert.match(feature, /window\.addEventListener\('resize', handleScroll, \{ passive: true \}\)/);
+  assert.match(feature, /window\.removeEventListener\('resize', handleScroll\)/);
 });

@@ -677,16 +677,23 @@ label,
 }
 
 /* Touch screens get no hover, so a press is the only feedback a tap has.
-   Transform only, so it never touches layout. */
+   It uses the standalone `scale` property, so it never fights an element's own
+   transform, and it lives in the components layer so a Tailwind transition
+   utility on the same element (transition-colors, say) still wins: colours
+   keep animating and only the press snaps. */
+@layer components {
+  @media (hover: none) {
+    .tap-press {
+      transition: scale 140ms var(--nitro-ease-out);
+    }
+
+    .tap-press:active {
+      scale: 0.96;
+    }
+  }
+}
+
 @media (hover: none) {
-  .tap-press {
-    transition: transform 140ms var(--nitro-ease-out);
-  }
-
-  .tap-press:active {
-    transform: scale(0.96);
-  }
-
   .movie-card {
     transition: transform 180ms var(--nitro-ease-out), border-color 400ms ease, box-shadow 400ms ease;
   }
@@ -707,7 +714,7 @@ label,
     transition: none !important;
   }
 
-  .tap-press:active { transform: none; }
+  .tap-press:active { scale: none; }
 }
 
 .custom-scrollbar::-webkit-scrollbar {

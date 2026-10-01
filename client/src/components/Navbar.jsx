@@ -3,6 +3,7 @@ import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { assets } from '../assets/assets'
 import { SearchIcon, MenuIcon, XIcon, TicketPlus } from 'lucide-react'
 import { useClerk, UserButton, useUser } from '@clerk/react'
+import useBodyScrollLock from '../hooks/useBodyScrollLock'
 
 const navLinks = [
   { name: 'Home', path: '/' },
@@ -46,13 +47,27 @@ const Navbar = () => {
   // While the full-screen menu is up, the page behind it must not scroll under
   // the finger; focus moves into the menu so keyboard and screen reader users
   // land where the content is.
+  useBodyScrollLock(isOpen);
   useEffect(() => {
-    if (!isOpen) return undefined;
-    const { overflow } = document.body.style;
-    document.body.style.overflow = 'hidden';
-    closeButtonRef.current?.focus({ preventScroll: true });
-    return () => { document.body.style.overflow = overflow; };
+    if (isOpen) closeButtonRef.current?.focus({ preventScroll: true });
   }, [isOpen]);
+
+  // The open phone menu covers the page, so Tab cycles inside it instead of
+  // wandering onto the controls hidden behind the overlay.
+  const keepFocusInMenu = (event) => {
+    if (!isOpen || event.key !== 'Tab') return;
+    const items = [...event.currentTarget.querySelectorAll('a[href], button:not([disabled])')];
+    if (!items.length) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
 
   // Rotating a tablet or widening a window past the phone layout leaves no menu
   // to close, so drop the open state instead of keeping the page locked.
@@ -100,6 +115,7 @@ const Navbar = () => {
         <nav
           id="app-mobile-nav"
           aria-label="Main"
+          onKeyDown={keepFocusInMenu}
           className={`max-md:fixed max-md:inset-x-0 max-md:top-0 max-md:w-full max-md:font-medium
         max-md:text-lg z-50 flex flex-col md:flex-row items-center max-md:justify-center gap-3 md:gap-8 md:px-8 py-1.75
         app-mobile-nav md:rounded-full bg-black md:bg-white/10 md:backdrop-blur-xl
@@ -127,7 +143,9 @@ const Navbar = () => {
             return (
               <Link
                 key={link.name}
-                onClick={() => { window.scrollTo(0, 0); closeMenu(); }}
+                // From the phone menu, focus returns to the menu button rather
+                // than staying on a link that is about to be hidden.
+                onClick={() => { window.scrollTo(0, 0); if (isOpen) closeMenu({ restoreFocus: true }); }}
                 to={link.path}
                 aria-current={isActive ? 'page' : undefined}
                 // Phone links rise in one after another as the menu opens.

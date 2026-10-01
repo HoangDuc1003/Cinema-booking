@@ -102,13 +102,17 @@ const FeatureSection = () => {
     if (!progressFrameRef.current) progressFrameRef.current = requestAnimationFrame(paintProgress);
   }, [paintProgress]);
 
+  // Cards are sized in vw, so a rotation or resize changes how far the rail
+  // can scroll; the indicator is repainted for that too, not only on scroll.
   useEffect(() => {
     paintProgress();
+    window.addEventListener('resize', handleScroll, { passive: true });
     return () => {
+      window.removeEventListener('resize', handleScroll);
       if (progressFrameRef.current) cancelAnimationFrame(progressFrameRef.current);
       progressFrameRef.current = 0;
     };
-  }, [nowShowing, paintProgress]);
+  }, [nowShowing, paintProgress, handleScroll]);
 
   const handleNavigate = () => {
     navigate('/movies');

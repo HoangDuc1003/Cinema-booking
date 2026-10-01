@@ -108,7 +108,21 @@ test('phone menu opens over a locked page, takes focus, and closes on Escape', a
     expect((await link.boundingBox()).height).toBeGreaterThanOrEqual(44);
   }
 
+  // Tab cycles inside the open menu instead of reaching controls behind it.
+  await page.keyboard.press('Shift+Tab');
+  await expect(nav.getByRole('link', { name: 'Favorites' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', { name: 'Close menu' })).toBeFocused();
+
   await page.keyboard.press('Escape');
+  await expect(nav).toBeHidden();
+  await expect(menuButton).toBeFocused();
+  expect(await page.evaluate(() => document.body.style.overflow)).toBe('');
+
+  // Leaving by a link also hands focus back instead of dropping it on <body>.
+  await menuButton.click();
+  await nav.getByRole('link', { name: 'Movies' }).click();
+  await expect(page).toHaveURL(/\/movies$/);
   await expect(nav).toBeHidden();
   await expect(menuButton).toBeFocused();
   expect(await page.evaluate(() => document.body.style.overflow)).toBe('');
@@ -172,7 +186,10 @@ test('phone seat picking ends in a sticky checkout bar without a toast per seat'
       success: true,
       movie,
       dateTime: {
-        [showDate]: [{ showId: 'show-1', time: `${showDate}T03:00:00.000Z`, price: 5, hall: 'Hall A', isVirtual: false }],
+        [showDate]: [
+          { showId: 'show-1', time: `${showDate}T03:00:00.000Z`, price: 5, hall: 'Hall A', isVirtual: false },
+          { showId: 'show-2', time: `${showDate}T08:00:00.000Z`, price: 6, hall: 'Hall A', isVirtual: false },
+        ],
       },
     }),
   }));
@@ -188,7 +205,7 @@ test('phone seat picking ends in a sticky checkout bar without a toast per seat'
 
   // The seat map loads even when Clerk never does (the token wait is bounded).
   const d5 = page.locator('[data-seat="D5"]');
-  await expect(d5).toHaveAttribute('aria-label', 'Seat D5, $7.5', { timeout: 10_000 });
+  await expect(d5).toHaveAttribute('aria-label', 'Seat D5, $7.50', { timeout: 10_000 });
   await expect(page.locator('[data-seat="D9"]')).toBeDisabled();
   await expect(page.locator('[data-seat="D9"]')).toHaveAttribute('aria-label', 'Seat D9, taken');
 
@@ -209,7 +226,14 @@ test('phone seat picking ends in a sticky checkout bar without a toast per seat'
   await expect(page.getByText(/Seat D5 selected|Seat D6 selected/)).toHaveCount(0);
 
   await page.locator('[data-seat="D6"]').click();
-  await expect(bar).toContainText('$7.5');
+  await expect(bar).toContainText('$7.50');
   await expect(bar).not.toContainText('D6');
+
+  // Another showtime starts from an empty pick at its own price.
+  await page.getByRole('button', { name: /\d{1,2}:\d{2} [AP]M \$6$/ }).click();
+  await expect(bar).toBeHidden();
+  await expect(page.getByText('Seats cleared for the new showtime')).toBeVisible();
+  await expect(d5).toHaveAttribute('aria-label', 'Seat D5, $9', { timeout: 10_000 });
+  await expect(d5).toHaveAttribute('aria-pressed', 'false');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });

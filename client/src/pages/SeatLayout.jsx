@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ClockIcon, ArrowRight, Users, Calendar, Star, MapPin, RefreshCw } from 'lucide-react'
 import BlurCircle from '../components/BlurCircle'
@@ -21,6 +21,13 @@ const SEAT_TOAST_STYLE = { background: '#1a1a1a', color: '#fff', border: '1px so
 const seatPriceFor = (type, showPrice) => (
   type === 'front' ? showPrice * 2 : type === 'middle' ? showPrice * 1.5 : showPrice
 )
+
+// Money as the server rounds it (to the cent), with cents shown only when
+// there are some: $10, $7.50 - never $7.5 or $19.485.
+const formatPrice = (amount) => {
+  const cents = Math.round(Number(amount) * 100)
+  return `$${cents % 100 === 0 ? cents / 100 : (cents / 100).toFixed(2)}`
+}
 
 // Memoized Seat Component to prevent re-rendering the whole grid. `onClick` is
 // stable (see `onSeatClick`), so the default shallow compare is enough.
@@ -47,7 +54,7 @@ const Seat = React.memo(({ seatId, status, type, showPrice, onClick }) => {
       }
   }
 
-  const price = showPrice > 0 ? `$${seatPriceFor(type, showPrice)}` : '';
+  const price = showPrice > 0 ? formatPrice(seatPriceFor(type, showPrice)) : '';
   const label = status === 'occupied'
     ? `Seat ${seatId}, taken`
     : [`Seat ${seatId}`, price, status === 'selected' ? 'selected' : ''].filter(Boolean).join(', ');
@@ -328,7 +335,9 @@ const SeatLayout = () => {
   // Memoised seats keep the first handler they were given, so they call through
   // a ref that always holds the current one instead of a stale closure.
   const seatClickRef = useRef(handleSeatClick)
-  useEffect(() => { seatClickRef.current = handleSeatClick })
+  // A layout effect, so the ref is current before the browser can deliver the
+  // next tap; a passive effect could still be pending when it arrives.
+  useLayoutEffect(() => { seatClickRef.current = handleSeatClick })
   const onSeatClick = useCallback((seatId) => seatClickRef.current(seatId), [])
 
   const handleHallSelect = (hall) => {
@@ -339,6 +348,17 @@ const SeatLayout = () => {
   }
 
   const handleTimeSelect = (time) => {
+    const showIdOf = (item) => item?.showId ?? item?._id ?? item?.id
+    if (showIdOf(time) !== showIdOf(selectedTime)) {
+      // Seats belong to one show. Carried over, they could book a seat that is
+      // taken at the new time, priced at the old one.
+      if (selectedSeats.length) {
+        toast('Seats cleared for the new showtime', { id: 'seat-feedback', icon: '🎬', style: SEAT_TOAST_STYLE })
+      }
+      setSelectedSeats([])
+      setOccupiedSeats([])
+      setShowPrice(0)
+    }
     setSelectedTime(time)
     // On a phone the seat map sits below the whole sidebar; bring it up so the
     // next step is on screen without hunting for it.
@@ -405,17 +425,10 @@ const SeatLayout = () => {
     )
   }
   const calculateTotal = React.useMemo(() => {
-    let total = 0;
-    selectedSeats.forEach((seatId) => {
-      const rowLetter = seatId.charAt(0);
-      const rowConfig = rowConfigByLetter.get(rowLetter)
-
-      if (rowConfig) {
-        if (rowConfig.type === 'front') total += showPrice * 2;
-        else if (rowConfig.type === 'middle') total += showPrice * 1.5;
-        else if (rowConfig.type === 'back') total += showPrice;
-      }
-    })
+    const total = selectedSeats.reduce((sum, seatId) => {
+      const rowConfig = rowConfigByLetter.get(seatId.charAt(0))
+      return rowConfig ? sum + seatPriceFor(rowConfig.type, showPrice) : sum
+    }, 0)
     // Cents, as the server charges (seatService.calculateBookingAmount): one
     // $7.50 seat used to show as $8 here and then cost $7.50 at Stripe.
     return Math.round(total * 100) / 100;
@@ -559,7 +572,7 @@ const SeatLayout = () => {
                         </div>
                       </div>
                       <div className="text-right">
-                        <div className="font-bold text-primary">${item.price}</div>
+                        <div className="font-bold text-primary">{formatPrice(item.price)}</div>
                         {selectedTime?.showId === item.showId && (
                           <div className="w-3 h-3 bg-white rounded-full animate-pulse mt-1 ml-auto"></div>
                         )}
@@ -644,7 +657,7 @@ const SeatLayout = () => {
                       {priceLoading ? (
                         <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full mx-auto"></div>
                       ) : (
-                        `$${showPrice}`
+                        formatPrice(showPrice)
                       )}
                     </div>
                     <div className="text-gray-400 text-sm">
@@ -732,7 +745,7 @@ const SeatLayout = () => {
               <div className="mb-4 sm:mb-6 mt-1 sm:mt-2">
                 <div className="text-center mb-3 sm:mb-4">
                   <span className="text-yellow-500 text-sm sm:text-base font-bold px-3 py-1.5 sm:px-4 sm:py-2 bg-yellow-500/10 rounded-full border border-yellow-500/20">
-                    Front Premium • ${showPrice > 0 ? showPrice * 2 : '...'}
+                    Front Premium • {showPrice > 0 ? formatPrice(seatPriceFor('front', showPrice)) : '$...'}
                   </span>
                 </div>
                 {seatRows.filter(row => row.type === 'front').map(renderSeatRow)}
@@ -742,7 +755,7 @@ const SeatLayout = () => {
               <div className="mb-4 sm:mb-6">
                 <div className="text-center mb-3 sm:mb-4">
                   <span className="text-primary text-sm sm:text-base font-bold px-3 py-1.5 sm:px-4 sm:py-2 bg-primary/10 rounded-full border border-primary/20">
-                    Middle VIP • ${showPrice > 0 ? showPrice * 1.5 : '...'}
+                    Middle VIP • {showPrice > 0 ? formatPrice(seatPriceFor('middle', showPrice)) : '$...'}
                   </span>
                 </div>
                 {seatRows.filter(row => row.type === 'middle').map(renderSeatRow)}
@@ -752,7 +765,7 @@ const SeatLayout = () => {
               <div className="mb-4 sm:mb-6">
                 <div className="text-center mb-3 sm:mb-4">
                   <span className="text-green-500 text-sm sm:text-base font-bold px-3 py-1.5 sm:px-4 sm:py-2 bg-green-500/10 rounded-full border border-green-500/20">
-                    Back Standard • ${showPrice > 0 ? showPrice : '...'}
+                    Back Standard • {showPrice > 0 ? formatPrice(seatPriceFor('back', showPrice)) : '$...'}
                   </span>
                 </div>
                 {seatRows.filter(row => row.type === 'back').map(renderSeatRow)}
@@ -793,7 +806,7 @@ const SeatLayout = () => {
                 </div>
                 <div className="text-right">
                   <p className="text-gray-400 text-sm mb-1">Total Amount</p>
-                  <p className="text-3xl font-bold text-white">${calculateTotal}</p>
+                  <p className="text-3xl font-bold text-white">{formatPrice(calculateTotal)}</p>
                 </div>
               </div>
 
@@ -833,7 +846,7 @@ const SeatLayout = () => {
               </p>
               <p className="truncate text-sm font-semibold text-green-400">{selectedSeats.join(', ')}</p>
             </div>
-            <p className="shrink-0 text-xl font-bold text-white" aria-label={`Total $${calculateTotal}`}>${calculateTotal}</p>
+            <p className="shrink-0 text-xl font-bold text-white" aria-label={`Total ${formatPrice(calculateTotal)}`}>{formatPrice(calculateTotal)}</p>
             <button
               type="button"
               disabled={!selectedTime || isBooking}

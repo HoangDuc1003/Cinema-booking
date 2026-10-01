@@ -30,7 +30,14 @@ export const AppProvider = ({ children }) => {
   const { user } = useUser()
   const { getToken, isLoaded: authLoaded } = useAuth()
   const authLoadedRef = useRef(authLoaded)
-  useEffect(() => { authLoadedRef.current = authLoaded }, [authLoaded])
+  // Set once a wait has run out with Clerk still not loaded: later requests go
+  // out at once instead of each sitting through the grace period (and each
+  // leaving another getToken() pending on a Clerk that may never arrive).
+  const clerkWaitExpiredRef = useRef(false)
+  useEffect(() => {
+    authLoadedRef.current = authLoaded
+    if (authLoaded) clerkWaitExpiredRef.current = false
+  }, [authLoaded])
   const location = useLocation()
   const navigate = useNavigate()
 
@@ -41,9 +48,13 @@ export const AppProvider = ({ children }) => {
         try {
           // Once Clerk has loaded, wait for the token as long as it takes: a
           // signed-in request on a slow network must not go out without one.
-          const token = authLoadedRef.current
-            ? await getToken()
-            : await tokenWithin(getToken(), CLERK_LOAD_GRACE_MS);
+          let token = null;
+          if (authLoadedRef.current) {
+            token = await getToken();
+          } else if (!clerkWaitExpiredRef.current) {
+            token = await tokenWithin(getToken(), CLERK_LOAD_GRACE_MS);
+            if (!authLoadedRef.current) clerkWaitExpiredRef.current = true;
+          }
           if (token) {
             config.headers['Authorization'] = `Bearer ${token}`;
           }
