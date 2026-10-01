@@ -145,9 +145,7 @@ test('Now Showing rail snaps on phones and its indicator follows the scroll', as
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
-test('movie details puts the booking button on the first phone screen', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  await mockHomeApis(page);
+const mockMovieDetails = async (page) => {
   const movie = movies[0];
   await page.route(`**/api/show/tmdb/movie/${movie.id}/similar**`, (route) => route.fulfill({
     status: 200,
@@ -164,6 +162,13 @@ test('movie details puts the booking button on the first phone screen', async ({
     contentType: 'application/json',
     body: JSON.stringify({ success: true, movie, dateTime: {} }),
   }));
+  return movie;
+};
+
+test('movie details puts the booking button on the first phone screen', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockHomeApis(page);
+  const movie = await mockMovieDetails(page);
   await page.goto(`/movies/${movie.id}`);
 
   await expect(page.getByRole('heading', { name: 'Nitro Night', level: 1 })).toBeVisible();
@@ -281,3 +286,55 @@ test('every control on phone pages is a 44px tap target and every aria-controls 
     expect(report.dangling, `dangling aria-controls on ${path}`).toEqual([]);
   }
 });
+
+test('a phone turned sideways shows details side by side with Buy Tickets on screen', async ({ page }) => {
+  await page.setViewportSize({ width: 740, height: 360 });
+  await mockHomeApis(page);
+  const movie = await mockMovieDetails(page);
+  await page.goto(`/movies/${movie.id}`);
+
+  const title = page.getByRole('heading', { name: 'Nitro Night', level: 1 });
+  await expect(title).toBeVisible();
+  const poster = page.getByRole('img', { name: 'Nitro Night' }).first();
+  const [posterBox, titleBox] = await Promise.all([poster.boundingBox(), title.boundingBox()]);
+  expect(titleBox.x).toBeGreaterThan(posterBox.x + posterBox.width - 1);
+  const buy = await page.getByRole('link', { name: 'Buy Tickets' }).boundingBox();
+  expect(buy.y + buy.height).toBeLessThanOrEqual(360);
+});
+
+for (const width of [768, 1024]) {
+  test(`desktop nav fits without clipping a link at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await mockHomeApis(page);
+    await page.goto('/favorite');
+    await expect(page.getByRole('button', { name: 'Login' })).toBeVisible();
+
+    const fit = await page.evaluate(() => {
+      const nav = document.querySelector('#app-mobile-nav').getBoundingClientRect();
+      const search = document.querySelector('[aria-label="Search movies"]').getBoundingClientRect();
+      const clipped = [...document.querySelectorAll('#app-mobile-nav a')]
+        .filter((link) => {
+          const box = link.getBoundingClientRect();
+          return box.left < nav.left - 1 || box.right > nav.right + 1;
+        })
+        .map((link) => link.textContent.trim());
+      return { clipped, gap: search.left - nav.right };
+    });
+    expect(fit.clipped).toEqual([]);
+    expect(fit.gap).toBeGreaterThanOrEqual(8);
+  });
+}
+
+for (const [width, height] of [[320, 568], [360, 740], [740, 360], [768, 1024], [1024, 768]]) {
+  test(`no page scrolls sideways at ${width}x${height}`, async ({ page }) => {
+    await page.setViewportSize({ width, height });
+    await mockHomeApis(page);
+    await mockMovieDetails(page);
+    for (const path of ['/', '/movies', `/movies/${movies[0].id}`, '/favorite']) {
+      await page.goto(path);
+      await expect(page.locator('.app-navbar')).toBeVisible();
+      await page.waitForTimeout(300);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth), path).toBeLessThanOrEqual(0);
+    }
+  });
+}

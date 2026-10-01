@@ -229,14 +229,16 @@ const MovieDetails = () => {
         </div>
 
       <div className="relative z-10 px-6 md:px-6 lg:px-40 pt-24 md:pt-[200px] pb-8 md:pb-12">
-          <div className='flex flex-col md:flex-row gap-8 max-w-6xl mx-auto'>
+          {/* A phone turned sideways has the width but not the height for a
+              stacked poster, so it gets the desktop side-by-side layout. */}
+          <div className='flex flex-col md:flex-row max-md:landscape:flex-row gap-8 max-md:landscape:gap-6 max-w-6xl mx-auto'>
             {/* Phones get a smaller poster so the title, rating and booking
                 buttons are on the first screen instead of below a full-height image. */}
-            <div className="relative overflow-hidden rounded-xl cursor-pointer group w-auto h-130 max-md:h-auto max-md:mx-auto flex-shrink-0 shadow-2xl shadow-black/60">
+            <div className="relative overflow-hidden rounded-xl cursor-pointer group w-auto h-130 max-md:h-auto max-md:mx-auto max-md:landscape:mx-0 max-md:landscape:self-start flex-shrink-0 shadow-2xl shadow-black/60">
               <img
                 src={imageUrl}
                 alt={show.title}
-                className='max-md:mx-auto rounded-2xl h-130 w-[340px] max-md:h-auto max-md:w-[min(62vw,240px)] max-md:aspect-[2/3] object-cover group-hover:scale-105 transition-transform duration-500'
+                className='max-md:mx-auto rounded-2xl h-130 w-[340px] max-md:h-auto max-md:w-[min(62vw,240px)] max-md:landscape:w-[min(28vw,200px)] max-md:aspect-[2/3] object-cover group-hover:scale-105 transition-transform duration-500'
               />
               <div className="absolute top-0 left-[-150%] w-1/2 h-full z-10 block transform -skew-x-12 bg-linear-to-r from-transparent
                 via-white/40 to-transparent transition-all duration-700 group-hover:left-[150%]">

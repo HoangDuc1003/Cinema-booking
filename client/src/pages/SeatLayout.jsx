@@ -835,8 +835,11 @@ const SeatLayout = () => {
         <div className="seat-checkout-bar lg:hidden sticky bottom-0 z-30 border-t border-white/10 bg-[#0c0d12]/95 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-12px_32px_rgba(0,0,0,0.55)]">
           <div className="mx-auto flex max-w-xl items-center gap-3">
             <div className="min-w-0 flex-1">
-              <p className="text-xs text-gray-400">
-                {selectedSeats.length} seat{selectedSeats.length > 1 ? 's' : ''} • {selectedTime ? isoTimeFormat(selectedTime.time) : ''}
+              <p className="truncate text-xs text-gray-400">
+                {/* Time only: the date is already at the top of the page, and the
+                    full stamp wrapped to three lines on a 320px phone. */}
+                {selectedSeats.length} seat{selectedSeats.length > 1 ? 's' : ''}
+                {selectedTime ? ` • ${new Date(selectedTime.time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}` : ''}
               </p>
               <p className="truncate text-sm font-semibold text-green-400">{selectedSeats.join(', ')}</p>
             </div>

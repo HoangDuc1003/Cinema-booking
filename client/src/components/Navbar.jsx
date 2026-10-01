@@ -97,7 +97,10 @@ const Navbar = () => {
   // Only colours and padding change on scroll; phones get a near-opaque bar
   // instead of a backdrop blur, which would be re-filtered on every scrolled frame.
   return (
-    <div className={`app-navbar fixed top-0 left-0 z-50 w-full flex items-center justify-between px-6 md:px-16 lg:px-36
+    // Tablet widths (768-1279px) get tighter spacing, a smaller logo and
+    // smaller link text: at the desktop sizes the five links overflowed the
+    // pill and "Favorites" was clipped under the search icon.
+    <div className={`app-navbar fixed top-0 left-0 z-50 w-full flex items-center justify-between px-6 md:px-8 lg:px-12 xl:px-36
       transition-[background-color,border-color,box-shadow,padding] duration-300 border-b ${
       isScrolled
         ? 'py-3 bg-black/85 md:bg-black/60 md:backdrop-blur-md border-white/10 shadow-lg'
@@ -107,7 +110,7 @@ const Navbar = () => {
       {/* Padding offset by negative margin: a 44px tap area around the 34px
           logo without making the bar any taller. */}
       <Link to='/' className='group block -my-[5px] py-[5px] transition-transform duration-300 hover:scale-105' >
-        <img src={assets.logo} alt="NitroCine" className='w-36 md:w-50 h-auto' />
+        <img src={assets.logo} alt="NitroCine" className='w-36 lg:w-40 xl:w-50 h-auto' />
         </Link>
 
         {/* The closed phone menu is slid off screen; `invisible` also takes its
@@ -119,7 +122,7 @@ const Navbar = () => {
           aria-label="Main"
           onKeyDown={keepFocusInMenu}
           className={`max-md:fixed max-md:inset-x-0 max-md:top-0 max-md:w-full max-md:font-medium
-        max-md:text-lg z-50 flex flex-col md:flex-row items-center max-md:justify-center gap-3 md:gap-8 md:px-8 py-1.75
+        max-md:text-lg z-50 flex flex-col md:flex-row items-center max-md:justify-center gap-3 md:gap-4 lg:gap-8 md:px-5 lg:px-8 py-1.75 md:shrink-0
         app-mobile-nav md:rounded-full bg-black md:bg-white/10 md:backdrop-blur-xl
         md:border border-gray-300/20 md:shadow-xl overflow-hidden
         max-md:duration-300 max-md:ease-out motion-reduce:transition-none ${isOpen?
@@ -152,7 +155,7 @@ const Navbar = () => {
                 aria-current={isActive ? 'page' : undefined}
                 // Phone links rise in one after another as the menu opens.
                 style={isOpen ? { transitionDelay: `${90 + index * 45}ms` } : undefined}
-                className={`relative font-medium transition-[color,scale,translate,opacity] duration-300 group px-1 py-1
+                className={`relative font-medium md:text-sm lg:text-base transition-[color,scale,translate,opacity] duration-300 group px-1 py-1
                   max-md:flex max-md:min-h-12 max-md:items-center max-md:px-6 max-md:text-2xl motion-reduce:transition-none ${
                   isOpen ? 'max-md:translate-y-0 max-md:opacity-100' : 'max-md:translate-y-3 max-md:opacity-0'
                 } ${
@@ -172,7 +175,7 @@ const Navbar = () => {
           })}
         </nav>
 
-        <div className='flex items-center gap-4 md:gap-8 max-md:ml-auto'>
+        <div className='flex items-center gap-4 md:gap-5 lg:gap-8 max-md:ml-auto'>
           <button
             type="button"
             aria-label="Search movies"
