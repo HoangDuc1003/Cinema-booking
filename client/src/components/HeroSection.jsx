@@ -337,7 +337,7 @@ const HeroSection = ({ onTrailerRequest }) => {
   return (
     <section
       ref={sectionRef}
-      className={`hero-section ${trailerVisible ? 'is-trailer-playing' : ''}`}
+      className={`hero-section ${trailerVisible ? 'is-trailer-playing' : ''} ${inView ? '' : 'is-offscreen'}`}
       aria-label="Featured movie"
       data-catalog-source={catalogSource}
       data-catalog-version={catalogMeta?.version || ''}

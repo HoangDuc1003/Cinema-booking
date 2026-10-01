@@ -241,7 +241,7 @@ const MyBookings = () => {
                     </div>
 
                     {/* Date and actions */}
-                    <div className="relative w-28 sm:w-40 shrink-0 flex flex-col items-end justify-between p-2 sm:p-3">
+                    <div className="relative w-32 sm:w-40 shrink-0 flex flex-col items-end justify-between p-2 sm:p-3">
                       <p className="text-[9px] sm:text-[10px] text-gray-300 text-right leading-tight">
                         {item.show?.showDateTime ? dateFormat(item.show.showDateTime) : 'Date N/A'}
                       </p>
@@ -251,7 +251,7 @@ const MyBookings = () => {
                             {!isExpired && (
                               <button
                                 onClick={() => handlePayNow(item)}
-                                className="px-2 sm:px-3 py-1 sm:py-1.5 bg-gradient-to-r from-[#F84565] to-[#D63854]
+                                className="min-h-9 px-2.5 sm:px-3 py-1 sm:py-1.5 bg-gradient-to-r from-[#F84565] to-[#D63854]
                                   hover:from-[#D63854] hover:to-[#F84565] text-white font-semibold rounded-lg
                                   shadow-md shadow-[#F84565]/25 hover:shadow-[#F84565]/50
                                   hover:scale-105 active:scale-95 transition-all duration-300 text-[10px] sm:text-[11px] whitespace-nowrap"
@@ -261,8 +261,9 @@ const MyBookings = () => {
                             )}
                             <button
                               onClick={() => handleDelete(item._id)}
-                              className="p-1 sm:p-1.5 bg-black/40 hover:bg-red-500/20 text-gray-400 hover:text-red-500 rounded-lg border border-white/5 hover:border-red-500/30 transition-all duration-300"
+                              className="grid h-9 w-9 place-items-center bg-black/40 hover:bg-red-500/20 text-gray-400 hover:text-red-500 rounded-lg border border-white/5 hover:border-red-500/30 transition-colors duration-300 tap-press"
                               title="Delete booking"
+                              aria-label="Delete booking"
                             >
                               <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                             </button>
@@ -280,7 +281,7 @@ const MyBookings = () => {
           {/* Right Sidebar - Total Invoice */}
           {unpaidBookings.length > 0 && (
             <div className="w-full lg:w-[350px] shrink-0">
-              <div className="sticky top-30 bg-[#1a1a1a]/80 backdrop-blur-xl border border-white/10 rounded-2xl p-6 shadow-2xl">
+              <div className="lg:sticky lg:top-30 bg-[#1a1a1a]/95 lg:bg-[#1a1a1a]/80 lg:backdrop-blur-xl border border-white/10 rounded-2xl p-5 sm:p-6 shadow-2xl">
                 <h3 className="text-xl font-bold text-white mb-4">Order Summary</h3>
                 
                 <div className="space-y-3 mb-6 max-h-[40vh] overflow-y-auto pr-2 custom-scrollbar">
@@ -338,7 +339,7 @@ const MyBookings = () => {
           <p className='text-2xl md:text-3xl font-bold text-white mb-6'>You May Also Like</p>
           <MovieGrid
             movies={suggestions}
-            columns="sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+            columns="grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
             animated={true}
             staggerDelay={100}
           />

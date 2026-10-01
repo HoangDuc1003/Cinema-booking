@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ClockIcon, ArrowRight, Users, Calendar, Star, MapPin, RefreshCw } from 'lucide-react'
 import BlurCircle from '../components/BlurCircle'
@@ -10,54 +10,28 @@ import isoTimeFormat from '../lib/isoTimeFormat'
 import { fetchMovieShowtimes } from '../services/tmdb'
 import { getTmdbImageUrl } from '../components/hero/heroImages'
 
-const customStyles = `
-    @keyframes syncPulse {
-      0%, 100% { 
-        opacity: 1; 
-        transform: scale(1.1);
-        box-shadow: 0 0 20px rgba(34, 197, 94, 0.5);
-      }
-      50% { 
-        opacity: 0.6; 
-        transform: scale(1.05);
-        box-shadow: 0 0 30px rgba(34, 197, 94, 0.8);
-      }
-    }
-    
-    @keyframes syncGlow {
-      0%, 100% { 
-        opacity: 0.4;
-        transform: scale(1);
-      }
-      50% { 
-        opacity: 0.8;
-        transform: scale(1.1);
-      }
-    }
-    
-    .sync-pulse {
-      animation: syncPulse 2s ease-in-out infinite;
-    }
-    
-    .sync-glow {
-      animation: syncGlow 2s ease-in-out infinite;
-    }
-`
-
 const sameSeatSet = (left, right) => {
   if (left.length !== right.length) return false
   const rightSet = new Set(right)
   return left.every((seat) => rightSet.has(seat))
 }
 
-// Memoized Seat Component to prevent re-rendering the whole grid
-const Seat = React.memo(({ seatId, status, type, showPrice, onClick }) => {
-  const baseStyles = 'w-7 h-7 sm:w-8 sm:h-8 rounded-lg border-2 text-[10px] sm:text-xs font-bold transition-all duration-300 transform relative overflow-hidden'
+const SEAT_TOAST_STYLE = { background: '#1a1a1a', color: '#fff', border: '1px solid #333' }
 
-  let styles = baseStyles;
+const seatPriceFor = (type, showPrice) => (
+  type === 'front' ? showPrice * 2 : type === 'middle' ? showPrice * 1.5 : showPrice
+)
+
+// Memoized Seat Component to prevent re-rendering the whole grid. `onClick` is
+// stable (see `onSeatClick`), so the default shallow compare is enough.
+// The selected glow is a `.seat.is-selected::after` layer that only animates
+// opacity and transform; the old box-shadow pulse and three blurred overlays
+// repainted every selected seat on every frame.
+const Seat = React.memo(({ seatId, status, type, showPrice, onClick }) => {
+  let styles = 'seat w-7 h-7 sm:w-8 sm:h-8 rounded-lg border-2 text-[10px] sm:text-xs font-bold';
   switch (status) {
     case 'selected':
-      styles += ' bg-gradient-to-br from-green-500 to-green-600 text-white border-green-400 shadow-lg shadow-green-500/50 sync-pulse';
+      styles += ' is-selected bg-gradient-to-br from-green-500 to-green-600 text-white border-green-400';
       break;
     case 'occupied':
       styles += ' bg-gradient-to-br from-red-600 to-red-800 text-white border-red-500 cursor-not-allowed opacity-80';
@@ -73,35 +47,25 @@ const Seat = React.memo(({ seatId, status, type, showPrice, onClick }) => {
       }
   }
 
-  const displayPrice = showPrice > 0 ? (type === 'front' ? showPrice * 2 : type === 'middle' ? showPrice * 1.5 : showPrice) : '...';
+  const price = showPrice > 0 ? `$${seatPriceFor(type, showPrice)}` : '';
+  const label = status === 'occupied'
+    ? `Seat ${seatId}, taken`
+    : [`Seat ${seatId}`, price, status === 'selected' ? 'selected' : ''].filter(Boolean).join(', ');
 
   return (
-    <div className="relative group">
-      <button
-        onClick={() => onClick(seatId)}
-        disabled={status === 'occupied'}
-        className={styles}
-      >
-        <span className="relative z-10">{seatId.match(/\d+/)}</span>
-
-        {status === 'selected' && (
-          <>
-            <div className="absolute inset-0 bg-green-500/40 rounded-lg blur-sm sync-glow"></div>
-            <div className="absolute -inset-1 bg-green-400/20 rounded-lg blur-md sync-glow"></div>
-            <div className="absolute -inset-2 bg-green-300/10 rounded-lg blur-xl sync-glow"></div>
-          </>
-        )}
-
-        {status !== 'occupied' && (
-          <div className="absolute -top-12 left-1/2 transform -translate-x-1/2 bg-black/90 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none whitespace-nowrap z-20">
-            ${displayPrice} • {seatId}
-          </div>
-        )}
-      </button>
-    </div>
+    <button
+      type="button"
+      onClick={() => onClick(seatId)}
+      disabled={status === 'occupied'}
+      aria-label={label}
+      aria-pressed={status === 'occupied' ? undefined : status === 'selected'}
+      title={label}
+      data-seat={seatId}
+      className={styles}
+    >
+      <span className="relative z-10">{seatId.match(/\d+/)}</span>
+    </button>
   );
-}, (prev, next) => {
-  return prev.status === next.status && prev.showPrice === next.showPrice;
 });
 
 const SeatLayout = () => {
@@ -122,6 +86,8 @@ const SeatLayout = () => {
   const [reloadToken, setReloadToken] = useState(0)
   const [isBooking, setIsBooking] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false) // Tracking real-time sync
+  const seatMapRef = useRef(null)
+  const seatSectionRef = useRef(null)
 
   // Seat configuration - Memoized
   const seatRows = React.useMemo(() => [
@@ -327,63 +293,70 @@ const SeatLayout = () => {
     }
   }, [selectedTime, fetchOccupiedSeats])
 
-  const handleSeatClick = React.useCallback((seatId) => {
+  // Selecting a seat answers on the seat itself and in the checkout bar, so
+  // only problems raise a toast. They share one id: a burst of taps replaces
+  // the message instead of stacking toasts down a phone screen.
+  const handleSeatClick = (seatId) => {
     if (!selectedTime) {
-      return toast.error('Please select a time first', { icon: '⏰', style: { background: '#1a1a1a', color: '#fff', border: '1px solid #333' } })
+      return toast.error('Please select a time first', { id: 'seat-feedback', icon: '⏰', style: SEAT_TOAST_STYLE })
     }
 
     if (showPrice === 0) {
-      return toast.error('Loading seat price, please wait...', { icon: '💰', style: { background: '#1a1a1a', color: '#fff', border: '1px solid #333' } })
+      return toast.error('Loading seat price, please wait...', { id: 'seat-feedback', icon: '💰', style: SEAT_TOAST_STYLE })
     }
 
     if (occupiedSeatSet.has(seatId)) {
-      return toast.error('This seat is already taken', { icon: '🚫', style: { background: '#1a1a1a', color: '#fff', border: '1px solid #ef4444' } })
+      return toast.error('This seat is already taken', { id: 'seat-feedback', icon: '🚫', style: { ...SEAT_TOAST_STYLE, border: '1px solid #ef4444' } })
     }
 
     // FIX: Determine action BEFORE setState to avoid side-effects inside updater.
     setSelectedSeats(prev => {
       const nextSeats = new Set(prev)
-      const isSelected = nextSeats.has(seatId)
-      if (!isSelected && prev.length >= 8) {
-        queueMicrotask(() => toast.error('You can only select up to 8 seats', { icon: '👥', style: { background: '#1a1a1a', color: '#fff', border: '1px solid #333' } }));
-        return prev;
-      }
-
-      if (isSelected) {
-        queueMicrotask(() => toast.success(`Seat ${seatId} deselected`, { icon: '↩️', style: { background: '#1a1a1a', color: '#fff', border: '1px solid #10b981' } }));
+      if (nextSeats.has(seatId)) {
         nextSeats.delete(seatId)
         return [...nextSeats]
-      } else {
-        const rowLetter = seatId.charAt(0);
-        const rowConfig = rowConfigByLetter.get(rowLetter)
-        let seatPrice = showPrice;
-        if (rowConfig?.type === 'front') seatPrice = showPrice * 2;
-        else if (rowConfig?.type === 'middle') seatPrice = showPrice * 1.5;
-
-        const roundedPrice = Math.round(seatPrice);
-        queueMicrotask(() => toast.success(`Seat ${seatId} selected • $${roundedPrice}`, {
-          icon: '✅',
-          style: { background: '#1a1a1a', color: '#fff', border: '1px solid #10b981' }
-        }));
-        nextSeats.add(seatId)
-        return [...nextSeats]
       }
+      if (prev.length >= 8) {
+        queueMicrotask(() => toast.error('You can only select up to 8 seats', { id: 'seat-feedback', icon: '👥', style: SEAT_TOAST_STYLE }));
+        return prev;
+      }
+      nextSeats.add(seatId)
+      return [...nextSeats]
     });
-  }, [selectedTime, showPrice, occupiedSeatSet, rowConfigByLetter])
+  }
+
+  // Memoised seats keep the first handler they were given, so they call through
+  // a ref that always holds the current one instead of a stale closure.
+  const seatClickRef = useRef(handleSeatClick)
+  useEffect(() => { seatClickRef.current = handleSeatClick })
+  const onSeatClick = useCallback((seatId) => seatClickRef.current(seatId), [])
 
   const handleHallSelect = (hall) => {
     setSelectedHall(hall)
     setSelectedTime(null)
     setSelectedSeats([])
     setShowPrice(0)
-
-    toast.success(`${hall} selected`, { icon: '🏟️', style: { background: '#1a1a1a', color: '#fff', border: '1px solid #6366f1' } })
   }
 
   const handleTimeSelect = (time) => {
     setSelectedTime(time)
-    toast.success(`${isoTimeFormat(time.time)} - ${time.hall} selected`, { icon: '🎬', style: { background: '#1a1a1a', color: '#fff', border: '1px solid #6366f1' } })
+    // On a phone the seat map sits below the whole sidebar; bring it up so the
+    // next step is on screen without hunting for it.
+    if (window.matchMedia?.('(max-width: 1023px)').matches) {
+      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      requestAnimationFrame(() => {
+        seatSectionRef.current?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' })
+      })
+    }
   }
+
+  // The map is wider than a phone. Start it centred, the way the screen is,
+  // rather than parked on the left-hand aisle.
+  useEffect(() => {
+    const map = seatMapRef.current
+    if (!map) return
+    map.scrollLeft = Math.max(0, (map.scrollWidth - map.clientWidth) / 2)
+  }, [show])
 
   const getSeatStatus = (seatId) => {
     if (occupiedSeatSet.has(seatId)) return 'occupied'
@@ -416,7 +389,7 @@ const SeatLayout = () => {
           status={status}
           type={type}
           showPrice={showPrice}
-          onClick={handleSeatClick}
+          onClick={onSeatClick}
         />
       )
     }
@@ -469,23 +442,22 @@ const SeatLayout = () => {
 
   return show ? (
     <div className="min-h-screen bg-black relative">
-      <style>{customStyles}</style>
 
       {/* Enhanced Background Effects */}
       <div className="absolute inset-0 bg-linear-to-br from-primary/5 via-transparent to-purple-500/5"></div>
       <BlurCircle top="-100px" left="-100px" />
       <BlurCircle bottom="-100px" right="-100px" />
 
-      {/* Floating Elements */}
-      <div className="absolute top-20 right-20 w-3 h-3 bg-primary/60 rounded-full animate-bounce duration-3000"></div>
-      <div className="absolute bottom-40 left-20 w-2 h-2 bg-yellow-500/40 rounded-full animate-ping duration-4000 delay-1000"></div>
-      <div className="absolute top-1/2 right-10 w-2 h-2 bg-green-500/50 rounded-full animate-pulse duration-5000 delay-2000"></div>
+      {/* Floating Elements: desktop garnish, left off phones */}
+      <div className="hidden md:block absolute top-20 right-20 w-3 h-3 bg-primary/60 rounded-full animate-bounce duration-3000" aria-hidden="true"></div>
+      <div className="hidden md:block absolute bottom-40 left-20 w-2 h-2 bg-yellow-500/40 rounded-full animate-ping duration-4000 delay-1000" aria-hidden="true"></div>
+      <div className="hidden md:block absolute top-1/2 right-10 w-2 h-2 bg-green-500/50 rounded-full animate-pulse duration-5000 delay-2000" aria-hidden="true"></div>
 
       <div className="relative z-10 flex flex-col lg:flex-row gap-4 sm:gap-6 lg:gap-8 p-3 sm:p-6 md:p-8 lg:p-12 xl:p-16">
 
         {/* Enhanced Left Sidebar */}
-        <div className={`lg:w-80 xl:lg:w-96 transition-all duration-1000 mt-5 ${isVisible ? 'translate-x-0 opacity-100' : '-translate-x-10 opacity-0 '}`}>
-          <div className="bg-white/5 mt-10 backdrop-blur-xl rounded-2xl sm:rounded-3xl border border-white/10 p-4 sm:p-6 lg:p-8 lg:sticky lg:top-20 shadow-2xl">
+        <div className={`lg:w-80 xl:lg:w-96 transition-[translate,opacity] duration-500 lg:duration-1000 ease-out motion-reduce:transition-none mt-5 ${isVisible ? 'translate-x-0 opacity-100' : '-translate-x-10 opacity-0 '}`}>
+          <div className="bg-white/5 mt-10 md:backdrop-blur-xl rounded-2xl sm:rounded-3xl border border-white/10 p-4 sm:p-6 lg:p-8 lg:sticky lg:top-20 shadow-2xl">
 
             <div className="flex items-center gap-3 sm:gap-4 mb-5 sm:mb-8">
               <div className="w-12 h-12 bg-linear-to-br from-primary/30 to-primary/10 rounded-2xl flex items-center justify-center backdrop-blur-sm">
@@ -515,7 +487,7 @@ const SeatLayout = () => {
                   <button
                     key={hall}
                     onClick={() => handleHallSelect(hall)}
-                    className={`p-4 rounded-xl border transition-all duration-300 text-left ${selectedHall === hall
+                    className={`p-4 rounded-xl border transition-colors duration-300 text-left tap-press ${selectedHall === hall
                       ? 'border-primary bg-primary/10 text-white shadow-lg shadow-primary/20'
                       : 'border-gray-600/50 bg-gray-700/20 text-gray-300 hover:border-primary/50 hover:bg-primary/5'
                       }`}
@@ -570,9 +542,11 @@ const SeatLayout = () => {
                     <button
                       key={`${item.time}-${item.hall}`}
                       onClick={() => handleTimeSelect(item)}
-                      className={`w-full flex items-center justify-between p-5 rounded-2xl transition-all duration-300 group ${selectedTime?.showId === item.showId
-                        ? 'bg-linear-to-r from-primary to-primary-dull text-white shadow-lg shadow-primary/30 scale-105'
-                        : 'bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 hover:border-primary/30 hover:scale-105'
+                      // No scale-up on the chosen time: at 105% it spilled past the
+                      // sidebar edge on a phone. A ring marks it instead.
+                      className={`w-full flex items-center justify-between p-4 sm:p-5 rounded-2xl transition-colors duration-300 group tap-press ${selectedTime?.showId === item.showId
+                        ? 'bg-linear-to-r from-primary to-primary-dull text-white shadow-lg shadow-primary/30 ring-2 ring-primary/40 ring-offset-2 ring-offset-black'
+                        : 'bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 hover:border-primary/30'
                         }`}
                       style={{ animationDelay: `${index * 100}ms` }}
                     >
@@ -689,12 +663,15 @@ const SeatLayout = () => {
         </div>
 
         {/* Enhanced Right Section */}
-        <div className={`flex-1 transition-all duration-1000 delay-300 mt-15 ${isVisible ? 'translate-y-0 opacity-100 ' : 'translate-y-10 opacity-0'}`}>
-          <div className="text-center mb-12">
+        <div
+          ref={seatSectionRef}
+          className={`flex-1 scroll-mt-24 transition-[translate,opacity] duration-500 lg:duration-1000 delay-150 lg:delay-300 ease-out motion-reduce:transition-none mt-6 lg:mt-15 ${isVisible ? 'translate-y-0 opacity-100 ' : 'translate-y-10 opacity-0'}`}
+        >
+          <div className="text-center mb-8 sm:mb-12">
            <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-3 bg-linear-to-r from-white via-primary to-white bg-clip-text text-transparent">
               Select Your Seat
             </h1>
-            <p className="text-gray-400 text-lg flex items-center justify-center gap-2">
+            <p className="text-gray-400 text-sm sm:text-lg flex items-center justify-center gap-2">
               Choose your preferred seats for the best cinema experience
               {isSyncing && (
                 <span className="flex h-2 w-2 relative">
@@ -705,7 +682,7 @@ const SeatLayout = () => {
             </p>
 
             <div className="mt-4 flex justify-center">
-              <div className="flex items-center gap-2 sm:gap-4 bg-white/5 backdrop-blur-sm rounded-xl sm:rounded-2xl px-3 sm:px-6 py-2 sm:py-3 border border-white/10 flex-wrap justify-center">
+              <div className="flex items-center gap-2 sm:gap-4 bg-white/5 rounded-xl sm:rounded-2xl px-3 sm:px-6 py-2 sm:py-3 border border-white/10 flex-wrap justify-center">
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 bg-primary rounded-full"></div>
                   <span className="text-primary text-sm font-medium">Date Selected</span>
@@ -746,7 +723,8 @@ const SeatLayout = () => {
           </div>
 
           {/* Enhanced Seat Map */}
-          <div className="w-full overflow-x-auto pb-6 custom-scrollbar">
+          <p className="sm:hidden mb-2 text-center text-xs text-gray-500">Swipe sideways to see every seat</p>
+          <div ref={seatMapRef} className="w-full overflow-x-auto overscroll-x-contain pb-6 custom-scrollbar">
             <div className="w-fit mx-auto px-8 sm:px-12 min-w-max">
               {/* Front Section */}
               <div className="mb-4 sm:mb-6 mt-1 sm:mt-2">
@@ -787,7 +765,7 @@ const SeatLayout = () => {
               <span className="text-gray-400 font-medium">Available</span>
             </div>
             <div className="flex items-center gap-3">
-              <div className="w-6 h-6 bg-linear-to-br from-green-500 to-green-600 rounded-lg shadow-lg shadow-green-500/30 sync-pulse"></div>
+              <div className="w-6 h-6 bg-linear-to-br from-green-500 to-green-600 rounded-lg shadow-lg shadow-green-500/30 ring-2 ring-green-400/40"></div>
               <span className="text-gray-400 font-medium">Selected</span>
             </div>
             <div className="flex items-center gap-3">
@@ -796,9 +774,9 @@ const SeatLayout = () => {
             </div>
           </div>
 
-          {/* Enhanced Summary & Checkout */}
+          {/* Enhanced Summary & Checkout (desktop; phones use the sticky bar below) */}
           {selectedSeats.length > 0 && (
-            <div className="bg-linear-to-br from-white/10 to-white/5 backdrop-blur-xl rounded-2xl sm:rounded-3xl border border-white/20 p-4 sm:p-6 shadow-2xl">
+            <div className="hidden lg:block bg-linear-to-br from-white/10 to-white/5 backdrop-blur-xl rounded-2xl sm:rounded-3xl border border-white/20 p-4 sm:p-6 shadow-2xl">
               <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 bg-primary/20 rounded-2xl flex items-center justify-center">
@@ -821,7 +799,7 @@ const SeatLayout = () => {
                 <span className="text-gray-400 font-medium">Selected Seats:</span>
                 <div className="flex gap-2 flex-wrap">
                   {selectedSeats.map(seat => (
-                    <span key={seat} className="px-3 py-1 bg-green-500/20 text-green-400 rounded-lg text-sm font-bold border border-green-500/30 sync-pulse">
+                    <span key={seat} className="px-3 py-1 bg-green-500/20 text-green-400 rounded-lg text-sm font-bold border border-green-500/30">
                       {seat}
                     </span>
                   ))}
@@ -841,6 +819,31 @@ const SeatLayout = () => {
           )}
         </div>
       </div>
+
+      {/* Phone checkout: sticks to the bottom of the screen while seats are
+          picked, and stops at the end of the page so it never covers the footer. */}
+      {selectedSeats.length > 0 && (
+        <div className="seat-checkout-bar lg:hidden sticky bottom-0 z-30 border-t border-white/10 bg-[#0c0d12]/95 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-12px_32px_rgba(0,0,0,0.55)]">
+          <div className="mx-auto flex max-w-xl items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-xs text-gray-400">
+                {selectedSeats.length} seat{selectedSeats.length > 1 ? 's' : ''} • {selectedTime ? isoTimeFormat(selectedTime.time) : ''}
+              </p>
+              <p className="truncate text-sm font-semibold text-green-400">{selectedSeats.join(', ')}</p>
+            </div>
+            <p className="shrink-0 text-xl font-bold text-white" aria-label={`Total $${calculateTotal}`}>${calculateTotal}</p>
+            <button
+              type="button"
+              disabled={!selectedTime || isBooking}
+              onClick={bookTickets}
+              className="tap-press flex min-h-12 shrink-0 items-center gap-2 rounded-xl bg-linear-to-r from-primary to-primary-dull px-4 font-bold text-white shadow-lg shadow-primary/30 disabled:from-gray-600 disabled:to-gray-700 disabled:shadow-none"
+            >
+              {isBooking ? 'Holding…' : 'Checkout'}
+              <ArrowRight className="h-5 w-5" aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   ) : (
     <Loading />

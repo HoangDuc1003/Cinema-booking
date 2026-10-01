@@ -296,6 +296,13 @@
   animation-play-state: paused;
 }
 
+/* Scrolled away: nobody is watching the pan or the breathing overlay, so the
+   compositor stops ticking them until the Hero comes back into view. */
+.hero-section.is-offscreen .hero-poster,
+.hero-section.is-offscreen .hero-media__breath {
+  animation-play-state: paused;
+}
+
 /* Once the trailer is on, the synopsis steps back so the picture carries the slide.
    An animation, not a transition: the entrance animation holds opacity with
    `forwards`, which a plain declaration cannot override. */
@@ -652,6 +659,9 @@
 .hero-poster-rail {
   position: absolute;
   z-index: 15;
+  /* The active thumbnail grows in width and height; containment keeps that
+     re-layout inside the rail instead of the whole section. */
+  contain: layout style;
   left: var(--hero-safe-left);
   bottom: var(--hero-safe-bottom);
   max-width: min(64vw, 47rem);
@@ -855,16 +865,54 @@
     flex-wrap: wrap;
   }
 
+  /* 44px: the smallest target a thumb hits reliably. */
   .hero-action {
     flex: 1 1 auto;
-    min-height: 2.35rem;
-    padding: 0.5rem 0.85rem;
-    font-size: 0.78rem;
+    min-height: 2.75rem;
+    padding: 0.55rem 0.85rem;
+    font-size: 0.8rem;
     white-space: nowrap;
   }
 
   .hero-action--details {
     display: inline-flex;
+  }
+
+  /* Frosted glass over a panning poster has to be re-blurred on every frame of
+     the pan. Phones get the same tint without the blur. */
+  .hero-genres span {
+    background: rgba(10, 12, 18, 0.55);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .hero-action--secondary,
+  .hero-action--details,
+  .hero-action--trailer,
+  .hero-control {
+    background: rgba(10, 12, 18, 0.72);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .hero-action:active,
+  .hero-poster-thumb:active {
+    transform: scale(0.96);
+    transition-duration: 120ms;
+  }
+
+  /* A 3-12% black flicker over a phone-sized poster is not worth a full-screen
+     layer animating forever. */
+  .hero-media__breath {
+    animation: none;
+  }
+
+  /* The slide-change flare without its 30px blur and screen blending: the
+     gradient alone already has soft edges. */
+  .hero-transition-flare {
+    filter: none;
+    mix-blend-mode: normal;
+    background: linear-gradient(90deg, transparent 0%, rgba(229, 9, 20, 0.22) 30%, rgba(229, 9, 20, 0.5) 50%, rgba(229, 9, 20, 0.22) 70%, transparent 100%);
   }
 
   .hero-poster-rail {
@@ -968,6 +1016,8 @@
   }
 
   .hero-media__breath { opacity: 0.03 !important; }
+  .hero-action:active,
+  .hero-poster-thumb:active { transform: none; }
   .hero-transition-flare { opacity: 0 !important; }
   .hero-catalog-state__backdrop,
   .hero-catalog-state__skeleton span { animation: none !important; }

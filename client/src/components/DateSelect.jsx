@@ -48,13 +48,13 @@ const DateSelect = ({
     const bookDisabled = status !== 'ready' || !selected;
 
     return (
-        <div id='dateSelect' className='pt-30'>
-            <div className='flex flex-col md:flex-row items-center justify-between gap-10 relative p-8 bg-primary/10 border
+        <div id='dateSelect' className='pt-16 md:pt-30 scroll-mt-16'>
+            <div className='flex flex-col md:flex-row items-center justify-between gap-6 md:gap-10 relative p-5 md:p-8 bg-primary/10 border
              border-primary/20 rounded-lg'>
                 <BlurCircle top='-100px' left='-100px' />
                 <BlurCircle top='100px' right='0' />
 
-                <div>
+                <div className='w-full min-w-0 md:w-auto'>
                     <div className="flex flex-wrap items-center gap-3 mb-5">
                         {isSimulated && (
                             <span
@@ -70,18 +70,19 @@ const DateSelect = ({
                             Choose Date
                         </p>
                     </div>
-                    <div className='flex items-center gap-3 sm:gap-6 text-sm mt-5' aria-live="polite">
+                    <div className='flex items-center gap-3 sm:gap-6 text-sm mt-5 max-sm:mt-3' aria-live="polite">
                         <button
                             type="button"
                             onClick={() => scrollDates(-1)}
                             disabled={dates.length < 2}
                             aria-label="Previous show dates"
-                            className="shrink-0 rounded-full p-2 hover:text-primary focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                            className="max-sm:hidden shrink-0 rounded-full p-2 hover:text-primary focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                         >
                             <ChevronLeftIcon width={28} aria-hidden="true" />
                         </button>
 
-                        <div ref={datesRef} className='flex max-w-[18rem] sm:max-w-lg gap-4 overflow-x-auto no-Scrollbar scroll-smooth'>
+                        {/* Phones swipe the strip (the arrows are for mouse users), and it snaps date by date. */}
+                        <div ref={datesRef} className='flex w-full max-w-full sm:max-w-lg gap-3 sm:gap-4 overflow-x-auto overscroll-x-contain snap-x snap-mandatory no-Scrollbar scroll-smooth py-2'>
                             {status === 'loading' && Array.from({ length: 3 }, (_, index) => (
                                 <span key={index} className="h-18 w-14 shrink-0 animate-pulse rounded bg-white/8" aria-hidden="true" />
                             ))}
@@ -95,8 +96,8 @@ const DateSelect = ({
                                         key={dateStr}
                                         aria-pressed={selected === dateStr}
                                         aria-label={date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                                        className={`flex shrink-0 flex-col items-center justify-center h-18 w-14 aspect-square rounded cursor-pointer border
-                                            transition-all ${
+                                        className={`flex shrink-0 snap-start flex-col items-center justify-center h-18 w-14 aspect-square rounded cursor-pointer border
+                                            transition-[background-color,border-color,box-shadow,scale] duration-200 ${
                                             selected === dateStr
                                             ? "bg-primary text-white border-primary hover:scale-105 active:scale-95 shadow-xl shadow-primary/60"
                                             : "bg-white/5 border-transparent hover:bg-primary/20 hover:border-primary text-white hover:scale-105 active:scale-95"
@@ -133,7 +134,7 @@ const DateSelect = ({
                             onClick={() => scrollDates(1)}
                             disabled={dates.length < 2}
                             aria-label="Next show dates"
-                            className="shrink-0 rounded-full p-2 hover:text-primary focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                            className="max-sm:hidden shrink-0 rounded-full p-2 hover:text-primary focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                         >
                             <ChevronRightIcon width={28} aria-hidden="true" />
                         </button>
@@ -144,7 +145,7 @@ const DateSelect = ({
                   type="button"
                   disabled={bookDisabled}
                   onClick={onBookHandler}
-                  className="group flex items-center gap-3 px-10 py-6 bg-gradient-to-r from-[#F84565]
+                  className="group flex items-center justify-center gap-3 px-10 py-6 max-md:w-full max-md:py-4 bg-gradient-to-r from-[#F84565]
                  to-[#D63854] hover:from-[#D63854] hover:to-[#F84565] text-white font-semibold rounded-full shadow-lg shadow-[#F84565]/30 
                  hover:shadow-xl hover:shadow-[#F84565]/60 hover:scale-105 active:scale-95 transition-all duration-300 border border-[#F84565]/30
                   hover:border-[#F84565]/60 relative overflow-hidden disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:scale-100 disabled:shadow-none">

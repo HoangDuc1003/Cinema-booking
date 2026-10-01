@@ -1,6 +1,7 @@
 import React from 'react'
 
-
+// The glow itself lives in `.blur-circle` (index.css): a static gradient, and a
+// drift that only runs on desktop pointers with motion allowed.
 const BlurCircle = ({
   top = "auto",
   left = "auto",
@@ -11,7 +12,8 @@ const BlurCircle = ({
   return (
 
     <div
-      className="absolute w-72 h-72 aspect-square rounded-full bg-primary/60 blur-3xl animate-float-blob pointer-events-none"
+      className="blur-circle animate-float-blob"
+      aria-hidden="true"
       style={{
         top: top,
         left: left,
@@ -24,4 +26,4 @@ const BlurCircle = ({
   )
 }
 
-export default BlurCircle
+export default React.memo(BlurCircle)

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useRef, useCallback, useEffect } from 'react';
 import { ArrowRightIcon, StarIcon, Calendar, Clock } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
 import BlurCircle from './BlurCircle';
@@ -32,7 +32,7 @@ const MobileCarouselCard = ({ movie }) => {
   };
 
   return (
-    <article className="group relative flex-shrink-0 w-[190px] rounded-2xl overflow-hidden bg-black/40 border border-white/10 shadow-lg select-none">
+    <article className="group relative flex-shrink-0 w-[42vw] max-w-[190px] snap-start rounded-2xl overflow-hidden bg-black/40 border border-white/10 shadow-lg select-none tap-press">
       <Link to={movieHref} onClick={handleNavigate} className="block relative aspect-[2/3] w-full overflow-hidden">
         <img
           src={posterSrc || undefined}
@@ -43,7 +43,7 @@ const MobileCarouselCard = ({ movie }) => {
         />
 
         {rating && (
-          <div className="absolute top-2.5 left-2.5 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/70 backdrop-blur-md border border-white/15 text-[11px] font-bold text-yellow-400">
+          <div className="absolute top-2.5 left-2.5 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/75 border border-white/15 text-[11px] font-bold text-yellow-400">
             <StarIcon className="w-3 h-3 fill-yellow-400 text-yellow-400" aria-hidden="true" />
             <span>{rating}</span>
           </div>
@@ -66,11 +66,12 @@ const MobileCarouselCard = ({ movie }) => {
         </div>
       </Link>
 
+      {/* Touch screens have no hover, so the essentials are always shown here. */}
       <div className="p-2.5 bg-white/[0.03] border-t border-white/5 group-hover:opacity-0 transition-opacity duration-300">
-        <h4 className="text-xs font-semibold text-white truncate">{movie.title || movie.name}</h4>
-        <div className="flex items-center justify-between text-[10px] text-gray-400 mt-0.5">
-          <span>{releaseYear}</span>
-          {movie.genres?.[0]?.name && <span className="text-primary font-medium">{movie.genres[0].name}</span>}
+        <h4 className="text-[13px] font-semibold text-white truncate">{movie.title || movie.name}</h4>
+        <div className="flex items-center justify-between gap-2 text-[11px] text-gray-400 mt-0.5">
+          <span className="truncate">{[releaseYear, runtime].filter(Boolean).join(' · ')}</span>
+          {movie.genres?.[0]?.name && <span className="shrink-0 text-primary font-medium">{movie.genres[0].name}</span>}
         </div>
       </div>
     </article>
@@ -80,20 +81,34 @@ const MobileCarouselCard = ({ movie }) => {
 const FeatureSection = () => {
   const navigate = useNavigate();
   const { nowShowing, nowShowingStatus, nowShowingSource, retryNowShowing } = useHomeData();
-  const [scrollProgress, setScrollProgress] = useState(0);
   const railRef = useRef(null);
+  const progressRef = useRef(null);
+  const progressFrameRef = useRef(0);
+
+  // The indicator is written straight to the DOM once per frame. Keeping it in
+  // React state re-rendered the whole section on every scroll event, which is
+  // dozens of renders a second while a thumb is flicking the rail.
+  const paintProgress = useCallback(() => {
+    progressFrameRef.current = 0;
+    const el = railRef.current;
+    const bar = progressRef.current;
+    if (!el || !bar) return;
+    const maxScroll = el.scrollWidth - el.clientWidth;
+    const progress = maxScroll <= 0 ? 1 : Math.min(1, Math.max(0, el.scrollLeft / maxScroll));
+    bar.style.transform = `scaleX(${Math.max(0.2, progress).toFixed(3)})`;
+  }, []);
 
   const handleScroll = useCallback(() => {
-    const el = railRef.current;
-    if (!el) return;
-    const maxScroll = el.scrollWidth - el.clientWidth;
-    if (maxScroll <= 0) {
-      setScrollProgress(100);
-      return;
-    }
-    const current = Math.min(100, Math.max(0, (el.scrollLeft / maxScroll) * 100));
-    setScrollProgress(current);
-  }, []);
+    if (!progressFrameRef.current) progressFrameRef.current = requestAnimationFrame(paintProgress);
+  }, [paintProgress]);
+
+  useEffect(() => {
+    paintProgress();
+    return () => {
+      if (progressFrameRef.current) cancelAnimationFrame(progressFrameRef.current);
+      progressFrameRef.current = 0;
+    };
+  }, [nowShowing, paintProgress]);
 
   const handleNavigate = () => {
     navigate('/movies');
@@ -108,17 +123,17 @@ const FeatureSection = () => {
       data-catalog-source={nowShowingSource || 'unavailable'}
     >
       {/* Header */}
-      <div className="relative flex items-center justify-between pt-10 sm:pt-5 pb-6 sm:pb-10">
+      <div className="relative flex items-center justify-between pt-8 sm:pt-5 pb-5 sm:pb-10">
         <BlurCircle top="80px" right="-60px" />
         <BlurCircle top="600px" left="-65px" />
         <BlurCircle top="800px" right="-100px" />
         <BlurCircle top="0px" left="0" />
-        <h2 id="home-now-showing-title" className="relative text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-2 mt-8 sm:mt-20">
+        <h2 id="home-now-showing-title" className="relative text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-2 mt-4 sm:mt-20">
           Now Showing
         </h2>
         <button
           onClick={handleNavigate}
-          className="group flex items-center gap-2 px-4 py-2 sm:px-6 sm:py-3 text-[10px] sm:text-sm text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/20 hover:border-primary/40 rounded-full backdrop-blur-sm transition-all duration-300 hover:scale-105 relative overflow-hidden mt-8 sm:mt-20 cursor-pointer"
+          className="group flex min-h-10 items-center gap-2 px-4 py-2 sm:px-6 sm:py-3 text-xs sm:text-sm text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/20 hover:border-primary/40 rounded-full transition-[color,background-color,border-color,scale] duration-300 hover:scale-105 relative overflow-hidden mt-4 sm:mt-20 cursor-pointer tap-press"
         >
           View All
           <ArrowRightIcon className="group-hover:translate-x-0.5 transition w-4 h-4 sm:w-4.5 sm:h-4.5" />
@@ -132,10 +147,13 @@ const FeatureSection = () => {
           {/* Cached data is displayed silently — no technical reconnect banner */}
           {/* MOBILE ONLY: Horizontal Carousel Rail */}
           <div className="block sm:hidden relative">
+            {/* Edge to edge, snapping card by card, and never handing the swipe
+                on to the page's back/forward gesture. */}
             <div
               ref={railRef}
               onScroll={handleScroll}
-              className="flex items-center gap-3 overflow-x-auto scroll-smooth py-2 px-1 no-scrollbar"
+              data-rail="now-showing"
+              className="-mx-4 flex items-stretch gap-3 overflow-x-auto overscroll-x-contain snap-x snap-mandatory scroll-px-4 px-4 py-2 no-scrollbar"
               style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
             >
               {nowShowing.map((movie) => (
@@ -144,10 +162,11 @@ const FeatureSection = () => {
             </div>
             {/* Mobile Scroll Indicator */}
             <div className="mt-4 flex items-center justify-center">
-              <div className="w-28 h-1 rounded-full bg-white/10 overflow-hidden">
+              <div className="w-28 h-1 rounded-full bg-white/10 overflow-hidden" aria-hidden="true">
                 <div
-                  className="h-full bg-primary transition-all duration-300 rounded-full"
-                  style={{ width: `${Math.max(20, scrollProgress)}%` }}
+                  ref={progressRef}
+                  className="h-full w-full origin-left bg-primary"
+                  style={{ transform: 'scaleX(0.2)' }}
                 />
               </div>
             </div>

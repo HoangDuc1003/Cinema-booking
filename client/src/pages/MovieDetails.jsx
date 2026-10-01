@@ -175,7 +175,10 @@ const MovieDetails = () => {
   return show ? (
     <main className='relative isolate min-h-screen bg-[#03060a] pb-20'>
       <div
-        className="pointer-events-none absolute inset-0 z-0 overflow-hidden"
+        // On a phone the page runs several screens tall; a blurred backdrop
+        // behind all of it is a huge filtered surface for nothing. It covers
+        // the first screen or so and fades into the page colour.
+        className="pointer-events-none absolute inset-0 max-md:bottom-auto max-md:h-[120svh] z-0 overflow-hidden"
         aria-hidden="true"
         >
           {imageUrl && (
@@ -225,13 +228,15 @@ const MovieDetails = () => {
           <div className="absolute inset-0 bg-gradient-to-b from-[#03060a]/20 via-transparent to-[#03060a]" />
         </div>
 
-      <div className="relative z-10 px-6 md:px-6 lg:px-40 pt-[200px] pb-12">
+      <div className="relative z-10 px-6 md:px-6 lg:px-40 pt-24 md:pt-[200px] pb-8 md:pb-12">
           <div className='flex flex-col md:flex-row gap-8 max-w-6xl mx-auto'>
-            <div className="relative overflow-hidden rounded-xl cursor-pointer group w-auto h-130 flex-shrink-0">
+            {/* Phones get a smaller poster so the title, rating and booking
+                buttons are on the first screen instead of below a full-height image. */}
+            <div className="relative overflow-hidden rounded-xl cursor-pointer group w-auto h-130 max-md:h-auto max-md:mx-auto flex-shrink-0 shadow-2xl shadow-black/60">
               <img
                 src={imageUrl}
                 alt={show.title}
-                className='max-md:mx-auto rounded-2xl h-130 w-[340px] md:w-[340px] object-cover group-hover:scale-105 transition-transform duration-500'
+                className='max-md:mx-auto rounded-2xl h-130 w-[340px] max-md:h-auto max-md:w-[min(62vw,240px)] max-md:aspect-[2/3] object-cover group-hover:scale-105 transition-transform duration-500'
               />
               <div className="absolute top-0 left-[-150%] w-1/2 h-full z-10 block transform -skew-x-12 bg-linear-to-r from-transparent
                 via-white/40 to-transparent transition-all duration-700 group-hover:left-[150%]">
@@ -242,7 +247,7 @@ const MovieDetails = () => {
               {languageName && (
                 <p className='text-primary font-bold tracking-wider text-sm uppercase'>{languageName}</p>
               )}
-              <h1 className='text-4xl md:text-5xl font-extrabold max-w-xl text-balance'>{show.title}</h1>
+              <h1 className='text-3xl md:text-5xl font-extrabold max-w-xl text-balance'>{show.title}</h1>
 
               <div className='flex items-center gap-2 text-gray-300'>
                 <StarIcon className='w-5 h-5 text-primary fill-primary' />
@@ -260,16 +265,18 @@ const MovieDetails = () => {
                   .join(' • ')}
               </p>
 
-              <div className='flex items-center flex-wrap gap-4 mt-4'>
+              {/* On a phone Buy Tickets takes a full row of its own, with the
+                  trailer and favourite buttons sharing the row beneath it. */}
+              <div className='flex items-center flex-wrap gap-3 md:gap-4 mt-4'>
                 <button
                   type="button"
                   onClick={handleWatchTrailer}
-                  className="group flex items-center gap-3 px-8 py-4 rounded-full backdrop-blur-sm border transition-all duration-300
-                  hover:scale-105 bg-white/10 hover:bg-white/20 border-white/20 hover:border-primary/40 cursor-pointer">
+                  className="group flex items-center justify-center gap-3 px-8 py-4 max-md:flex-1 max-md:px-5 max-md:py-3.5 rounded-full md:backdrop-blur-sm border transition-all duration-300
+                  hover:scale-105 active:scale-95 bg-white/10 hover:bg-white/20 border-white/20 hover:border-primary/40 cursor-pointer">
                   <PlayCircleIcon className="w-5 h-5" />
                   Watch Trailer
                 </button>
-                <a href="#dateSelect" className="group flex items-center gap-3 px-12 py-6 bg-linear-to-r from-primary to-primary-dull
+                <a href="#dateSelect" className="group flex items-center justify-center gap-3 px-12 py-6 max-md:order-first max-md:basis-full max-md:py-4 bg-linear-to-r from-primary to-primary-dull
                 hover:from-primary-dull hover:to-primary text-white font-semibold rounded-full shadow-lg shadow-primary/30
                 hover:shadow-xl hover:shadow-primary/60 hover:scale-105 active:scale-95 transition-all duration-300 border
                 border-primary/30 hover:border-primary/60 relative overflow-hidden">
@@ -310,13 +317,13 @@ const MovieDetails = () => {
 
       <section className="relative z-10 w-full mt-16 pb-10">
         <div className="mx-auto w-full max-w-[1440px] px-6 lg:px-10 xl:px-12">
-          <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-8">
+          <h2 className="text-2xl md:text-4xl lg:text-5xl font-bold text-white mb-5 md:mb-8">
             You May Also Like
           </h2>
 
           <div aria-live="polite">
             {recommendationStatus === 'loading' && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-6">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-6">
                 {Array.from({ length: 5 }, (_, index) => (
                   <div key={index} className="catalog-card-skeleton" aria-hidden="true">
                     <span className="catalog-card-skeleton__art" />
@@ -351,7 +358,7 @@ const MovieDetails = () => {
             {recommendationStatus === 'ready' && (
               <MovieGrid
                 movies={movies}
-                columns="grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
+                columns="grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
                 animated
                 staggerDelay={80}
               />

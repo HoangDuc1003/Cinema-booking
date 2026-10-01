@@ -8,11 +8,10 @@ const CatalogPageShell = ({ header, children }) => (
     <BlurCircle top="350px" left="-80px" delay="0.6s" />
     <BlurCircle top="700px" right="-100px" delay="1.2s" />
     <div
-      className="absolute -z-100 w-[28rem] h-[28rem] rounded-full blur-3xl animate-float-blob"
+      className="blur-circle blur-circle--blue -z-100 animate-float-blob"
       style={{
         top: '120px',
         left: '-40px',
-        background: 'rgba(37, 71, 180, 0.35)',
         animationDelay: '1.8s',
       }}
       aria-hidden="true"

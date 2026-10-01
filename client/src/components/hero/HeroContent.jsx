@@ -25,7 +25,7 @@ const HeroContent = ({
           return (
             <span
               key={`${word}-${wordIndex}`}
-              className="hero-title__word inline-block whitespace-nowrap will-change-transform"
+              className="hero-title__word inline-block whitespace-nowrap"
               style={{
                 animation: `${animation} 700ms cubic-bezier(0.22, 1, 0.36, 1) ${wordIndex * 80}ms both`,
               }}

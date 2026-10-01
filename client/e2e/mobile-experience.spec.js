@@ -89,3 +89,73 @@ test('desktop Home keeps Navbar, Hero, and Footer in the unified tree', async ({
   await expect(page.locator('footer')).toBeAttached();
   await expect(page.getByTestId('mobile-bottom-nav')).toHaveCount(0);
 });
+
+test('phone menu opens over a locked page, takes focus, and closes on Escape', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockHomeApis(page);
+  await page.goto('/');
+  await expect(page.locator('.hero-title')).toContainText('Nitro Night');
+
+  const menuButton = page.getByRole('button', { name: 'Open menu' });
+  await menuButton.click();
+  const nav = page.locator('#app-mobile-nav');
+  await expect(nav).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Close menu' })).toBeFocused();
+  await expect(menuButton).toHaveAttribute('aria-expanded', 'true');
+  expect(await page.evaluate(() => document.body.style.overflow)).toBe('hidden');
+  // Every link is a full-size touch target.
+  for (const link of await nav.getByRole('link').all()) {
+    expect((await link.boundingBox()).height).toBeGreaterThanOrEqual(44);
+  }
+
+  await page.keyboard.press('Escape');
+  await expect(nav).toBeHidden();
+  await expect(menuButton).toBeFocused();
+  expect(await page.evaluate(() => document.body.style.overflow)).toBe('');
+});
+
+test('Now Showing rail snaps on phones and its indicator follows the scroll', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockHomeApis(page);
+  await page.goto('/');
+  await page.locator('#home-now-showing-title').scrollIntoViewIfNeeded();
+
+  const rail = page.locator('[data-rail="now-showing"]');
+  await expect(rail.getByRole('link').first()).toBeVisible();
+  await expect(rail).toHaveCSS('scroll-snap-type', 'x mandatory');
+  const bar = rail.locator('xpath=following-sibling::div[1]//div/div');
+  const progress = () => bar.evaluate((el) => Number(el.style.transform.match(/scaleX\(([\d.]+)\)/)?.[1]));
+  expect(await progress()).toBeLessThan(0.5);
+  await rail.evaluate((el) => { el.scrollLeft = el.scrollWidth; });
+  await expect.poll(progress).toBe(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test('movie details puts the booking button on the first phone screen', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockHomeApis(page);
+  const movie = movies[0];
+  await page.route(`**/api/show/tmdb/movie/${movie.id}/similar**`, (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, data: { results: movies.slice(1, 5) } }),
+  }));
+  await page.route(`**/api/show/tmdb/movie/${movie.id}`, (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, data: movie }),
+  }));
+  await page.route(`**/api/show/${movie.id}`, (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, movie, dateTime: {} }),
+  }));
+  await page.goto(`/movies/${movie.id}`);
+
+  await expect(page.getByRole('heading', { name: 'Nitro Night', level: 1 })).toBeVisible();
+  const buy = page.getByRole('link', { name: 'Buy Tickets' });
+  const box = await buy.boundingBox();
+  expect(box.y + box.height).toBeLessThanOrEqual(844);
+  expect(box.height).toBeGreaterThanOrEqual(44);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
