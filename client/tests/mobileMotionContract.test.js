@@ -210,3 +210,22 @@ test('the rail indicator is repainted on resize as well as on scroll', () => {
   assert.match(feature, /window\.addEventListener\('resize', handleScroll, \{ passive: true \}\)/);
   assert.match(feature, /window\.removeEventListener\('resize', handleScroll\)/);
 });
+
+test('white-on-pink buttons use the AA fill and grey text stays readable on black', () => {
+  const css = read('index.css');
+  const navbar = read('components/Navbar.jsx');
+  const footer = read('components/Footer.jsx');
+
+  assert.match(css, /--nitro-accent-fill: #d63854;/);
+  assert.match(ruleBody(css, '.movie-card__cta'), /background: var\(--nitro-accent-fill\);/);
+  assert.match(ruleBody(css, '.catalog-state-panel__button'), /background: var\(--nitro-accent-fill\);/);
+  assert.match(navbar, /bg-primary-dull hover:bg-\[#c22d48\][^']*'>Login</);
+  assert.doesNotMatch(footer, /text-gray-500/);
+});
+
+test('the trailer thumbnails control an element that is always rendered', () => {
+  const trailer = read('components/TrailerSection.jsx');
+
+  assert.match(trailer, /<div id=\{`\$\{sectionId\}-player`\}>\s*\{loading \?/);
+  assert.equal((trailer.match(/id=\{`\$\{sectionId\}-player`\}/g) || []).length, 1);
+});

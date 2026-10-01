@@ -11,7 +11,7 @@ const Footer = () => {
 
                 <div className="md:max-w-96">
 
-                    <button type="button" aria-label="Back to top" className="cursor-pointer" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
+                    <button type="button" aria-label="Back to top" className="block -my-[5px] py-[5px] cursor-pointer" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
                         <img className="w-36 h-auto" src={assets.logo} alt="NitroCine" />
                     </button>
 
@@ -22,32 +22,33 @@ const Footer = () => {
                     </p>
                 </div>
 
-                <div className="flex-1 flex items-start md:justify-end gap-20">
+                <div className="flex-1 flex items-start md:justify-end gap-8 sm:gap-20">
 
                     <div>
-                        <h2 className="font-semibold mb-5 text-white">Company</h2>
-            <ul className="text-sm space-y-2 text-gray-400">
+                        <h2 className="font-semibold mb-2 md:mb-5 text-white">Company</h2>
+            {/* Full-height rows on a phone so each link is a 44px target. */}
+            <ul className="text-sm md:space-y-2 text-gray-400">
 
               <li>
-                <a href="#" className="hover:text-white transition-colors" 
+                <a href="#" className="inline-flex min-h-11 min-w-11 items-center md:min-h-0 md:min-w-0 hover:text-white transition-colors" 
                   onClick={(e) => { e.preventDefault(); window.scrollTo({top: 0, behavior: 'smooth'}); }}>
                   Home
                 </a>
               </li>
               <li>
-                <a href="#" className="hover:text-white transition-colors" 
+                <a href="#" className="inline-flex min-h-11 min-w-11 items-center md:min-h-0 md:min-w-0 hover:text-white transition-colors" 
                   onClick={(e) => { e.preventDefault(); window.scrollTo({top: 0, behavior: 'smooth'}); }}>
                   About us
                 </a>
               </li>
               <li>
-                <a href="#" className="hover:text-white transition-colors" 
+                <a href="#" className="inline-flex min-h-11 min-w-11 items-center md:min-h-0 md:min-w-0 hover:text-white transition-colors" 
                   onClick={(e) => { e.preventDefault(); window.scrollTo({top: 0, behavior: 'smooth'}); }}>
                   Contact us
                 </a>
               </li>
               <li>
-                <a href="#" className="hover:text-white transition-colors" 
+                <a href="#" className="inline-flex min-h-11 min-w-11 items-center md:min-h-0 md:min-w-0 hover:text-white transition-colors" 
                   onClick={(e) => { e.preventDefault(); window.scrollTo({top: 0, behavior: 'smooth'}); }}>
                   Privacy policy
                 </a>
@@ -56,31 +57,32 @@ const Footer = () => {
           </div>
 
           <div>
-            <h2 className="font-semibold mb-5 text-white">Get in touch</h2>
-            <div className="text-sm space-y-2 text-gray-400">
-              <p>098 1025559</p>
-              <p>hhprolay@gmail.com</p>
+            <h2 className="font-semibold mb-2 md:mb-5 text-white">Get in touch</h2>
+            {/* Tap to call or write, rather than copying the text by hand. */}
+            <div className="text-sm md:space-y-2 text-gray-400">
+              <p><a href="tel:0981025559" className="inline-flex min-h-11 min-w-11 items-center md:min-h-0 md:min-w-0 hover:text-white transition-colors">098 1025559</a></p>
+              <p><a href="mailto:hhprolay@gmail.com" className="inline-flex min-h-11 min-w-11 items-center md:min-h-0 md:min-w-0 hover:text-white transition-colors">hhprolay@gmail.com</a></p>
                         </div>
                         {/* Social links */}
-                        <div className="flex items-center gap-4 mt-5" >
+                        <div className="flex items-center gap-1 mt-3 -ml-2.5" >
 
-                            <a href="https://www.facebook.com/kieuheef" aria-label="Facebook" className="hover:-translate-y-0.5 transition-all duration-300"  >
+                            <a href="https://www.facebook.com/kieuheef" aria-label="Facebook" className="grid h-11 w-11 place-items-center rounded-full hover:-translate-y-0.5 hover:bg-white/5 transition-[translate,background-color] duration-300"  >
                                 <svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" >
                                     <path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z" stroke="#fff" strokeOpacity=".5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                                 </svg>
                             </a>
-                            <a href="http://instagram.com/dlycr_ndh/" aria-label="Instagram" className="hover:-translate-y-0.5 transition-all duration-300">
+                            <a href="http://instagram.com/dlycr_ndh/" aria-label="Instagram" className="grid h-11 w-11 place-items-center rounded-full hover:-translate-y-0.5 hover:bg-white/5 transition-[translate,background-color] duration-300">
                                 <svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                                     <path d="M17 2H7a5 5 0 0 0-5 5v10a5 5 0 0 0 5 5h10a5 5 0 0 0 5-5V7a5 5 0 0 0-5-5" stroke="#fff" strokeOpacity=".5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                                     <path d="M16 11.37a4 4 0 1 1-7.914 1.173A4 4 0 0 1 16 11.37m1.5-4.87h.01" stroke="#fff" strokeOpacity=".5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                                 </svg>
                             </a>
-                            <a href="https://www.linkedin.com/in/hoang-nguyen-duc-05909336b/" aria-label="LinkedIn" className="hover:-translate-y-0.5 transition-all duration-300">
+                            <a href="https://www.linkedin.com/in/hoang-nguyen-duc-05909336b/" aria-label="LinkedIn" className="grid h-11 w-11 place-items-center rounded-full hover:-translate-y-0.5 hover:bg-white/5 transition-[translate,background-color] duration-300">
                                 <svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                                     <path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-4 0v7h-4v-7a6 6 0 0 1 6-6M6 9H2v12h4zM4 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4" stroke="#fff" strokeOpacity=".5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                                 </svg>
                             </a>
-                            <a href="https://github.com/HoangDuc1003" aria-label="GitHub" className="hover:-translate-y-0.5 transition-all duration-300 ">
+                            <a href="https://github.com/HoangDuc1003" aria-label="GitHub" className="grid h-11 w-11 place-items-center rounded-full hover:-translate-y-0.5 hover:bg-white/5 transition-[translate,background-color] duration-300">
                                 <svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                                     <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.4 5.4 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65S8.93 17.38 9 18v4" stroke="#fff" strokeOpacity=".5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                                     <path d="M9 18c-4.51 2-5-2-7-2" stroke="#fff" strokeOpacity=".5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -91,7 +93,7 @@ const Footer = () => {
                 </div>
             </div>
 
-            <p className="pt-4 text-center text-xs md:text-sm pb-5 text-gray-500">
+            <p className="pt-4 text-center text-xs md:text-sm pb-5 text-gray-400">
                 Copyright 2026 © <a href="https://github.com/HoangDuc1003" className="hover:text-white transition-colors">Hoang Duc</a>. All Rights Reserved.
             </p>
         </footer>

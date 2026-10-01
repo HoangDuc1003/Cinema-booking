@@ -12,6 +12,9 @@
   --nitro-surface-strong: rgba(19, 22, 31, 0.94);
   --nitro-border: rgba(255, 255, 255, 0.1);
   --nitro-accent: #f84565;
+  /* Fill for buttons with white text: #f84565 gives 3.5:1, this gives 4.6:1. */
+  --nitro-accent-fill: #d63854;
+  --nitro-accent-fill-hover: #c22d48;
   --nitro-motion-fast: 160ms;
   --nitro-motion-base: 240ms;
   --nitro-motion-slow: 320ms;
@@ -229,7 +232,7 @@ body {
   margin-top: 1.25rem;
   border: 1px solid rgba(248, 69, 101, 0.5);
   border-radius: 999px;
-  background: var(--nitro-accent);
+  background: var(--nitro-accent-fill);
   padding: 0.7rem 1.2rem;
   color: #fff;
   font-weight: 800;
@@ -469,7 +472,7 @@ body {
   gap: 0.35rem;
   border: 1px solid rgba(255,143,163,0.5);
   border-radius: 0.75rem;
-  background: var(--nitro-accent);
+  background: var(--nitro-accent-fill);
   color: white;
   font-size: 0.78rem;
   font-weight: 800;
@@ -517,7 +520,7 @@ body {
   .movie-card:focus-within .movie-card__info,
   .movie-card:focus-within .movie-card__cta { opacity: 1; transform: translate3d(0, 0, 0); }
   .movie-card__favorite:hover { background: rgba(248,69,101,0.2); transform: scale(1.06); }
-  .movie-card__cta:hover { background: #ff5573; box-shadow: 0 10px 24px rgba(248,69,101,0.28); transform: translateY(-1px); }
+  .movie-card__cta:hover { background: var(--nitro-accent-fill-hover); box-shadow: 0 10px 24px rgba(248,69,101,0.28); transform: translateY(-1px); }
   .catalog-state-panel__button:hover { box-shadow: 0 12px 30px rgba(248,69,101,0.28); transform: translateY(-2px); }
 
   .catalog-search:hover { border-color: rgba(255, 255, 255, 0.2); }

@@ -328,7 +328,7 @@ const MyBookings = () => {
               <Ticket className="w-10 h-10 text-gray-600" />
             </div>
             <p className='text-gray-400 text-xl'>You haven't booked any movies yet.</p>
-            <p className="text-gray-600 text-sm">Browse movies and book your first ticket!</p>
+            <p className="text-gray-400 text-sm">Browse movies and book your first ticket!</p>
           </div>
         </div>
       )}

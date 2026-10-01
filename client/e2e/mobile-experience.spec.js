@@ -237,3 +237,47 @@ test('phone seat picking ends in a sticky checkout bar without a toast per seat'
   await expect(d5).toHaveAttribute('aria-pressed', 'false');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
+
+test('every control on phone pages is a 44px tap target and every aria-controls resolves', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockHomeApis(page);
+  for (const path of ['/', '/movies', '/favorite']) {
+    await page.goto(path);
+    await expect(page.locator('.app-navbar')).toBeVisible();
+    await page.locator('footer').scrollIntoViewIfNeeded();
+    await page.waitForTimeout(400);
+    // Measure settled boxes: cards still rising in are briefly scaled down.
+    // Only running, finite animations, and never longer than 2 s: a paused one
+    // (the Hero's slide countdown off screen) would never finish.
+    await page.evaluate(() => Promise.race([
+      Promise.all(document.getAnimations()
+        .filter((animation) => animation.playState === 'running'
+          && animation.effect?.getTiming().iterations !== Infinity)
+        .map((animation) => animation.finished.catch(() => null))),
+      new Promise((resolve) => { setTimeout(resolve, 2_000); }),
+    ]));
+    const report = await page.evaluate(() => {
+      const small = [];
+      for (const el of document.querySelectorAll('a[href], button, input, [role="button"]')) {
+        if (el.closest('[inert], [aria-hidden="true"]') || el.hasAttribute('data-seat')) continue;
+        const style = getComputedStyle(el);
+        if (style.visibility === 'hidden' || style.display === 'none') continue;
+        // A link inside a sentence is exempt (WCAG 2.5.8 "inline" exception).
+        const sentence = el.parentElement?.textContent.trim() || '';
+        if (style.display === 'inline' && el.parentElement?.tagName === 'P'
+          && sentence.length > el.textContent.trim().length + 10) continue;
+        const box = el.getBoundingClientRect();
+        if (!box.width || !box.height) continue;
+        if (Math.min(box.width, box.height) < 44) {
+          small.push(`${el.tagName} "${(el.getAttribute('aria-label') || el.textContent).trim().slice(0, 30)}" ${Math.round(box.width)}x${Math.round(box.height)}`);
+        }
+      }
+      const dangling = [...document.querySelectorAll('[aria-controls]')]
+        .map((el) => el.getAttribute('aria-controls'))
+        .filter((id) => !document.getElementById(id));
+      return { small, dangling };
+    });
+    expect(report.small, `small targets on ${path}`).toEqual([]);
+    expect(report.dangling, `dangling aria-controls on ${path}`).toEqual([]);
+  }
+});

@@ -137,7 +137,7 @@ const FeatureSection = () => {
         </h2>
         <button
           onClick={handleNavigate}
-          className="group flex min-h-10 items-center gap-2 px-4 py-2 sm:px-6 sm:py-3 text-xs sm:text-sm text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/20 hover:border-primary/40 rounded-full transition-[color,background-color,border-color,scale] duration-300 hover:scale-105 relative overflow-hidden mt-4 sm:mt-20 cursor-pointer tap-press"
+          className="group flex min-h-11 items-center gap-2 px-4 py-2 sm:px-6 sm:py-3 text-xs sm:text-sm text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/20 hover:border-primary/40 rounded-full transition-[color,background-color,border-color,scale] duration-300 hover:scale-105 relative overflow-hidden mt-4 sm:mt-20 cursor-pointer tap-press"
         >
           View All
           <ArrowRightIcon className="group-hover:translate-x-0.5 transition w-4 h-4 sm:w-4.5 sm:h-4.5" />

@@ -929,9 +929,10 @@
     gap: 0.45rem;
   }
 
+  /* 44px tall: the inactive thumbnails are tap targets too. */
   .hero-poster-thumb {
-    width: 4.4rem;
-    height: 2.5rem;
+    width: 4.85rem;
+    height: 2.75rem;
     border-radius: 0.5rem;
   }
 

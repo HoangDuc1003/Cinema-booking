@@ -104,7 +104,9 @@ const Navbar = () => {
         : 'py-5 bg-black/0 border-transparent'
     }`}>
 
-      <Link to='/' className='group transition-transform duration-300 hover:scale-105' >
+      {/* Padding offset by negative margin: a 44px tap area around the 34px
+          logo without making the bar any taller. */}
+      <Link to='/' className='group block -my-[5px] py-[5px] transition-transform duration-300 hover:scale-105' >
         <img src={assets.logo} alt="NitroCine" className='w-36 md:w-50 h-auto' />
         </Link>
 
@@ -182,8 +184,8 @@ const Navbar = () => {
           {
             !user ? (
                   // Wrapped: handing the click event to openSignIn passes it in as sign-in options.
-                  <button type="button" onClick={() => openSignIn()} className='min-h-10 px-5 text-sm sm:text-base sm:min-h-0 sm:px-7 sm:py-2
-                   bg-primary hover:bg-primary-dull transition-[background-color,scale] duration-300 hover:scale-105 rounded-full
+                  <button type="button" onClick={() => openSignIn()} className='min-h-11 -my-0.5 px-5 text-sm sm:text-base sm:min-h-0 sm:my-0 sm:px-7 sm:py-2
+                   bg-primary-dull hover:bg-[#c22d48] transition-[background-color,scale] duration-300 hover:scale-105 rounded-full
                   font-medium cursor-pointer tap-press'>Login</button>
             ):(
               <UserButton>

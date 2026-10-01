@@ -364,6 +364,9 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'home-trailer-sectio
           Trailers
         </h2>
 
+        {/* The stage is always rendered, whatever state it shows, so the
+            thumbnails' aria-controls never points at a missing element. */}
+        <div id={`${sectionId}-player`}>
         {loading ? (
           <div className="flex aspect-video w-full items-center justify-center rounded-2xl border border-white/10 bg-white/5" aria-busy="true">
             <Loading />
@@ -388,7 +391,6 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'home-trailer-sectio
                 key={current.trailer.key}
                 ref={frameRef}
                 onLoad={() => setReadyTrailerKey(current.trailer.key)}
-                id={`${sectionId}-player`}
                 src={embedSrc}
                 title={`${current.movie.title || current.movie.name} ${current.trailer.name || 'trailer'}`}
                 referrerPolicy="strict-origin-when-cross-origin"
@@ -440,6 +442,7 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'home-trailer-sectio
         ) : (
           <TrailerUnavailable movie={current.movie} allUnavailable={allUnavailable || requestState.status === 'error'} />
         )}
+        </div>
 
         {requestState.status === 'error' && (
           <p className="mt-4 text-center text-sm text-amber-200" role="status">
