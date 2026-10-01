@@ -9,10 +9,9 @@ import { Ticket, Clock, MapPin, CreditCard, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import MovieGrid from '../components/MovieGrid'
 import { fetchPopularMovies } from '../services/tmdb'
-import { formatPrice } from '../lib/formatPrice'
+import { CURRENCY as currency, formatPrice } from '../lib/formatPrice'
 
 const MyBookings = () => {
-  const currency = import.meta.env.VITE_CURRENCY || '$'
   const [bookings, setBookings] = useState([])
   const [suggestions, setSuggestions] = useState([])
   const [isLoading, setIsLoading] = useState(true)

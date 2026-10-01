@@ -243,8 +243,8 @@ test('phone seat picking ends in a sticky checkout bar without a toast per seat'
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
-test('every control on phone pages is a 44px tap target and every aria-controls resolves', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
+for (const [width, height] of [[390, 844], [740, 360]]) test(`every control on phone pages is a 44px tap target and every aria-controls resolves at ${width}x${height}`, async ({ page }) => {
+  await page.setViewportSize({ width, height });
   await mockHomeApis(page);
   for (const path of ['/', '/movies', '/favorite']) {
     await page.goto(path);

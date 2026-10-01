@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useCallback, useEffect, useState, useRef } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { assets } from '../assets/assets'
 import { SearchIcon, MenuIcon, XIcon, TicketPlus } from 'lucide-react'
@@ -26,23 +26,20 @@ const Navbar = () => {
   const menuButtonRef = useRef(null);
   const closeButtonRef = useRef(null);
 
-  const closeMenu = ({ restoreFocus = false } = {}) => {
+  const closeMenu = useCallback(({ restoreFocus = false } = {}) => {
     setIsOpen(false);
     if (restoreFocus) menuButtonRef.current?.focus();
-  };
+  }, []);
 
   // Escape closes the phone menu, as it would any overlay.
   useEffect(() => {
     if (!isOpen) return undefined;
     const closeOnEscape = (event) => {
-      if (event.key === 'Escape') {
-        setIsOpen(false);
-        menuButtonRef.current?.focus();
-      }
+      if (event.key === 'Escape') closeMenu({ restoreFocus: true });
     };
     window.addEventListener('keydown', closeOnEscape);
     return () => window.removeEventListener('keydown', closeOnEscape);
-  }, [isOpen]);
+  }, [closeMenu, isOpen]);
 
   // While the full-screen menu is up, the page behind it must not scroll under
   // the finger; focus moves into the menu so keyboard and screen reader users
@@ -187,7 +184,7 @@ const Navbar = () => {
           {
             !user ? (
                   // Wrapped: handing the click event to openSignIn passes it in as sign-in options.
-                  <button type="button" onClick={() => openSignIn()} className='min-h-11 -my-0.5 px-5 text-sm sm:text-base sm:min-h-0 sm:my-0 sm:px-7 sm:py-2
+                  <button type="button" onClick={() => openSignIn()} className='min-h-11 -my-0.5 px-5 text-sm sm:text-base sm:px-7
                    bg-primary-dull hover:bg-[#c22d48] transition-[background-color,scale] duration-300 hover:scale-105 rounded-full
                   font-medium cursor-pointer tap-press'>Login</button>
             ):(

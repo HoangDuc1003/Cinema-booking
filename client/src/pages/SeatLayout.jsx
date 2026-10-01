@@ -9,7 +9,7 @@ import Loading from '../components/Loading'
 import isoTimeFormat from '../lib/isoTimeFormat'
 import { fetchMovieShowtimes } from '../services/tmdb'
 import { getTmdbImageUrl } from '../components/hero/heroImages'
-import { formatPrice } from '../lib/formatPrice'
+import { CURRENCY, formatPrice } from '../lib/formatPrice'
 
 const sameSeatSet = (left, right) => {
   if (left.length !== right.length) return false
@@ -18,6 +18,9 @@ const sameSeatSet = (left, right) => {
 }
 
 const SEAT_TOAST_STYLE = { background: '#1a1a1a', color: '#fff', border: '1px solid #333' }
+
+// Showtimes from different sources name their id differently.
+const showIdOf = (item) => item?.showId ?? item?._id ?? item?.id
 
 const seatPriceFor = (type, showPrice) => (
   type === 'front' ? showPrice * 2 : type === 'middle' ? showPrice * 1.5 : showPrice
@@ -112,7 +115,7 @@ const SeatLayout = () => {
   )
   const showtimesForDate = React.useMemo(() => show?.dateTime?.[date] || [], [show, date])
   const showtimeById = React.useMemo(
-    () => new Map(showtimesForDate.map((item) => [item.showId ?? item._id ?? item.id, item])),
+    () => new Map(showtimesForDate.map((item) => [showIdOf(item), item])),
     [showtimesForDate],
   )
   const hallShowCounts = React.useMemo(() => {
@@ -142,7 +145,7 @@ const SeatLayout = () => {
 
   const fetchOccupiedSeats = React.useCallback(async (showIdParam) => {
     try {
-      const showId = showIdParam ?? selectedTime?.showId ?? selectedTime?._id ?? selectedTime?.id
+      const showId = showIdParam ?? showIdOf(selectedTime)
       if (!showId) return null
 
       const { data } = await axios.get(`/api/booking/seat/${showId}`)
@@ -160,7 +163,7 @@ const SeatLayout = () => {
     if (isBooking) return
     try {
       if (!user) return toast.error('Please login to book tickets')
-      const showId = selectedTime?.showId ?? selectedTime?._id ?? selectedTime?.id
+      const showId = showIdOf(selectedTime)
       if (!showId) return toast.error('No show selected')
 
       const payload = {
@@ -244,7 +247,7 @@ const SeatLayout = () => {
       if (!selectedTime) return
       setPriceLoading(true)
       try {
-        const showId = selectedTime?.showId ?? selectedTime?._id ?? selectedTime?.id
+        const showId = showIdOf(selectedTime)
         const occupied = await fetchOccupiedSeats(showId)
         if (mounted) setOccupiedSeats(Array.isArray(occupied) ? occupied : [])
 
@@ -268,7 +271,7 @@ const SeatLayout = () => {
   useEffect(() => {
     if (!selectedTime) return
 
-    const showId = selectedTime?.showId ?? selectedTime?._id ?? selectedTime?.id
+    const showId = showIdOf(selectedTime)
 
     let mounted = true
     const interval = setInterval(async () => {
@@ -338,11 +341,12 @@ const SeatLayout = () => {
     setSelectedHall(hall)
     setSelectedTime(null)
     setSelectedSeats([])
+    // No show is chosen in the new hall yet, so no seat is known to be taken.
+    setOccupiedSeats([])
     setShowPrice(0)
   }
 
   const handleTimeSelect = (time) => {
-    const showIdOf = (item) => item?.showId ?? item?._id ?? item?.id
     if (showIdOf(time) !== showIdOf(selectedTime)) {
       // Seats belong to one show. Carried over, they could book a seat that is
       // taken at the new time, priced at the old one.
@@ -739,7 +743,7 @@ const SeatLayout = () => {
               <div className="mb-4 sm:mb-6 mt-1 sm:mt-2">
                 <div className="text-center mb-3 sm:mb-4">
                   <span className="text-yellow-500 text-sm sm:text-base font-bold px-3 py-1.5 sm:px-4 sm:py-2 bg-yellow-500/10 rounded-full border border-yellow-500/20">
-                    Front Premium • {showPrice > 0 ? formatPrice(seatPriceFor('front', showPrice)) : '$...'}
+                    Front Premium • {showPrice > 0 ? formatPrice(seatPriceFor('front', showPrice)) : `${CURRENCY}...`}
                   </span>
                 </div>
                 {seatRows.filter(row => row.type === 'front').map(renderSeatRow)}
@@ -749,7 +753,7 @@ const SeatLayout = () => {
               <div className="mb-4 sm:mb-6">
                 <div className="text-center mb-3 sm:mb-4">
                   <span className="text-primary text-sm sm:text-base font-bold px-3 py-1.5 sm:px-4 sm:py-2 bg-primary/10 rounded-full border border-primary/20">
-                    Middle VIP • {showPrice > 0 ? formatPrice(seatPriceFor('middle', showPrice)) : '$...'}
+                    Middle VIP • {showPrice > 0 ? formatPrice(seatPriceFor('middle', showPrice)) : `${CURRENCY}...`}
                   </span>
                 </div>
                 {seatRows.filter(row => row.type === 'middle').map(renderSeatRow)}
@@ -759,7 +763,7 @@ const SeatLayout = () => {
               <div className="mb-4 sm:mb-6">
                 <div className="text-center mb-3 sm:mb-4">
                   <span className="text-green-500 text-sm sm:text-base font-bold px-3 py-1.5 sm:px-4 sm:py-2 bg-green-500/10 rounded-full border border-green-500/20">
-                    Back Standard • {showPrice > 0 ? formatPrice(seatPriceFor('back', showPrice)) : '$...'}
+                    Back Standard • {showPrice > 0 ? formatPrice(seatPriceFor('back', showPrice)) : `${CURRENCY}...`}
                   </span>
                 </div>
                 {seatRows.filter(row => row.type === 'back').map(renderSeatRow)}
@@ -843,7 +847,8 @@ const SeatLayout = () => {
               </p>
               <p className="truncate text-sm font-semibold text-green-400">{selectedSeats.join(', ')}</p>
             </div>
-            <p className="shrink-0 text-xl font-bold text-white" aria-label={`Total ${formatPrice(calculateTotal)}`}>{formatPrice(calculateTotal)}</p>
+            {/* Screen readers do not announce aria-label on a <p>; hidden text does. */}
+            <p className="shrink-0 text-xl font-bold text-white"><span className="sr-only">Total </span>{formatPrice(calculateTotal)}</p>
             <button
               type="button"
               disabled={!selectedTime || isBooking}

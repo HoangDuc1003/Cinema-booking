@@ -176,8 +176,13 @@ test('prices are shown to the cent, from one pricing rule', () => {
   const seat = read('pages/SeatLayout.jsx');
 
   const bookings = read('pages/MyBookings.jsx');
-  assert.match(seat, /import \{ formatPrice \} from '\.\.\/lib\/formatPrice'/);
-  assert.match(bookings, /import \{ formatPrice \} from '\.\.\/lib\/formatPrice'/);
+  const importsFormatter = /import \{[^}]*\bformatPrice\b[^}]*\} from '\.\.\/lib\/formatPrice'/;
+  assert.match(seat, importsFormatter);
+  assert.match(bookings, importsFormatter);
+  // One currency for every page, from VITE_CURRENCY.
+  assert.match(read('lib/formatPrice.js'), /export const CURRENCY = import\.meta\.env\?\.VITE_CURRENCY \|\| '\$';/);
+  assert.doesNotMatch(seat, /'\$\.\.\.'/);
+  assert.doesNotMatch(bookings, /import\.meta\.env\.VITE_CURRENCY/);
   assert.doesNotMatch(bookings, /\{currency\}\{/);
   // The total sums the same per-seat rule the labels use.
   assert.match(seat, /sum \+ seatPriceFor\(rowConfig\.type, showPrice\)/);
@@ -241,4 +246,31 @@ test('loading states animate on the compositor only', () => {
   }
   assert.match(ruleBody(css, '.catalog-card-skeleton__art::after'), /animation: catalog-shimmer/);
   assert.doesNotMatch(ruleBody(css, '.trailer-modal__pulse'), /backdrop-filter/);
+});
+
+test('changing hall forgets the previous show\'s taken seats too', () => {
+  const seat = read('pages/SeatLayout.jsx');
+  const start = seat.indexOf('const handleHallSelect = (hall) => {');
+  const handler = seat.slice(start, seat.indexOf('\n  }', start));
+
+  assert.match(handler, /setSelectedTime\(null\)/);
+  assert.match(handler, /setOccupiedSeats\(\[\]\)/);
+  // One id rule for showtimes, used everywhere.
+  assert.match(seat, /^const showIdOf = \(item\) => item\?\.showId \?\? item\?\._id \?\? item\?\.id$/m);
+  assert.doesNotMatch(seat, /selectedTime\?\.showId \?\? selectedTime\?\._id/);
+});
+
+test('the checkout total is announced with its label', () => {
+  const seat = read('pages/SeatLayout.jsx');
+
+  assert.match(seat, /<span className="sr-only">Total <\/span>\{formatPrice\(calculateTotal\)\}/);
+  assert.doesNotMatch(seat, /<p[^>]*aria-label=\{`Total/);
+});
+
+test('Hero actions stay 44px in every phone orientation', () => {
+  const css = read('components/hero/hero.css');
+
+  for (const match of css.matchAll(/\.hero-action \{[^}]*min-height: ([\d.]+)rem/g)) {
+    assert.ok(Number(match[1]) >= 2.75, `.hero-action min-height ${match[1]}rem`);
+  }
 });
