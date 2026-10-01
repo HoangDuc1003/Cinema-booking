@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react"
+import { createContext, useContext, useEffect, useMemo, useRef, useState, useCallback } from "react"
 import { useUser, useAuth } from "@clerk/react";
 import { useLocation, useNavigate } from "react-router-dom";
 import toast from 'react-hot-toast'
@@ -7,13 +7,30 @@ import { apiClient as api } from '../lib/apiClient.js';
 // eslint-disable-next-line react-refresh/only-export-components
 export const AppContext = createContext()
 
+// How long a request waits for Clerk to finish loading before it goes out
+// without a token. Clerk's getToken() waits for a "ready" status that never
+// comes when its script is blocked or fails, which used to hang every API call
+// (the seat map included) for good. Nobody can be signed in before Clerk has
+// loaded, so those early requests are anonymous either way.
+const CLERK_LOAD_GRACE_MS = 3000
+
+// Resolves to the token, or to null once `ms` has passed. A late rejection is
+// swallowed so it can never surface as an unhandled one.
+const tokenWithin = (tokenRequest, ms) => {
+  let timer
+  const timeout = new Promise((resolve) => { timer = setTimeout(() => resolve(null), ms) })
+  return Promise.race([tokenRequest.catch(() => null), timeout]).finally(() => clearTimeout(timer))
+}
+
 export const AppProvider = ({ children }) => {
   // The admin answer is kept with the user it was checked for, so a pending or
   // stale check is never mistaken for "not an admin" by the route guard below.
   const [adminCheck, setAdminCheck] = useState({ userId: null, isAdmin: false })
   
   const { user } = useUser()
-  const { getToken } = useAuth()
+  const { getToken, isLoaded: authLoaded } = useAuth()
+  const authLoadedRef = useRef(authLoaded)
+  useEffect(() => { authLoadedRef.current = authLoaded }, [authLoaded])
   const location = useLocation()
   const navigate = useNavigate()
 
@@ -22,7 +39,11 @@ export const AppProvider = ({ children }) => {
     const requestInterceptor = api.interceptors.request.use(
       async (config) => {
         try {
-          const token = await getToken();
+          // Once Clerk has loaded, wait for the token as long as it takes: a
+          // signed-in request on a slow network must not go out without one.
+          const token = authLoadedRef.current
+            ? await getToken()
+            : await tokenWithin(getToken(), CLERK_LOAD_GRACE_MS);
           if (token) {
             config.headers['Authorization'] = `Bearer ${token}`;
           }

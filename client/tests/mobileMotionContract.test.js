@@ -133,3 +133,21 @@ test('the Hero pauses its loops off screen and drops frosted glass on phones', (
   assert.match(phone, /\.hero-action--trailer,\s*\.hero-control \{[^}]*backdrop-filter: none;/);
   assert.match(phone, /\.hero-transition-flare \{[^}]*filter: none;/);
 });
+
+test('the checkout total is rounded to cents, the way the server charges it', () => {
+  const seat = read('pages/SeatLayout.jsx');
+  const server = readFileSync(new URL('../../server/services/seatService.js', import.meta.url), 'utf8');
+
+  assert.match(server, /return Math\.round\(total \* 100\) \/ 100;/);
+  assert.match(seat, /return Math\.round\(total \* 100\) \/ 100;/);
+  assert.doesNotMatch(seat, /return Math\.round\(total\);/);
+});
+
+test('API calls wait for Clerk only for a bounded time while it is still loading', () => {
+  const context = read('context/AppContext.jsx');
+
+  assert.match(context, /const CLERK_LOAD_GRACE_MS = 3000/);
+  assert.match(context, /Promise\.race\(\[tokenRequest\.catch\(\(\) => null\), timeout\]\)\.finally\(\(\) => clearTimeout\(timer\)\)/);
+  // A loaded Clerk still gets the full wait, so signed-in requests keep their token.
+  assert.match(context, /authLoadedRef\.current\s*\?\s*await getToken\(\)\s*:\s*await tokenWithin\(getToken\(\), CLERK_LOAD_GRACE_MS\)/);
+});

@@ -231,5 +231,6 @@ test('Now Showing failure leaves Hero healthy and uses Hero only as trailer fall
   await expect(page.getByRole('alert')).toContainText('Current releases are temporarily unavailable.');
   await expect(section.locator('iframe')).toHaveCount(1);
   expect(evidence.trailerBodies).toEqual([{ movieIds: heroMovies.map((movie) => movie.id) }]);
-  expect(evidence.requests.filter((url) => url.includes('/home-now-showing?limit=10'))).toHaveLength(1);
+  // A 503 gets exactly one bounded client retry (see services/tmdb.js), never a storm.
+  expect(evidence.requests.filter((url) => url.includes('/home-now-showing?limit=10'))).toHaveLength(2);
 });

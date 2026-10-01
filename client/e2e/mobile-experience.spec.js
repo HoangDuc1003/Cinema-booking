@@ -159,3 +159,57 @@ test('movie details puts the booking button on the first phone screen', async ({
   expect(box.height).toBeGreaterThanOrEqual(44);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
+
+test('phone seat picking ends in a sticky checkout bar without a toast per seat', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockHomeApis(page);
+  const movie = movies[0];
+  const showDate = '2026-07-27';
+  await page.route(`**/api/show/${movie.id}`, (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      success: true,
+      movie,
+      dateTime: {
+        [showDate]: [{ showId: 'show-1', time: `${showDate}T03:00:00.000Z`, price: 5, hall: 'Hall A', isVirtual: false }],
+      },
+    }),
+  }));
+  await page.route('**/api/booking/seat/**', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, occupiedSeats: ['D9'] }),
+  }));
+
+  await page.goto(`/movies/${movie.id}/${showDate}`);
+  await page.getByRole('button', { name: /Hall A/ }).click();
+  await page.getByRole('button', { name: /\d{1,2}:\d{2} [AP]M \$5$/ }).click();
+
+  // The seat map loads even when Clerk never does (the token wait is bounded).
+  const d5 = page.locator('[data-seat="D5"]');
+  await expect(d5).toHaveAttribute('aria-label', 'Seat D5, $7.5', { timeout: 10_000 });
+  await expect(page.locator('[data-seat="D9"]')).toBeDisabled();
+  await expect(page.locator('[data-seat="D9"]')).toHaveAttribute('aria-label', 'Seat D9, taken');
+
+  await d5.click();
+  await page.locator('[data-seat="D6"]').click();
+  await expect(d5).toHaveAttribute('aria-pressed', 'true');
+
+  const bar = page.locator('.seat-checkout-bar');
+  await expect(bar).toBeVisible();
+  await expect(bar).toContainText('D5, D6');
+  await expect(bar).toContainText('$15');
+  const checkout = bar.getByRole('button', { name: /Checkout/ });
+  // Measure where the bar settles, not a frame of its slide-up.
+  await bar.evaluate((el) => Promise.all(el.getAnimations().map((animation) => animation.finished)));
+  const box = await checkout.boundingBox();
+  expect(box.y + box.height).toBeLessThanOrEqual(844);
+  expect(box.height).toBeGreaterThanOrEqual(44);
+  await expect(page.getByText(/Seat D5 selected|Seat D6 selected/)).toHaveCount(0);
+
+  await page.locator('[data-seat="D6"]').click();
+  await expect(bar).toContainText('$7.5');
+  await expect(bar).not.toContainText('D6');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});

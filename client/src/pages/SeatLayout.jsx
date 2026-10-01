@@ -416,7 +416,9 @@ const SeatLayout = () => {
         else if (rowConfig.type === 'back') total += showPrice;
       }
     })
-    return Math.round(total);
+    // Cents, as the server charges (seatService.calculateBookingAmount): one
+    // $7.50 seat used to show as $8 here and then cost $7.50 at Stripe.
+    return Math.round(total * 100) / 100;
   }, [selectedSeats, rowConfigByLetter, showPrice])
 
   if (isLoading) return <Loading />

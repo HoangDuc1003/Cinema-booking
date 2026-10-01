@@ -51,7 +51,9 @@ test('production 503 with no server cache shows retryable error instead of mock 
   await installHomeSupportRoutes(page);
   await page.route('**/api/show/tmdb/home-now-showing**', (route) => {
     attempts += 1;
-    if (attempts < 2) {
+    // The first load is one request plus its single automatic 503 retry; only
+    // the user's Retry gets through.
+    if (attempts < 3) {
       return route.fulfill({
         status: 503,
         contentType: 'application/json',
@@ -73,13 +75,13 @@ test('production 503 with no server cache shows retryable error instead of mock 
 
   await section.getByRole('button', { name: 'Retry' }).click();
   await expect(section.getByRole('link', { name: 'View details for Server Movie 1', exact: true })).toBeVisible();
-  expect(attempts).toBe(2);
+  expect(attempts).toBe(3);
 });
 
 test('production 503 with a last-known-good cache renders stale server data only', async ({ page }) => {
   await page.addInitScript((cachedMovies) => {
-    localStorage.setItem('nitrocine:home-now-showing-cache-v2', JSON.stringify({
-      schemaVersion: 2,
+    localStorage.setItem('nitrocine:home-now-showing-cache-v3', JSON.stringify({
+      schemaVersion: 3,
       source: 'server',
       savedAt: new Date().toISOString(),
       meta: { version: 7, slot: 3 },
