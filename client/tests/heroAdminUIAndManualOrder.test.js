@@ -8,7 +8,7 @@ test('Hero admin is limited to selecting and ordering exactly five posters', asy
   const source = await read('../src/pages/admin/HeroSettings.jsx');
 
   assert.match(source, /const MAX_HERO_MOVIES = 5/);
-  assert.match(source, /Daily auto/);
+  assert.match(source, /Auto 12h/);
   assert.match(source, /Manual five/);
   assert.match(source, /Randomize five/);
   assert.match(source, /Choose exactly \$\{MAX_HERO_MOVIES\} posters for manual mode/);

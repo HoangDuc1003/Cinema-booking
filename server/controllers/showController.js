@@ -22,18 +22,13 @@ import { requestIdFor } from '../middleware/requestContext.js';
 import { LockBusyError } from '../services/lockService.js';
 import { isScheduledMovie } from '../services/scheduleMovieService.js';
 import {
-    DEFAULT_TITLE_LANGUAGE,
-    languageForCountry,
-    localizeMovieText,
-    resolveViewerCountry,
-} from '../services/movieTitleService.js';
-import {
     getBookableNowShowingMovies,
     ensureScheduledShowtimes,
     isGeneratedScheduleKey,
     isShowtimeGenerationEnabled,
     SCHEDULE_DAYS,
     SHOWS_PER_DAY,
+    TMDB_LANGUAGE,
     TMDB_REGION,
     syncNowPlayingShows,
 } from '../services/nowPlayingShowSyncService.js';
@@ -100,34 +95,27 @@ export const getTmdbPopular = async (req, res) => {
         return res.status(502).json({ success: false, message: 'Unable to load popular movies.' });
     }
 };
-// Titles and synopses follow the viewer country, so the same line-up has one ETag per language
-// and shared caches keep one copy per country.
-const TITLE_VARY = 'Origin, X-Vercel-IP-Country';
-const etagForLanguage = (etag, language) => (
-    language === DEFAULT_TITLE_LANGUAGE ? etag : etag.replace(/"$/, `.${language}"`)
-);
+// Movie text is English for every viewer, so one cached copy serves everyone.
+const HOME_VARY = 'Origin';
 
 export const createGetHomeHeroHandler = ({
     loadHero = getPublicHomeHero,
     makeEtag = createHeroEtag,
     etagMatches = matchesHeroEtag,
-    localizeText = localizeMovieText,
 } = {}) => async (req, res) => {
     try {
         const payload = await loadHero();
-        const titleLanguage = languageForCountry(resolveViewerCountry(req));
-        const etag = etagForLanguage(makeEtag(payload), titleLanguage);
+        const etag = makeEtag(payload);
         res.set('ETag', etag);
         // One line-up for everyone, so the CDN may hold it. Stale serving is kept
-        // short so the midnight rotation is not masked for a whole day.
+        // short so the 12-hour rotation is not masked for long.
         res.set('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=600');
-        res.set('Vary', TITLE_VARY);
-        res.set('Content-Language', titleLanguage);
+        res.set('Vary', HOME_VARY);
+        res.set('Content-Language', TMDB_LANGUAGE);
         setCacheHeader(res, payload.cache);
         if (etagMatches(req.get('if-none-match'), etag)) {
             return res.status(304).end();
         }
-        const movies = await localizeText(payload.movies, titleLanguage);
         return res.json({
             success: true,
             version: payload.version,
@@ -137,9 +125,9 @@ export const createGetHomeHeroHandler = ({
             nextRefreshAt: payload.nextRefreshAt,
             timezone: payload.timezone,
             settings: payload.settings,
-            movies,
+            movies: payload.movies,
             rotation: payload.rotation,
-            meta: { ...payload.meta, titleLanguage },
+            meta: payload.meta,
             cache: payload.cache,
         });
     } catch (error) {
@@ -152,7 +140,6 @@ export const createGetHomeNowShowingHandler = ({
     loadHome = getPublicHomeNowShowing,
     makeEtag = createHomeNowShowingEtag,
     etagMatches = matchesHeroEtag,
-    localizeText = localizeMovieText,
 } = {}) => async (req, res) => {
     const requestId = requestIdFor(req);
     const startedAt = performance.now();
@@ -189,14 +176,13 @@ export const createGetHomeNowShowingHandler = ({
             });
         }
 
-        const titleLanguage = languageForCountry(resolveViewerCountry(req));
-        const etag = etagForLanguage(makeEtag(value), titleLanguage);
+        const etag = makeEtag(value);
         const catalog = value.meta?.catalog || {};
         res.set('ETag', etag);
         res.set('Cache-Control', HOME_BROWSER_CACHE_CONTROL);
         res.set('Vercel-CDN-Cache-Control', HOME_CDN_CACHE_CONTROL);
-        res.set('Vary', TITLE_VARY);
-        res.set('Content-Language', titleLanguage);
+        res.set('Vary', HOME_VARY);
+        res.set('Content-Language', TMDB_LANGUAGE);
         setCacheHeader(res, result.cache || 'bypass');
         res.set('X-Data-Source', value.meta?.source || 'unknown');
         res.set('X-Catalog-Version', String(catalog.version ?? ''));
@@ -228,8 +214,7 @@ export const createGetHomeNowShowingHandler = ({
             cache: result.cache || 'bypass',
             status: 200,
         }));
-        const results = await localizeText(value.results, titleLanguage);
-        return res.json({ success: true, data: { ...value, results, meta: { ...value.meta, titleLanguage } } });
+        return res.json({ success: true, data: value });
     } catch (error) {
         const timing = { ...(req.nitroTiming || {}), totalMs: performance.now() - startedAt };
         res.set('Cache-Control', 'private, no-store');
@@ -336,7 +321,7 @@ export const getTmdbNowPlaying = async (req, res) => {
             redisTtl.movies,
             () => withMovieFallback(
                 'getTmdbNowPlaying',
-                () => fetchTmdbJson('/movie/now_playing', { region: TMDB_REGION, language: 'vi-VN', page }),
+                () => fetchTmdbJson('/movie/now_playing', { region: TMDB_REGION, language: TMDB_LANGUAGE, page }),
             ),
         );
     } catch (error) {

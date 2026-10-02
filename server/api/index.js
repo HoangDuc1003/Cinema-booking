@@ -88,7 +88,7 @@ app.get('/api/health/ready', async (req, res) => {
             clerk: clerkConfig,
             tmdb: { configured: Boolean(process.env.TMDB_API_KEY) },
             clientUrl,
-            hero:{ mode: 'daily-poster-rotation', timezone: 'Asia/Ho_Chi_Minh' },
+            hero:{ mode: 'poster-rotation', rotationHours: 12, timezone: 'Asia/Ho_Chi_Minh' },
         },
     });
 });

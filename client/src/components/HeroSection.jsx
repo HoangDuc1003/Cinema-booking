@@ -28,7 +28,14 @@ const HERO_TRAILER_DWELL_MS = 12_000;
 // Slack for a short trailer to finish on its own before the clock steps in, so
 // a stream that stalls near the end still cannot freeze the slide.
 const HERO_TRAILER_END_GRACE_MS = 2_000;
-const VIETNAM_TIME_ZONE = 'Asia/Ho_Chi_Minh';
+// The server turns the line-up over every 12 hours, at 00:00 and 12:00 in
+// Vietnam (which has no daylight saving time), and says when in nextRefreshAt.
+const HERO_ROTATION_MS = 12 * 60 * 60 * 1_000;
+const VIETNAM_UTC_OFFSET_MS = 7 * 60 * 60 * 1_000;
+// Just after a turnover the CDN may still serve the old line-up for up to its
+// stale window; until the new one arrives, ask again every minute.
+const HERO_STALE_WINDOW_MS = 15 * 60 * 1_000;
+const HERO_STALE_RETRY_MS = 60_000;
 
 const getRailThumbnailUrls = (movie) => buildHeroImageCandidates([
   movie.heroImageUrl,
@@ -43,19 +50,15 @@ const isSameMovieOrder = (left, right) => (
   ))
 );
 
-const getVietnamDateKey = (now = new Date()) => {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: VIETNAM_TIME_ZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(now).reduce((result, part) => ({ ...result, [part.type]: part.value }), {});
-  return `${parts.year}-${parts.month}-${parts.day}`;
-};
-
-const millisecondsUntilNextVietnamDay = (now = new Date()) => {
-  const nextMidnight = Date.parse(`${getVietnamDateKey(now)}T17:00:01.000Z`);
-  return Math.max(1_000, nextMidnight - now.getTime());
+const millisecondsUntilHeroRefresh = (nextRefreshAt, now = Date.now()) => {
+  const announced = Date.parse(nextRefreshAt || '');
+  if (Number.isFinite(announced)) {
+    if (announced > now) return announced - now + 1_000;
+    if (now - announced < HERO_STALE_WINDOW_MS) return HERO_STALE_RETRY_MS;
+  }
+  const nextSlot = ((Math.floor((now + VIETNAM_UTC_OFFSET_MS) / HERO_ROTATION_MS) + 1) * HERO_ROTATION_MS)
+    - VIETNAM_UTC_OFFSET_MS;
+  return nextSlot - now + 1_000;
 };
 
 const HeroSection = ({ onTrailerRequest }) => {
@@ -259,26 +262,27 @@ const HeroSection = ({ onTrailerRequest }) => {
     setFailedTrailers((previous) => new Set(previous).add(src));
   }, []);
 
+  const nextRefreshAt = catalogMeta?.nextRefreshAt || '';
   useEffect(() => {
     let timer;
-    const refreshAtVietnamMidnight = () => {
+    const refreshAtNextRotation = () => {
       window.clearTimeout(timer);
       timer = window.setTimeout(() => {
         retryHomeData();
-        refreshAtVietnamMidnight();
-      }, millisecondsUntilNextVietnamDay());
+        refreshAtNextRotation();
+      }, millisecondsUntilHeroRefresh(nextRefreshAt));
     };
     const refreshWhenVisible = () => {
       if (document.visibilityState === 'visible') retryHomeData();
     };
 
-    refreshAtVietnamMidnight();
+    refreshAtNextRotation();
     document.addEventListener('visibilitychange', refreshWhenVisible);
     return () => {
       window.clearTimeout(timer);
       document.removeEventListener('visibilitychange', refreshWhenVisible);
     };
-  }, [retryHomeData]);
+  }, [nextRefreshAt, retryHomeData]);
 
   useEffect(() => () => clearTransitionTimers(), [clearTransitionTimers]);
 

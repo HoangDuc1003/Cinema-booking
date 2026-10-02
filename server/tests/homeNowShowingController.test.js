@@ -55,7 +55,7 @@ test('home now-showing returns stable ETag, CDN stale policy, provenance, and ti
     assert.equal(first.headers['X-Catalog-Slot'], '2');
     assert.equal(first.headers['Cache-Control'], 'public, max-age=60, stale-if-error=86400');
     assert.equal(first.headers['Vercel-CDN-Cache-Control'], 's-maxage=300, stale-while-revalidate=43200, stale-if-error=86400');
-    assert.equal(first.headers.Vary, 'Origin, X-Vercel-IP-Country');
+    assert.equal(first.headers.Vary, 'Origin');
     assert.match(first.headers['Server-Timing'], /db;dur=8\.00/);
     assert.match(first.headers['Server-Timing'], /indexes;dur=0\.00/);
 
@@ -114,16 +114,11 @@ test('TMDB Home failure returns a controlled 503 without exposing internal detai
     assert.doesNotMatch(JSON.stringify(response.body), /must-not-escape|Bearer/i);
 });
 
-test('title and synopsis follow the viewer country; genres stay English and the ETag differs per language', async () => {
+test('every country gets the same English titles, synopses and ETag', async () => {
     const value = createValue(['100', '101']);
     value.results[0].overview = 'An English synopsis.';
-    const calls = [];
     const handler = createGetHomeNowShowingHandler({
         loadHome: async () => ({ value, cache: 'miss' }),
-        localizeText: async (movies, language) => {
-            calls.push(language);
-            return language === 'vi-VN' ? movies.map((movie) => ({ ...movie, title: `Phim ${movie.id}`, overview: `Mô tả ${movie.id}` })) : movies;
-        },
     });
     const headerGet = (country) => (name) => (name.toLowerCase() === 'x-vercel-ip-country' ? country : undefined);
 
@@ -132,16 +127,11 @@ test('title and synopsis follow the viewer country; genres stay English and the 
     const unitedStates = createResponse();
     await handler({ query: {}, get: headerGet('US') }, unitedStates);
 
-    assert.deepEqual(calls, ['vi-VN', 'en-US']);
-    assert.equal(vietnam.body.data.results[0].title, 'Phim 100');
-    assert.equal(vietnam.body.data.results[0].overview, 'Mô tả 100');
-    assert.equal(unitedStates.body.data.results[0].overview, 'An English synopsis.');
-    assert.equal(vietnam.body.data.meta.titleLanguage, 'vi-VN');
-    assert.equal(vietnam.headers['Content-Language'], 'vi-VN');
-    assert.equal(unitedStates.body.data.results[0].title, 'Movie 100');
-    assert.notEqual(vietnam.headers.ETag, unitedStates.headers.ETag);
-    // The shared cache must not hand the Vietnamese copy to other countries.
-    assert.equal(vietnam.headers.Vary, 'Origin, X-Vercel-IP-Country');
-    // The cached server value is never mutated in place.
-    assert.equal(value.results[0].title, 'Movie 100');
+    for (const res of [vietnam, unitedStates]) {
+        assert.equal(res.body.data.results[0].title, 'Movie 100');
+        assert.equal(res.body.data.results[0].overview, 'An English synopsis.');
+        assert.equal(res.headers['Content-Language'], 'en-US');
+        assert.equal(res.headers.Vary, 'Origin');
+    }
+    assert.equal(vietnam.headers.ETag, unitedStates.headers.ETag);
 });

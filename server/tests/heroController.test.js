@@ -27,22 +27,23 @@ const createResponse = () => ({
 });
 
 const payload = {
-    version: 'auto:2026-07-29:initial',
-    batchId: 'poster-2026-07-29',
-    batchKey: '2026-07-29',
+    version: 'auto:2026-07-29T00:00:initial',
+    batchId: 'poster-2026-07-29T00:00',
+    batchKey: '2026-07-29T00:00',
     generatedAt: '2026-07-29T00:00:00.000Z',
-    nextRefreshAt: '2026-07-29T17:00:00.000Z',
+    nextRefreshAt: '2026-07-29T05:00:00.000Z',
     timezone: 'Asia/Ho_Chi_Minh',
     dateKey: '2026-07-29',
     settings: { mode: 'auto', configuredMode: 'auto', effectiveMode: 'auto', movieIds: [] },
     movies: Array.from({ length: 5 }, (_, index) => ({ id: String(index + 1) })),
-    rotation: { type: 'daily-poster', dateKey: '2026-07-29', seed: 'hero:2026-07-29:default' },
+    rotation: { type: 'poster-rotation', key: '2026-07-29T00:00', hours: 12, dateKey: '2026-07-29', seed: 'hero:2026-07-29T00:00:default' },
     meta: {
         configuredMode: 'auto',
         effectiveMode: 'auto',
-        source: 'daily-poster-rotation',
+        source: 'poster-rotation',
         dateKey: '2026-07-29',
-        seed: 'hero:2026-07-29:default',
+        rotationKey: '2026-07-29T00:00',
+        seed: 'hero:2026-07-29T00:00:default',
     },
     cache: 'hit',
 };
@@ -60,29 +61,30 @@ test('Home Hero controller returns cache headers, stable metadata, meta identity
     assert.equal(res.headers.ETag, '"hero-controller-test"');
     assert.equal(res.headers['X-Cache'], 'hit');
     assert.match(res.headers['Cache-Control'], /stale-while-revalidate/);
-    assert.equal(res.headers.Vary, 'Origin, X-Vercel-IP-Country');
+    assert.equal(res.headers.Vary, 'Origin');
     assert.equal(res.body.success, true);
     assert.deepEqual(res.body.movies, payload.movies);
     assert.equal(res.body.nextRefreshAt, payload.nextRefreshAt);
-    assert.deepEqual(res.body.meta, { ...payload.meta, titleLanguage: 'en-US' });
-    assert.equal(res.body.meta.source, 'daily-poster-rotation');
+    assert.deepEqual(res.body.meta, payload.meta);
+    assert.equal(res.body.meta.source, 'poster-rotation');
 });
 
-test('Home Hero controller translates title and synopsis for the viewer country, keeps genres, and keys the ETag by language', async () => {
+test('Home Hero controller serves the same English text and ETag to every country', async () => {
     const handler = createGetHomeHeroHandler({
         loadHero: async () => payload,
         makeEtag: () => '"hero-controller-test"',
-        localizeText: async (movies, language) => movies.map((movie) => ({ ...movie, title: `${language}:${movie.id}`, overview: `${language} synopsis` })),
     });
-    const res = createResponse();
-    await handler({ get: (name) => (name.toLowerCase() === 'x-vercel-ip-country' ? 'jp' : undefined) }, res);
+    const countryGet = (country) => (name) => (name.toLowerCase() === 'x-vercel-ip-country' ? country : undefined);
+    const vietnam = createResponse();
+    await handler({ get: countryGet('VN') }, vietnam);
+    const japan = createResponse();
+    await handler({ get: countryGet('JP') }, japan);
 
-    assert.equal(res.headers.ETag, '"hero-controller-test.ja-JP"');
-    assert.equal(res.headers['Content-Language'], 'ja-JP');
-    assert.equal(res.body.meta.titleLanguage, 'ja-JP');
-    assert.equal(res.body.movies[0].title, `ja-JP:${payload.movies[0].id}`);
-    assert.equal(res.body.movies[0].overview, 'ja-JP synopsis');
-    assert.deepEqual(res.body.movies[0].genres, payload.movies[0].genres);
+    for (const res of [vietnam, japan]) {
+        assert.equal(res.headers.ETag, '"hero-controller-test"');
+        assert.equal(res.headers['Content-Language'], 'en-US');
+        assert.deepEqual(res.body.movies, payload.movies);
+    }
 });
 
 test('Home Hero controller returns 304 without a response body for a matching ETag', async () => {

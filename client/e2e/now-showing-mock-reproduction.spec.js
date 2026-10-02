@@ -80,8 +80,8 @@ test('production 503 with no server cache shows retryable error instead of mock 
 
 test('production 503 with a last-known-good cache renders stale server data only', async ({ page }) => {
   await page.addInitScript((cachedMovies) => {
-    localStorage.setItem('nitrocine:home-now-showing-cache-v3', JSON.stringify({
-      schemaVersion: 3,
+    localStorage.setItem('nitrocine:home-now-showing-cache-v4', JSON.stringify({
+      schemaVersion: 4,
       source: 'server',
       savedAt: new Date().toISOString(),
       meta: { version: 7, slot: 3 },

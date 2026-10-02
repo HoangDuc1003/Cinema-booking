@@ -1,6 +1,6 @@
-// v3: title and synopsis follow the viewer country; the rest is English.
-export const HOME_NOW_SHOWING_CACHE_KEY = 'nitrocine:home-now-showing-cache-v3';
-export const HOME_NOW_SHOWING_CACHE_SCHEMA_VERSION = 3;
+// v4: every title and synopsis is English, so no translated copy is reused.
+export const HOME_NOW_SHOWING_CACHE_KEY = 'nitrocine:home-now-showing-cache-v4';
+export const HOME_NOW_SHOWING_CACHE_SCHEMA_VERSION = 4;
 export const HOME_NOW_SHOWING_FRESH_TTL_MS = 5 * 60 * 1000;
 export const HOME_NOW_SHOWING_MAX_STALE_MS = 48 * 60 * 60 * 1000;
 

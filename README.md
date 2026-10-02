@@ -24,7 +24,7 @@
 ### For Users 👤
 
 - **Secure Authentication:** Easy login and registration using Clerk.
-- **Discover Movies:** A home banner that changes daily (two hot new releases and three classics), Now Showing, search, and upcoming releases.
+- **Discover Movies:** A home banner that shows five new movies every 12 hours, working through the whole catalog, Now Showing, search, and upcoming releases.
 - **Watch Trailers:** Play trailers from the home page or from a preview on each movie page.
 - **Showtimes:** Pick a date from the next seven days, with three showtimes a day.
 - **Interactive Seat Selection:** Pick your favorite seats with a real-time availability map.
@@ -37,7 +37,7 @@
 - **Analytics Dashboard:** View total revenue, bookings, and active shows.
 - **Showtime Management:** Add shows for a movie and sync showtimes on demand.
 - **Booking Overview:** Monitor all customer bookings in one place.
-- **Hero Settings:** Let the home banner rotate daily, or pick five movies by hand.
+- **Hero Settings:** Let the home banner rotate every 12 hours, or pick five movies by hand.
 
 ---
 
@@ -164,7 +164,7 @@ Cinema-booking/
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET`  | `/api/show/hero` | Gets today's five home banner movies. |
+| `GET`  | `/api/show/hero` | Gets the current five home banner movies (they change at 00:00 and 12:00 Vietnam time). |
 | `GET`  | `/api/show/all` | Gets the movies that have bookable shows. |
 | `GET`  | `/api/show/:movieId` | Gets movie details and seven days of showtimes. |
 | `GET`  | `/api/show/cinemas` | Gets the cached cinema/hall list. |

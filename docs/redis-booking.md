@@ -1,56 +1,56 @@
 # Redis and booking concurrency
 
-## Mục tiêu và source of truth
+## Goals and source of truth
 
-MongoDB là source of truth cho booking. Unique index `SeatReservation(show, seat)` bảo đảm chỉ có một reservation hoạt động cho mỗi ghế của một suất chiếu. Redis giảm tải read, cung cấp seat-hold TTL, giảm tranh chấp bằng distributed lock và chống xử lý đồng thời cùng một Stripe event; hệ thống vẫn dựa vào MongoDB invariant nếu Redis tạm mất.
+MongoDB is the source of truth for bookings. The unique index `SeatReservation(show, seat)` guarantees that each seat of a showtime has at most one active reservation. Redis takes load off reads, provides the seat-hold TTL, reduces contention with a distributed lock and stops the same Stripe event from being processed concurrently; if Redis is temporarily unavailable, the system still relies on the MongoDB invariant.
 
-MongoDB phải chạy dưới dạng replica set (MongoDB Atlas đáp ứng yêu cầu này) vì create, payment và cancel sử dụng transaction.
-Booking creation và payment callback chờ `Booking.init()` cùng `SeatReservation.init()` hoàn tất. Movie/read APIs chỉ phụ thuộc kết nối MongoDB, nên lỗi migration booking index không làm toàn bộ catalog trả 503.
+MongoDB must run as a replica set (MongoDB Atlas meets this requirement) because create, payment and cancel use transactions.
+Booking creation and the payment callback wait for `Booking.init()` and `SeatReservation.init()` to finish. Movie/read APIs depend only on the MongoDB connection, so a failed booking index migration does not make the whole catalog return 503.
 
 ## Redis keys
 
-Prefix mặc định là `nitrocine:v1`; có thể đổi phần `nitrocine` bằng `REDIS_KEY_PREFIX`.
+The default prefix is `nitrocine:v1`; the `nitrocine` part can be changed with `REDIS_KEY_PREFIX`.
 
-| Key pattern | Nội dung | TTL mặc định |
+| Key pattern | Contents | Default TTL |
 |---|---|---:|
-| `{prefix}:cache:movies:all` | danh sách movie có show/virtual | 300 giây |
-| `{prefix}:cache:movies:now-playing` | TMDB now-playing | 300 giây |
-| `{prefix}:cache:movie:{movieId}` | movie detail | 1.800 giây |
-| `{prefix}:cache:cinemas:all` | danh sách hall/cinema | 600 giây |
-| `{prefix}:cache:showtimes:{movieId}` | movie + showtimes bảy ngày | 120 giây |
-| `{prefix}:cache:seat-map:{showId}` | mảng ghế paid/đang hold | 5 giây |
-| `{prefix}:hold:show:{showId}:seat:{seat}` | booking ID đang giữ ghế | 1.800 giây |
-| `{prefix}:lock:booking:{showId}` | random lock token | 10.000 ms |
-| `{prefix}:lock:stripe-event:{eventId}` | random processing token | 30.000 ms |
-| `{prefix}:idempotency:stripe:{eventId}` | marker `processed` | 604.800 giây |
+| `{prefix}:cache:movies:all` | list of movies with real/virtual shows | 300 seconds |
+| `{prefix}:cache:movies:now-playing` | TMDB now-playing | 300 seconds |
+| `{prefix}:cache:movie:{movieId}` | movie detail | 1,800 seconds |
+| `{prefix}:cache:cinemas:all` | list of halls/cinemas | 600 seconds |
+| `{prefix}:cache:showtimes:{movieId}` | movie + seven days of showtimes | 120 seconds |
+| `{prefix}:cache:seat-map:{showId}` | array of paid/held seats | 5 seconds |
+| `{prefix}:hold:show:{showId}:seat:{seat}` | ID of the booking holding the seat | 1,800 seconds |
+| `{prefix}:lock:booking:{showId}` | random lock token | 10,000 ms |
+| `{prefix}:lock:stripe-event:{eventId}` | random processing token | 30,000 ms |
+| `{prefix}:idempotency:stripe:{eventId}` | `processed` marker | 604,800 seconds |
 
-Lock được release bằng compare-and-delete Lua script; một request không thể xóa lock/hold do request khác tạo.
+Locks are released with a compare-and-delete Lua script, so one request can never delete a lock or hold created by another request.
 
-## Luồng booking
+## Booking flow
 
-1. Server normalize seat ID, loại duplicate, giới hạn tám ghế và tính lại giá từ `showPrice` + seat class.
-2. Virtual/mock show được resolve thành Show thật.
-3. Redis show-lock được acquire với thời gian chờ ngắn. Redis down thì flow tiếp tục vì DB unique index vẫn bảo vệ inventory.
-4. Mongo transaction xóa hold hết hạn liên quan, tạo Booking pending và insert từng SeatReservation.
-5. Chỉ một request insert được `(show, seat)`; duplicate key trả HTTP 409.
-6. Sau commit, Redis seat-hold được ghi với TTL và seat-map/showtime cache bị invalidate.
-7. Stripe callback verify signature, dùng event idempotency, confirm reservation, materialize `Show.occupiedSeats`, đánh dấu Booking paid và invalidate cache.
-8. Cancel chỉ áp dụng cho booking chưa paid, xóa reservation trong transaction rồi xóa Redis hold/cache.
+1. The server normalizes seat IDs, removes duplicates, caps the request at eight seats and recomputes the price from `showPrice` + seat class.
+2. A virtual/mock show is resolved into a real Show.
+3. The Redis show lock is acquired with a short wait. If Redis is down the flow continues, because the DB unique index still protects the inventory.
+4. A Mongo transaction deletes related expired holds, creates a pending Booking and inserts one SeatReservation per seat.
+5. Only one request can insert a given `(show, seat)`; a duplicate key returns HTTP 409.
+6. After the commit, the Redis seat hold is written with a TTL and the seat-map/showtime caches are invalidated.
+7. The Stripe callback verifies the signature, applies event idempotency, confirms the reservations, materializes `Show.occupiedSeats`, marks the Booking paid and invalidates caches.
+8. Cancel only applies to unpaid bookings: it deletes the reservations in a transaction, then deletes the Redis holds/caches.
 
 ## Cache invalidation
 
-| Mutation | Keys bị xóa |
+| Mutation | Keys deleted |
 |---|---|
-| Add/import show/movie | movie list, now-playing, cinema list, movie/showtime liên quan |
-| Create booking | seat-map theo actual ID/alias và showtime của movie |
-| Payment success | seat-map và showtime của movie |
-| Cancel booking | seat-map và showtime của movie |
+| Add/import show/movie | movie list, now-playing, cinema list, related movie/showtimes |
+| Create booking | seat map by actual ID/alias and the movie's showtimes |
+| Payment success | seat map and the movie's showtimes |
+| Cancel booking | seat map and the movie's showtimes |
 
-Cache service dùng `SCAN` cho pattern invalidation, không dùng `KEYS`.
+The cache service uses `SCAN` for pattern invalidation, never `KEYS`.
 
-## Cấu hình và health
+## Configuration and health
 
-Copy `server/.env.example` thành `server/.env`, sau đó điền `MONGODB_URI`, `REDIS_URL` và các provider keys. Không commit `.env`; `.gitignore` đã chặn mọi file `.env` thật.
+Copy `server/.env.example` to `server/.env`, then fill in `MONGODB_URI`, `REDIS_URL` and the provider keys. Do not commit `.env`; `.gitignore` already blocks every real `.env` file.
 
 ```powershell
 cd server
@@ -59,16 +59,16 @@ npm run server
 Invoke-RestMethod http://127.0.0.1:3000/api/health
 ```
 
-Health trả `ok` khi MongoDB và Redis sẵn sàng, `degraded` khi MongoDB sẵn sàng nhưng Redis unavailable/disabled, và HTTP 503 khi MongoDB unavailable. Health không trả connection string.
+Health returns `ok` when MongoDB and Redis are ready, `degraded` when MongoDB is ready but Redis is unavailable/disabled, and HTTP 503 when MongoDB is unavailable. Health never returns the connection string.
 
-## Kiểm thử
+## Testing
 
 ```powershell
 cd server
 npm test
 ```
 
-Unit test luôn chạy. Integration unique-index test chỉ chạy trên database dùng một lần:
+Unit tests always run. The unique-index integration test only runs against a disposable database:
 
 ```powershell
 $env:ALLOW_INTEGRATION_TESTS='true'
@@ -76,21 +76,21 @@ $env:TEST_MONGODB_URI='mongodb://127.0.0.1:27017/nitrocine_test?replicaSet=rs0'
 npm test
 ```
 
-Để bắn nhiều request đồng thời vào một test API/show (script này tạo dữ liệu thật), đặt các biến `CONCURRENCY_BASE_URL`, `CONCURRENCY_SHOW_ID`, `CONCURRENCY_AUTH_TOKEN`, tùy chọn `CONCURRENCY_SEAT`/`CONCURRENCY_ATTEMPTS`, rồi xác nhận rõ:
+To fire many concurrent requests at a test API/show (this script creates real data), set `CONCURRENCY_BASE_URL`, `CONCURRENCY_SHOW_ID`, `CONCURRENCY_AUTH_TOKEN`, optionally `CONCURRENCY_SEAT`/`CONCURRENCY_ATTEMPTS`, then confirm explicitly:
 
 ```powershell
 $env:CONCURRENCY_TEST_CONFIRM='I_UNDERSTAND'
 npm run test:concurrency
 ```
 
-Kỳ vọng đúng một response có `bookingId`; các request còn lại trả 409.
+Expect exactly one response with a `bookingId`; the remaining requests return 409.
 
-## Deploy index
+## Deploying the index
 
-Mongoose sẽ tạo critical unique index từ schema khi auto-index được bật. Với production tắt auto-index, tạo thủ công:
+Mongoose creates the critical unique index from the schema when auto-index is enabled. In production with auto-index disabled, create it manually:
 
 ```javascript
 db.seatreservations.createIndex({ show: 1, seat: 1 }, { unique: true })
 ```
 
-Không tạo index trước khi dọn duplicate seat reservation hiện hữu; MongoDB sẽ từ chối build index thay vì tự chọn bản ghi để xóa. Show catalog chỉ dùng compound index không unique để tương thích dữ liệu cũ.
+Do not create the index before cleaning up existing duplicate seat reservations; MongoDB will refuse to build the index rather than choose which records to delete. The show catalog only uses non-unique compound indexes to stay compatible with older data.

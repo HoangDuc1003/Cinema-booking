@@ -1,10 +1,10 @@
 import { getJson, setJson } from './cacheService.js';
-import { getHeroPosterDateKey, getPublicHomeHero } from './heroService.js';
+import { getHeroRotationKey, getPublicHomeHero } from './heroService.js';
 import { getPublicHomeNowShowing, HOME_NOW_SHOWING_LIMIT } from './homeNowShowingService.js';
 import { redisKeys } from './redisKeys.js';
 
 // Long enough that a showtime read does not recompute the Hero, short enough
-// that the midnight Hero rotation reaches the schedule within minutes.
+// that a new Hero line-up reaches the schedule within minutes.
 const SCHEDULE_MOVIES_TTL_SECONDS = 300;
 // A set missing one of its sources is held only briefly, so a hiccup does not
 // leave a Hero or Now Showing movie without showtimes for long.
@@ -64,7 +64,8 @@ export const getScheduleMovies = async ({
 };
 
 export const getScheduledMovieIds = async ({ now = new Date(), load = getScheduleMovies } = {}) => {
-    const cacheKey = redisKeys.scheduleMovieIds(getHeroPosterDateKey(now));
+    // Keyed by the Hero slot, so the 12-hour turnover starts a fresh set at once.
+    const cacheKey = redisKeys.scheduleMovieIds(getHeroRotationKey(now));
     const cached = await getJson(cacheKey);
     if (Array.isArray(cached?.ids)) return cached.ids;
 
