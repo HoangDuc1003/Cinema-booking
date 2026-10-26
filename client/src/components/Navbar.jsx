@@ -161,8 +161,9 @@ const Navbar = () => {
               >
                 <span className="relative z-10">{link.name}</span>
 
-                <span className={`absolute -bottom-1 max-md:bottom-1 left-0 max-md:left-6 max-md:right-6 h-0.5 bg-primary transition-[width] duration-500 ${
-                  isActive ? 'w-full max-md:w-auto' : 'w-0 md:group-hover:w-full'
+                {/* Grows with `scale`, not width, so the compositor runs it. */}
+                <span className={`absolute -bottom-1 max-md:bottom-1 left-0 max-md:left-6 max-md:right-6 h-0.5 w-full max-md:w-auto origin-left bg-primary transition-[scale] duration-500 motion-reduce:transition-none ${
+                  isActive ? 'scale-x-100' : 'scale-x-0 md:group-hover:scale-x-100'
                 }`}></span>
 
                 <span className="absolute inset-0 rounded-lg bg-primary/10 scale-0 group-hover:scale-100 transition-transform

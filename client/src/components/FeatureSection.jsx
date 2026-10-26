@@ -6,6 +6,7 @@ import { useHomeData } from '../context/HomeDataContext';
 import MovieGrid from './MovieGrid';
 import Loading from './Loading';
 import timeFormat from '../lib/timeFormat';
+import useEdgeSwipeGuard from '../hooks/useEdgeSwipeGuard';
 const getImageUrl = (path) => {
   if (!path) return '';
   if (path.startsWith('http')) return path.replace('/t/p/original/', '/t/p/w500/');
@@ -84,6 +85,8 @@ const FeatureSection = () => {
   const railRef = useRef(null);
   const progressRef = useRef(null);
   const progressFrameRef = useRef(0);
+  // Keeps a swipe at either end of the rail from going back/forward in history.
+  const guardRail = useEdgeSwipeGuard(railRef);
 
   // The indicator is written straight to the DOM once per frame. Keeping it in
   // React state re-rendered the whole section on every scroll event, which is
@@ -154,7 +157,7 @@ const FeatureSection = () => {
             {/* Edge to edge, snapping card by card, and never handing the swipe
                 on to the page's back/forward gesture. */}
             <div
-              ref={railRef}
+              ref={guardRail}
               onScroll={handleScroll}
               data-rail="now-showing"
               className="-mx-4 flex items-stretch gap-3 overflow-x-auto overscroll-x-contain snap-x snap-mandatory scroll-px-4 px-4 py-2 no-scrollbar"

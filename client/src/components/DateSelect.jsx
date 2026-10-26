@@ -3,6 +3,7 @@ import BlurCircle from './BlurCircle'
 import { ChevronLeftIcon, ChevronRightIcon, FlaskConical, RefreshCw } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useNavigate } from 'react-router-dom'
+import useEdgeSwipeGuard from '../hooks/useEdgeSwipeGuard'
 
 const DateSelect = ({
     id,
@@ -15,6 +16,8 @@ const DateSelect = ({
     const navigate = useNavigate();
     const [selected, setSelected] = useState(null);
     const datesRef = useRef(null);
+    // A swipe at either end of the date rail must not go back/forward in history.
+    const guardDates = useEdgeSwipeGuard(datesRef);
 
     const dates = useMemo(() => Object.keys(availableDates || {}).sort(), [availableDates]);
 
@@ -82,7 +85,7 @@ const DateSelect = ({
                         </button>
 
                         {/* Phones swipe the strip (the arrows are for mouse users), and it snaps date by date. */}
-                        <div ref={datesRef} className='flex w-full max-w-full sm:max-w-lg gap-3 sm:gap-4 overflow-x-auto overscroll-x-contain snap-x snap-mandatory no-Scrollbar scroll-smooth py-2'>
+                        <div ref={guardDates} className='flex w-full max-w-full sm:max-w-lg gap-3 sm:gap-4 overflow-x-auto overscroll-x-contain snap-x snap-mandatory no-Scrollbar scroll-smooth py-2'>
                             {status === 'loading' && Array.from({ length: 3 }, (_, index) => (
                                 <span key={index} className="h-18 w-14 shrink-0 animate-pulse rounded bg-white/8" aria-hidden="true" />
                             ))}

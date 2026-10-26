@@ -6,6 +6,7 @@ import { useHomeData } from '../context/HomeDataContext';
 import { fetchHomeTrailers } from '../services/tmdb';
 import { useMediaQuery, useSaveData } from './hero/useHeroEnvironment';
 import { getTmdbImageUrl } from './hero/heroImages';
+import useEdgeSwipeGuard from '../hooks/useEdgeSwipeGuard';
 
 const MAX_TRAILER_CANDIDATES = 10;
 const EMPTY_MOVIES = Object.freeze([]);
@@ -114,6 +115,8 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'home-trailer-sectio
   const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
   const saveData = useSaveData();
   const railRef = useRef(null);
+  // A swipe at either end of the trailer rail must not go back/forward in history.
+  const guardRail = useEdgeSwipeGuard(railRef);
   const playerRef = useRef(null);
   const frameRef = useRef(null);
   const [inView, setInView] = useState(false);
@@ -462,8 +465,8 @@ const TrailerSection = ({ featuredMovie = null, sectionId = 'home-trailer-sectio
             </button>
 
             <div
-              ref={railRef}
-              className="flex min-w-0 flex-1 snap-x snap-mandatory gap-3 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              ref={guardRail}
+              className="flex min-w-0 flex-1 snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
               aria-label="Trailer movie selector"
             >
               {items.map((item) => {

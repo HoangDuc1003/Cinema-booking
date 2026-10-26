@@ -240,8 +240,10 @@ const MovieDetails = () => {
                 alt={show.title}
                 className='max-md:mx-auto rounded-2xl h-130 w-[340px] max-md:h-auto max-md:w-[min(62vw,240px)] max-md:landscape:w-[min(28vw,200px)] max-md:aspect-[2/3] object-cover group-hover:scale-105 transition-transform duration-500'
               />
-              <div className="absolute top-0 left-[-150%] w-1/2 h-full z-10 block transform -skew-x-12 bg-linear-to-r from-transparent
-                via-white/40 to-transparent transition-all duration-700 group-hover:left-[150%]">
+              {/* Shine sweep on translate, not `left`: a compositor-only move. Its
+                  own width is half the poster, so ±300% spans -150%..150%. */}
+              <div className="absolute top-0 left-0 w-1/2 h-full z-10 block -translate-x-[300%] -skew-x-12 bg-linear-to-r from-transparent
+                via-white/40 to-transparent transition-[translate] duration-700 group-hover:translate-x-[300%] motion-reduce:hidden" aria-hidden="true">
               </div>
             </div>
 

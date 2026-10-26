@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import useEdgeSwipeGuard from '../../hooks/useEdgeSwipeGuard';
 import Loading from '../../components/Loading';
 import Title from '../../components/admin/Title';
 import BlurCircle from '../../components/BlurCircle';
@@ -8,6 +9,8 @@ import { useAppContext } from '../../context/AppContext';
 import toast from 'react-hot-toast'
 
 const AddShows = () => {
+  // Wide table/poster row: a swipe at either end must not go back/forward in history.
+  const guardScroller = useEdgeSwipeGuard();
   const {axios,getToken} = useAppContext();
   const currency = import.meta.env.VITE_CURRENCY || "$";
   const [nowPlayingMovies, setNowPlayingMovies] = useState([]);
@@ -122,7 +125,7 @@ const AddShows = () => {
       <p className='text-lg font-medium'>Now Playing Movies</p>
       </div>
       {/* Movie list */}
-      <div className='overflow-x-auto pb-4'>
+      <div ref={guardScroller} className='overflow-x-auto pb-4'>
         <div className='group flex flex-wrap gap-4 mt-4 w-max'>
           {nowPlayingMovies.map((movie) => (
             <div 

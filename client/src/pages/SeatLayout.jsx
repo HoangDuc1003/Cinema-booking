@@ -10,6 +10,7 @@ import isoTimeFormat from '../lib/isoTimeFormat'
 import { fetchMovieShowtimes } from '../services/tmdb'
 import { getTmdbImageUrl } from '../components/hero/heroImages'
 import { CURRENCY, formatPrice } from '../lib/formatPrice'
+import useEdgeSwipeGuard from '../hooks/useEdgeSwipeGuard'
 
 const sameSeatSet = (left, right) => {
   if (left.length !== right.length) return false
@@ -31,7 +32,9 @@ const seatPriceFor = (type, showPrice) => (
 // The selected glow is a `.seat.is-selected::after` layer that only animates
 // opacity and transform; the old box-shadow pulse and three blurred overlays
 // repainted every selected seat on every frame.
-const Seat = React.memo(({ seatId, status, type, showPrice, onClick }) => {
+// `locked` (no show time picked yet) is visual only: the tap still reaches
+// handleSeatClick, which explains what to pick first.
+const Seat = React.memo(({ seatId, status, type, showPrice, locked, onClick }) => {
   let styles = 'seat w-7 h-7 sm:w-8 sm:h-8 rounded-lg border-2 text-[10px] sm:text-xs font-bold';
   switch (status) {
     case 'selected':
@@ -41,13 +44,17 @@ const Seat = React.memo(({ seatId, status, type, showPrice, onClick }) => {
       styles += ' bg-gradient-to-br from-red-600 to-red-800 text-white border-red-500 cursor-not-allowed opacity-80';
       break;
     default:
+      if (locked) {
+        styles += ' bg-transparent text-gray-500 border-white/15 opacity-50 cursor-not-allowed';
+        break;
+      }
       {
         const typeStyles = {
           front: 'border-yellow-500/40 hover:border-yellow-500 hover:bg-yellow-500/20 hover:text-yellow-500',
           middle: 'border-primary/40 hover:border-primary hover:bg-primary/20 hover:text-primary',
           back: 'border-green-500/40 hover:border-green-500 hover:bg-green-500/20 hover:text-green-500'
         }
-        styles += ` bg-transparent text-gray-300 hover:text-white hover:scale-105 ${typeStyles[type] || typeStyles.middle}`;
+        styles += ` bg-transparent text-gray-300 cursor-pointer hover:text-white hover:scale-105 ${typeStyles[type] || typeStyles.middle}`;
       }
   }
 
@@ -63,6 +70,7 @@ const Seat = React.memo(({ seatId, status, type, showPrice, onClick }) => {
       disabled={status === 'occupied'}
       aria-label={label}
       aria-pressed={status === 'occupied' ? undefined : status === 'selected'}
+      aria-disabled={locked && status === 'available' ? true : undefined}
       title={label}
       data-seat={seatId}
       className={styles}
@@ -91,7 +99,12 @@ const SeatLayout = () => {
   const [isBooking, setIsBooking] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false) // Tracking real-time sync
   const seatMapRef = useRef(null)
+  // A right swipe at the map's left edge used to go back in history and drop the picked seats.
+  const guardSeatMap = useEdgeSwipeGuard(seatMapRef)
   const seatSectionRef = useRef(null)
+  // Which sides of the seat map have seats scrolled out of view. Drives the
+  // edge fade and the "scroll sideways" hint where the map is wider than its column.
+  const [mapHidden, setMapHidden] = useState({ left: false, right: false })
 
   // Seat configuration - Memoized
   const seatRows = React.useMemo(() => [
@@ -376,6 +389,49 @@ const SeatLayout = () => {
     map.scrollLeft = Math.max(0, (map.scrollWidth - map.clientWidth) / 2)
   }, [show])
 
+  useEffect(() => {
+    const map = seatMapRef.current
+    if (!map) return undefined
+    let frame = 0
+    const measure = () => {
+      frame = 0
+      const max = map.scrollWidth - map.clientWidth
+      const left = max > 1 && map.scrollLeft > 1
+      const right = max > 1 && map.scrollLeft < max - 1
+      setMapHidden((prev) => (prev.left === left && prev.right === right ? prev : { left, right }))
+    }
+    const schedule = () => { if (!frame) frame = requestAnimationFrame(measure) }
+    measure()
+    map.addEventListener('scroll', schedule, { passive: true })
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null
+    observer?.observe(map)
+    if (map.firstElementChild) observer?.observe(map.firstElementChild)
+    return () => {
+      map.removeEventListener('scroll', schedule)
+      observer?.disconnect()
+      if (frame) cancelAnimationFrame(frame)
+    }
+  }, [show])
+
+  // Keyboard focus only: Chrome treats a seat inside the 3rem edge fade as already
+  // in view and does not scroll, even with scroll-padding. Nudge it clear of the
+  // fade instantly (no smooth scroll, so reduced motion needs no special case).
+  // Taps are not :focus-visible, so the map never jumps under a finger.
+  const keepFocusedSeatClear = (event) => {
+    const map = event.currentTarget
+    const seat = event.target
+    if (seat === map || !seat.matches?.(':focus-visible')) return
+    const style = getComputedStyle(map)
+    const padLeft = parseFloat(style.scrollPaddingLeft) || 0
+    const padRight = parseFloat(style.scrollPaddingRight) || 0
+    const mapBox = map.getBoundingClientRect()
+    const seatBox = seat.getBoundingClientRect()
+    let delta = 0
+    if (seatBox.left < mapBox.left + padLeft) delta = seatBox.left - (mapBox.left + padLeft)
+    else if (seatBox.right > mapBox.right - padRight) delta = seatBox.right - (mapBox.right - padRight)
+    if (delta) map.scrollBy({ left: delta, behavior: 'instant' })
+  }
+
   const getSeatStatus = (seatId) => {
     if (occupiedSeatSet.has(seatId)) return 'occupied'
     if (selectedSeatSet.has(seatId)) return 'selected'
@@ -407,6 +463,7 @@ const SeatLayout = () => {
           status={status}
           type={type}
           showPrice={showPrice}
+          locked={!selectedTime}
           onClick={onSeatClick}
         />
       )
@@ -461,15 +518,11 @@ const SeatLayout = () => {
       <BlurCircle top="-100px" left="-100px" />
       <BlurCircle bottom="-100px" right="-100px" />
 
-      {/* Floating Elements: desktop garnish, left off phones */}
-      <div className="hidden md:block absolute top-20 right-20 w-3 h-3 bg-primary/60 rounded-full animate-bounce duration-3000" aria-hidden="true"></div>
-      <div className="hidden md:block absolute bottom-40 left-20 w-2 h-2 bg-yellow-500/40 rounded-full animate-ping duration-4000 delay-1000" aria-hidden="true"></div>
-      <div className="hidden md:block absolute top-1/2 right-10 w-2 h-2 bg-green-500/50 rounded-full animate-pulse duration-5000 delay-2000" aria-hidden="true"></div>
-
       <div className="relative z-10 flex flex-col lg:flex-row gap-4 sm:gap-6 lg:gap-8 p-3 sm:p-6 md:p-8 lg:p-12 xl:p-16">
 
-        {/* Enhanced Left Sidebar */}
-        <div className={`lg:w-80 xl:lg:w-96 transition-[translate,opacity] duration-500 lg:duration-1000 ease-out motion-reduce:transition-none mt-5 ${isVisible ? 'translate-x-0 opacity-100' : '-translate-x-10 opacity-0 '}`}>
+        {/* Enhanced Left Sidebar. 320px at every desktop width (it was 384px from
+            1280px): the wider sidebar pushed the seat map into a scroller even at 1440px. */}
+        <div className={`lg:w-80 lg:shrink-0 transition-[translate,opacity] duration-500 lg:duration-1000 ease-out motion-reduce:transition-none mt-5 ${isVisible ? 'translate-x-0 opacity-100' : '-translate-x-10 opacity-0 '}`}>
           <div className="bg-white/5 mt-10 md:backdrop-blur-xl rounded-2xl sm:rounded-3xl border border-white/10 p-4 sm:p-6 lg:p-8 lg:sticky lg:top-20 shadow-2xl">
 
             <div className="flex items-center gap-3 sm:gap-4 mb-5 sm:mb-8">
@@ -664,7 +717,8 @@ const SeatLayout = () => {
                   </div>
                 ) : (
                   <div className="text-center py-4">
-                    <div className="w-6 h-6 border-2 border-gray-600 border-t-transparent rounded-full mx-auto mb-2 animate-spin"></div>
+                    {/* Static: nothing is loading here, the page is waiting for a choice. */}
+                    <div className="w-6 h-6 border-2 border-dashed border-gray-600 rounded-full mx-auto mb-2" aria-hidden="true"></div>
                     <span className="text-gray-400 text-sm">
                       {!selectedHall ? 'Step 1: Choose Hall' : 'Step 2: Choose Show Time'}
                     </span>
@@ -678,7 +732,7 @@ const SeatLayout = () => {
         {/* Enhanced Right Section */}
         <div
           ref={seatSectionRef}
-          className={`flex-1 scroll-mt-24 transition-[translate,opacity] duration-500 lg:duration-1000 delay-150 lg:delay-300 ease-out motion-reduce:transition-none mt-6 lg:mt-15 ${isVisible ? 'translate-y-0 opacity-100 ' : 'translate-y-10 opacity-0'}`}
+          className={`flex-1 min-w-0 scroll-mt-24 transition-[translate,opacity] duration-500 lg:duration-1000 delay-150 lg:delay-300 ease-out motion-reduce:transition-none mt-6 lg:mt-15 ${isVisible ? 'translate-y-0 opacity-100 ' : 'translate-y-10 opacity-0'}`}
         >
           <div className="text-center mb-8 sm:mb-12">
            <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-3 bg-linear-to-r from-white via-primary to-white bg-clip-text text-transparent">
@@ -736,9 +790,19 @@ const SeatLayout = () => {
           </div>
 
           {/* Enhanced Seat Map */}
+          {!selectedTime && (
+            <p className="mb-2 text-center text-sm text-gray-400">Choose a hall and show time to pick seats</p>
+          )}
           <p className="sm:hidden mb-2 text-center text-xs text-gray-500">Swipe sideways to see every seat</p>
-          <div ref={seatMapRef} className="w-full overflow-x-auto overscroll-x-contain pb-6 custom-scrollbar">
-            <div className="w-fit mx-auto px-8 sm:px-12 min-w-max">
+          {(mapHidden.left || mapHidden.right) && (
+            <p className="hidden sm:block mb-2 text-center text-xs text-gray-500">Scroll sideways to see every seat</p>
+          )}
+          <div
+            ref={guardSeatMap}
+            onFocus={keepFocusedSeatClear}
+            className={`seat-map-scroller w-full overflow-x-auto overscroll-x-contain pb-6 custom-scrollbar ${mapHidden.left ? 'has-hidden-left' : ''} ${mapHidden.right ? 'has-hidden-right' : ''}`}
+          >
+            <div className="w-fit mx-auto px-8 sm:px-12 lg:px-4 min-w-max">
               {/* Front Section */}
               <div className="mb-4 sm:mb-6 mt-1 sm:mt-2">
                 <div className="text-center mb-3 sm:mb-4">

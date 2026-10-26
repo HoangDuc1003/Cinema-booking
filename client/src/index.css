@@ -263,19 +263,16 @@ body {
 
 /* Each grid item is observed on its own, so this runs as the row reaches the
    viewport rather than once for the whole grid. */
+/* Transform and opacity only: a per-card blur re-ran a filter on every card of
+   a freshly revealed row each frame, off the compositor. */
 @keyframes catalog-card-enter {
   from {
     opacity: 0;
     transform: translate3d(0, 26px, 0) scale(0.965);
-    filter: blur(6px);
-  }
-  60% {
-    filter: blur(0);
   }
   to {
     opacity: 1;
     transform: translate3d(0, 0, 0) scale(1);
-    filter: blur(0);
   }
 }
 
@@ -290,9 +287,8 @@ body {
   will-change: auto;
 }
 
-/* Phones reveal a whole row of cards at once while the finger is still moving.
-   Blurring each of them in is a filter re-run per card per frame, so they get
-   a shorter, filter-free rise that the compositor can run on its own. */
+/* Phones reveal a whole row of cards at once while the finger is still moving,
+   so they get a shorter, smaller rise that settles before the scroll does. */
 @keyframes catalog-card-enter-lite {
   from {
     opacity: 0;
@@ -755,6 +751,29 @@ label,
 
 
 /* ---------- Seat map ---------- */
+
+/* Tabbing to a seat scrolls it 3rem clear of the edge, so it never sits under
+   the edge fade below (WCAG 2.4.11 focus not obscured). */
+.seat-map-scroller {
+  scroll-padding-inline: 3rem;
+}
+
+/* Fades the edge that has seats scrolled out of view, so a map wider than its
+   column (1024-1280px, phones) reads as scrollable. A static mask, no motion. */
+.seat-map-scroller.has-hidden-left {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 3rem);
+  mask-image: linear-gradient(to right, transparent, #000 3rem);
+}
+
+.seat-map-scroller.has-hidden-right {
+  -webkit-mask-image: linear-gradient(to left, transparent, #000 3rem);
+  mask-image: linear-gradient(to left, transparent, #000 3rem);
+}
+
+.seat-map-scroller.has-hidden-left.has-hidden-right {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 3rem, #000 calc(100% - 3rem), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 3rem, #000 calc(100% - 3rem), transparent);
+}
 
 .seat {
   position: relative;

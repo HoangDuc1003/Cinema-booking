@@ -22,6 +22,7 @@ import './hero/hero.css';
 const HERO_POSTER_SWAP_DELAY_MS = 400;
 const HERO_POSTER_TRANSITION_MS = 1_200;
 const HERO_AUTO_CAROUSEL_MS = 5_000;
+const HERO_SWIPE_MIN_PX = 48;
 // A trailer slide moves on after this much playback, so a two-minute trailer
 // never parks the Hero on one movie. Shorter trailers simply end first.
 const HERO_TRAILER_DWELL_MS = 12_000;
@@ -286,10 +287,32 @@ const HeroSection = ({ onTrailerRequest }) => {
 
   useEffect(() => () => clearTransitionTimers(), [clearTransitionTimers]);
 
+  // Horizontal swipe over the poster steps through the slides on touch screens.
+  // The poster rail scrolls on its own, so swipes that start there are left alone.
+  const swipeStartRef = useRef(null);
+  const handleTouchStart = (event) => {
+    const touch = event.touches[0];
+    swipeStartRef.current = event.touches.length === 1 && !event.target.closest?.('.hero-poster-rail')
+      ? { x: touch.clientX, y: touch.clientY }
+      : null;
+  };
+  const handleTouchEnd = (event) => {
+    const start = swipeStartRef.current;
+    swipeStartRef.current = null;
+    const touch = event.changedTouches[0];
+    if (!start || !touch || isTransitioning || movies.length < 2) return;
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+    if (Math.abs(dx) < HERO_SWIPE_MIN_PX || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+    switchMovie(currentIndex + (dx < 0 ? 1 : -1));
+  };
+
   if (!movies.length) {
     if (catalogSource === 'error') {
       return (
-        <section className="hero-section hero-section--catalog-error" aria-label="Featured movies">
+        // hero-catalog-state carries the safe-area padding that keeps this
+        // message clear of the fixed navbar.
+        <section className="hero-section hero-catalog-state hero-section--catalog-error" aria-label="Featured movies">
           <div className="hero-catalog-state__backdrop" aria-hidden="true" />
           <div className="hero-catalog-state__error" role="alert">
             <p className="hero-catalog-state__eyebrow">NitroCine</p>
@@ -303,7 +326,21 @@ const HeroSection = ({ onTrailerRequest }) => {
         </section>
       );
     }
-    return <section className="hero-section" aria-label="Loading featured movies" data-catalog-source={catalogSource} />;
+    return (
+      <section
+        className="hero-section hero-catalog-state"
+        aria-label="Loading featured movies"
+        aria-busy="true"
+        data-catalog-source={catalogSource}
+      >
+        <div className="hero-catalog-state__backdrop is-loading" aria-hidden="true" />
+        <div className="hero-catalog-state__skeleton" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </div>
+      </section>
+    );
   }
 
   const currentMovie = movies[currentIndex] || movies[0];
@@ -346,6 +383,9 @@ const HeroSection = ({ onTrailerRequest }) => {
       data-catalog-source={catalogSource}
       data-catalog-version={catalogMeta?.version || ''}
       data-hero-media={trailerVisible ? 'video' : 'poster'}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={() => { swipeStartRef.current = null; }}
     >
       <HeroMedia
         key={`media-${currentMovieKey}-${posterCandidates.join('|')}`}

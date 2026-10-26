@@ -66,7 +66,9 @@ const App = () => {
   // <main> an inner scroll box with a second scrollbar beside the page's own.
   return (
     <div className='flex flex-col min-h-screen overflow-x-clip w-full bg-black text-white'>
-      <Toaster />
+      {/* Below the fixed navbar, so a toast never covers its links. Admin has
+          no navbar, so its toasts keep the default top offset. */}
+      <Toaster containerStyle={isAdminRoute ? undefined : { top: 'calc(env(safe-area-inset-top, 0px) + 5.75rem)' }} />
 
       {!isAdminRoute && <Navbar />}
 

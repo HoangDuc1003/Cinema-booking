@@ -24,7 +24,7 @@
 ### For Users 👤
 
 - **Secure Authentication:** Easy login and registration using Clerk.
-- **Discover Movies:** A home banner that shows five new movies every 12 hours, working through the whole catalog, Now Showing, search, and upcoming releases.
+- **Discover Movies:** A home banner that shows the five newest movies and moves on to the next five every 12 hours, with no movie repeated within 30 days, Now Showing, search, and upcoming releases.
 - **Watch Trailers:** Play trailers from the home page or from a preview on each movie page.
 - **Showtimes:** Pick a date from the next seven days, with three showtimes a day.
 - **Interactive Seat Selection:** Pick your favorite seats with a real-time availability map.

@@ -55,7 +55,7 @@ const Movies = () => {
           ariaBusy={isSearching || status === 'loading'}
         >
           <div className="min-w-0">
-            <div className="catalog-search relative flex min-h-13 items-center rounded-2xl border border-white/12 bg-black/25 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] transition-all duration-300 focus-within:border-primary/70 focus-within:bg-black/35 focus-within:ring-4 focus-within:ring-primary/10">
+            <div className="catalog-search relative flex min-h-13 items-center rounded-2xl border border-white/12 bg-black/25 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] transition-[border-color,background-color,box-shadow] duration-300 focus-within:border-primary/70 focus-within:bg-black/35 focus-within:ring-4 focus-within:ring-primary/10">
               <span className="sr-only">Search movies</span>
               <Search className="pointer-events-none absolute left-4 h-5 w-5 text-gray-400" aria-hidden="true" />
             <input

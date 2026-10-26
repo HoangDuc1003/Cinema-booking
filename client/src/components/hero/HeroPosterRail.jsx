@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import useEdgeSwipeGuard from '../../hooks/useEdgeSwipeGuard';
 
 const HeroPosterThumbnail = ({ sources }) => {
   const [sourceIndex, setSourceIndex] = useState(0);
@@ -36,6 +37,7 @@ const HeroPosterRail = ({
   hidden = false,
 }) => {
   const itemsRef = useRef(null);
+  const guardItems = useEdgeSwipeGuard(itemsRef);
 
   // Where the rail overflows (phones), keep the slide that just came up in view.
   // Scrolls the rail only: scrollIntoView could also drag the page back up.
@@ -92,7 +94,7 @@ const HeroPosterRail = ({
           );
         })}
       </div>
-      <div className="hero-poster-rail__items" ref={itemsRef}>
+      <div className="hero-poster-rail__items" ref={guardItems}>
         {movies.map((movie, index) => {
           const active = index === currentIndex;
           const thumbnailUrls = getThumbnailUrls(movie);

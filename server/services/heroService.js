@@ -1,11 +1,11 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomInt } from 'node:crypto';
+import HeroRotation from '../models/HeroRotation.js';
 import Movie from '../models/Movie.js';
 import Show from '../models/Show.js';
 import SiteConfig from '../models/SiteConfig.js';
 import { deleteByPattern, deleteKeys } from './cacheService.js';
 import { attachHeroVideos } from './heroVideoService.js';
 import { redisKeys } from './redisKeys.js';
-import { hashSeed } from './seededRandom.js';
 import { TMDB_MOVIE_GENRES } from './tmdbConfig.js';
 
 const HERO_CONFIG_KEY = 'homeHero';
@@ -16,7 +16,9 @@ const HERO_ROTATION_MS = HERO_ROTATION_HOURS * 60 * 60 * 1000;
 // Upper bound on the rotation pool, far above the catalog's size, so a runaway
 // collection cannot turn every Hero request into a full scan.
 const HERO_ROTATION_POOL_LIMIT = 2000;
-const HERO_RANDOM_HISTORY_MS = 2 * 24 * 60 * 60 * 1000;
+// A movie stays off the Hero for this long after it was shown.
+export const HERO_NO_REPEAT_DAYS = 30;
+const HERO_NO_REPEAT_MS = HERO_NO_REPEAT_DAYS * 24 * 60 * 60 * 1000;
 const HERO_TIME_ZONE = 'Asia/Ho_Chi_Minh';
 // Vietnam has no daylight saving time, so its offset is fixed.
 const HERO_TIME_ZONE_OFFSET_MS = 7 * 60 * 60 * 1000;
@@ -114,10 +116,9 @@ export const createHeroEtag = (payload) => {
     const identity = JSON.stringify({
         configuredMode: payload?.settings?.configuredMode || payload?.settings?.mode || 'auto',
         effectiveMode: payload?.settings?.effectiveMode || payload?.meta?.effectiveMode || 'auto',
-        source: payload?.meta?.source || 'poster-rotation',
+        source: payload?.meta?.source || 'newest-rotation',
         version: payload?.version ?? 0,
         dateKey: payload?.dateKey || '',
-        seed: payload?.meta?.seed || '',
         movies: (payload?.movies || []).map((movie) => movie.id || movie._id),
         // A newly configured trailer must not be answered with a 304.
         videos: (payload?.movies || []).map((movie) => movie.trailerVideo?.src || ''),
@@ -170,66 +171,154 @@ const loadAvailablePosterMovies = async () => {
     return [...movies.values()];
 };
 
-/** One line-up per 12-hour slot; `salt` lets an admin reshuffle early. */
-export const getHeroSeed = ({ now = new Date(), salt = '' } = {}) => (
-    `hero:${getHeroRotationKey(now)}:${salt || 'default'}`
-);
-
 const toNumber = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
 
-// "Hot" is popularity first, then rating, then how many people voted. The final
-// ID tie-break keeps the order stable when a pool has no popularity data at all.
-const compareHotness = (left, right) => (
-    toNumber(right.popularity) - toNumber(left.popularity)
-    || toNumber(right.vote_average) - toNumber(left.vote_average)
-    || toNumber(right.vote_count) - toNumber(left.vote_count)
+// Newest release first. Popularity orders films released on the same day, and
+// the ID keeps the order stable when nothing else differs.
+const compareNewest = (left, right) => (
+    String(right.release_date || '').localeCompare(String(left.release_date || ''))
+    || toNumber(right.popularity) - toNumber(left.popularity)
     || String(left.id).localeCompare(String(right.id))
 );
 
 /**
- * The whole pool in one fixed cycle and where the slot's window starts in it.
- * Each movie's place comes from a hash of its ID, so a catalog refresh adds and
- * drops movies without reshuffling the rest, and each slot moves HERO_LIMIT
- * places on.
+ * A slot's five movies: the newest released movies that have not been on the
+ * Hero in the last 30 days (`lastShownAt` maps a movie ID to when its slot
+ * started). The first slot is therefore the five newest releases, each later
+ * slot the next five, and a release added to the catalog goes up in the very
+ * next slot.
+ *
+ * When fewer than five are left, the movies shown longest ago fill the gap, so
+ * a small catalog repeats as late as possible instead of shipping a short Hero.
  */
-const rotationWindow = (pool, { now = new Date(), salt = '' } = {}) => {
-    const key = `hero:cycle:${salt || 'default'}`;
-    const cycle = [...pool].sort((left, right) => (
-        hashSeed(`${key}:${left.id}`) - hashSeed(`${key}:${right.id}`)
-        || String(left.id).localeCompare(String(right.id))
-    ));
-    const start = cycle.length ? (getHeroSlotOrdinal(now) * HERO_LIMIT) % cycle.length : 0;
-    return { cycle, start };
+export const selectHeroMovies = (pool = [], { lastShownAt = new Map() } = {}) => {
+    const picks = pool
+        .filter((movie) => !lastShownAt.has(movie.id))
+        .sort(compareNewest)
+        .slice(0, HERO_LIMIT);
+    if (picks.length < HERO_LIMIT) {
+        const longestAgo = pool
+            .filter((movie) => lastShownAt.has(movie.id))
+            .sort((left, right) => lastShownAt.get(left.id) - lastShownAt.get(right.id) || compareNewest(left, right));
+        picks.push(...longestAgo.slice(0, HERO_LIMIT - picks.length));
+    }
+    return picks;
 };
 
 /**
- * The slot's five movies: the next five places in a cycle over the whole
- * catalog. Every movie gets its turn before any poster comes back, and two
- * neighbouring slots never share a movie while the pool holds at least ten.
+ * Every released movie in the catalog with artwork. Only what the ordering
+ * needs is read; the five picked movies are loaded in full afterwards.
  */
-export const selectHeroMovies = (pool = [], options = {}) => {
-    if (pool.length <= HERO_LIMIT) return pool.slice(0, HERO_LIMIT);
-    const { cycle, start } = rotationWindow(pool, options);
-    return Array.from({ length: HERO_LIMIT }, (_, offset) => cycle[(start + offset) % cycle.length]);
-};
-
-/**
- * Every movie in the catalog with artwork, as IDs. The rotation only needs IDs,
- * so the five picked movies are loaded in full afterwards.
- */
-export const loadHeroPool = async () => {
+export const loadHeroPool = async ({ now = new Date() } = {}) => {
     const movies = await Movie.find({
         adult: { $ne: true },
+        // Released by today: an upcoming title cannot be watched yet.
+        release_date: { $gte: '1900-01-01', $lte: getHeroPosterDateKey(now) },
         $or: [
             { backdrop_path: { $nin: [null, ''] } },
             { poster_path: { $nin: [null, ''] } },
         ],
     })
-        .select('_id')
-        .sort({ _id: 1 })
+        .select('_id release_date popularity')
+        .sort({ release_date: -1, _id: 1 })
         .limit(HERO_ROTATION_POOL_LIMIT)
         .lean();
-    return movies.map((movie) => ({ id: String(movie._id) }));
+    return movies.map((movie) => ({
+        id: String(movie._id),
+        release_date: movie.release_date,
+        popularity: movie.popularity,
+    }));
+};
+
+// When each movie was last on the Hero, over the 30 days before `startsAt`.
+const loadLastShownAt = async (startsAt) => {
+    const slots = await HeroRotation.find({
+        startsAt: { $gt: new Date(startsAt.getTime() - HERO_NO_REPEAT_MS), $lt: startsAt },
+    })
+        .select('startsAt movieIds shownMovieIds')
+        .lean();
+    const lastShownAt = new Map();
+    for (const slot of slots) {
+        const shownAt = new Date(slot.startsAt).getTime();
+        for (const id of [...(slot.movieIds || []), ...(slot.shownMovieIds || [])]) {
+            if ((lastShownAt.get(id) ?? -Infinity) < shownAt) lastShownAt.set(id, shownAt);
+        }
+    }
+    return lastShownAt;
+};
+
+// History plus the slot's own posters, so a reshuffle never brings one back.
+const loadShownBeforeOrDuring = async (slot) => {
+    const startsAt = new Date(slot.startsAt);
+    const lastShownAt = await loadLastShownAt(startsAt);
+    (slot.shownMovieIds || []).forEach((id) => lastShownAt.set(id, startsAt.getTime()));
+    return lastShownAt;
+};
+
+const reportRepeats = (rotationKey, reusedCount, poolSize) => {
+    if (!reusedCount) return;
+    console.warn(JSON.stringify({
+        event: 'hero-rotation-repeats-within-window',
+        rotationKey,
+        reusedCount,
+        poolSize,
+        noRepeatDays: HERO_NO_REPEAT_DAYS,
+    }));
+};
+
+/**
+ * The current slot's record. The first request of a slot picks its line-up and
+ * stores it; every later request, from any visitor or server instance, reads
+ * that same line-up, and the stored slots are the history later slots avoid.
+ */
+const resolveHeroSlot = async ({ now, pool = null }) => {
+    const rotationKey = getHeroRotationKey(now);
+    const existing = await HeroRotation.findById(rotationKey).lean();
+    if (existing) return existing;
+
+    const startsAt = heroSlotStart(getHeroSlotOrdinal(now));
+    const heroPool = pool || await loadHeroPool({ now });
+    const lastShownAt = await loadLastShownAt(startsAt);
+    const picks = selectHeroMovies(heroPool, { lastShownAt });
+    const movieIds = picks.map((movie) => movie.id);
+    const reusedCount = picks.filter((movie) => lastShownAt.has(movie.id)).length;
+    try {
+        const created = await HeroRotation.create({
+            _id: rotationKey,
+            startsAt,
+            movieIds,
+            shownMovieIds: movieIds,
+            reusedCount,
+        });
+        reportRepeats(rotationKey, reusedCount, heroPool.length);
+        return typeof created.toObject === 'function' ? created.toObject() : created;
+    } catch (error) {
+        // Another request opened this slot first; its line-up stands.
+        if (error?.code === 11000) {
+            const winner = await HeroRotation.findById(rotationKey).lean();
+            if (winner) return winner;
+        }
+        throw error;
+    }
+};
+
+/**
+ * The slot's line-up as full movies. A movie removed from the catalog after the
+ * slot started gives its place to the newest movie not shown recently.
+ */
+const loadSlotMovies = async (slot, { now }) => {
+    const movies = await loadMoviesByIds(slot.movieIds);
+    if (movies.length === HERO_LIMIT) return movies;
+
+    const kept = new Set(movies.map((movie) => movie.id));
+    const lastShownAt = await loadShownBeforeOrDuring(slot);
+    const pool = (await loadHeroPool({ now })).filter((movie) => !kept.has(movie.id));
+    const movieIds = [...kept, ...selectHeroMovies(pool, { lastShownAt }).map((movie) => movie.id)].slice(0, HERO_LIMIT);
+    await HeroRotation.updateOne(
+        { _id: slot._id },
+        { $set: { movieIds }, $addToSet: { shownMovieIds: { $each: movieIds } } },
+    );
+    return loadMoviesByIds(movieIds);
 };
 
 const invalidateHeroCaches = async () => {
@@ -244,7 +333,6 @@ const toSettings = (config) => {
         configuredMode: mode,
         effectiveMode: mode,
         movieIds: sanitizeMovieIds(config?.homeHero?.movieIds),
-        seedSalt: String(config?.homeHero?.seedSalt || ''),
         updatedAt: config?.updatedAt || null,
     };
 };
@@ -270,24 +358,25 @@ export const getHomeHeroConfig = async () => {
     return toSettings(created);
 };
 
-const buildHeroPayload = ({ settings, movies, effectiveMode, now }) => {
+const buildHeroPayload = ({ settings, movies, effectiveMode, now, reusedCount = 0 }) => {
     const dateKey = getHeroPosterDateKey(now);
     const rotationKey = getHeroRotationKey(now);
-    const seed = getHeroSeed({ now, salt: settings.seedSalt });
     const slot = getHeroSlotOrdinal(now);
     const startsAt = heroSlotStart(slot).toISOString();
     const nextRefreshAt = heroSlotStart(slot + 1).toISOString();
     const version = `${effectiveMode}:${rotationKey}:${settings.updatedAt?.getTime?.() || settings.updatedAt || 'initial'}`;
+    const isManual = effectiveMode === 'manual';
     const meta = {
         version,
         dateKey,
         rotationKey,
         rotationHours: HERO_ROTATION_HOURS,
-        seed,
+        noRepeatDays: HERO_NO_REPEAT_DAYS,
+        reusedCount: isManual ? 0 : reusedCount,
         timezone: HERO_TIME_ZONE,
         generatedAt: now.toISOString(),
         nextRefreshAt,
-        source: effectiveMode === 'manual' ? 'manual-selection' : 'poster-rotation',
+        source: isManual ? 'manual-selection' : 'newest-rotation',
         configuredMode: settings.mode,
         effectiveMode,
     };
@@ -303,11 +392,11 @@ const buildHeroPayload = ({ settings, movies, effectiveMode, now }) => {
         settings: { ...settings, effectiveMode },
         movies,
         rotation: {
-            type: 'poster-rotation',
+            type: 'newest-rotation',
             key: rotationKey,
             hours: HERO_ROTATION_HOURS,
+            noRepeatDays: HERO_NO_REPEAT_DAYS,
             dateKey,
-            seed,
             startsAt,
             endsAt: nextRefreshAt,
         },
@@ -317,45 +406,42 @@ const buildHeroPayload = ({ settings, movies, effectiveMode, now }) => {
 };
 
 /**
- * The home Hero is the same for every visitor: five movies from the whole
- * catalog, turning over every 12 hours (00:00 and 12:00 Vietnam time), the most
- * popular of the five first. Manual mode overrides all five.
+ * The home Hero is the same for every visitor. Every 12 hours (00:00 and 12:00
+ * Vietnam time) it shows the five newest released movies that have not been on
+ * it in the last 30 days, newest first. Manual mode overrides all five.
  */
 export const getPublicHomeHero = async ({ now = new Date(), preloaded = null } = {}) => {
-    const { settings, pool } = preloaded || {
-        settings: await getHomeHeroConfig(),
-        pool: null,
-    };
+    const settings = preloaded?.settings || await getHomeHeroConfig();
 
     let movies = [];
     let effectiveMode = 'auto';
+    let reusedCount = 0;
     if (settings.mode === 'manual' && settings.movieIds.length === HERO_LIMIT) {
         movies = await loadMoviesByIds(settings.movieIds);
         if (movies.length === HERO_LIMIT) effectiveMode = 'manual';
     }
     if (movies.length !== HERO_LIMIT) {
-        const heroPool = pool || await loadHeroPool();
-        const picks = selectHeroMovies(heroPool, { now, salt: settings.seedSalt });
-        movies = (await loadMoviesByIds(picks.map((movie) => movie.id))).sort(compareHotness);
+        const slot = await resolveHeroSlot({ now });
+        movies = await loadSlotMovies(slot, { now });
+        reusedCount = slot.reusedCount || 0;
         effectiveMode = 'auto';
     }
     if (movies.length !== HERO_LIMIT) {
         throw createHttpError(503, 'Five poster-ready movies are required for the home hero.', 'HERO_POOL_TOO_SMALL');
     }
 
-    return buildHeroPayload({ settings, movies: attachHeroVideos(movies), effectiveMode, now });
+    return buildHeroPayload({ settings, movies: attachHeroVideos(movies), effectiveMode, now, reusedCount });
 };
 
 export const getAdminHomeHero = async ({ now = new Date() } = {}) => {
-    // Loaded once and handed to getPublicHomeHero, so an admin request does not
-    // repeat the pool query. The 150-movie list is for manual picks.
-    const [settings, pool, availableMovies] = await Promise.all([
+    // The config is read once and handed to getPublicHomeHero. The 150-movie list
+    // is for manual picks.
+    const [settings, availableMovies] = await Promise.all([
         getHomeHeroConfig(),
-        loadHeroPool(),
         loadAvailablePosterMovies(),
     ]);
     const [liveHero, selectedMovies] = await Promise.all([
-        getPublicHomeHero({ now, preloaded: { settings, pool } }),
+        getPublicHomeHero({ now, preloaded: { settings } }),
         loadMoviesByIds(settings.movieIds),
     ]);
     return {
@@ -400,44 +486,39 @@ export const updateHomeHero = async ({ mode, movieIds }) => {
 };
 
 /**
- * Rolls a fresh seed salt so auto mode reshuffles immediately instead of waiting
- * for the next 12-hour turnover. Line-ups shown in the last two days are avoided
- * while the pool is large enough to allow it.
+ * Swaps the current slot's line-up for five random movies that have not been on
+ * the Hero in the last 30 days. The posters swapped out still count as shown.
  */
 export const randomizeHomeHero = async ({ now = new Date() } = {}) => {
-    const pool = await loadHeroPool();
+    const pool = await loadHeroPool({ now });
     if (pool.length < HERO_LIMIT) {
         throw createHttpError(400, `At least ${HERO_LIMIT} movies are required to randomize the Hero.`, 'HERO_POOL_TOO_SMALL');
     }
-    const timestamp = now.getTime();
-    const config = await SiteConfig.findOne({ key: HERO_CONFIG_KEY }).lean();
-    const history = (config?.homeHero?.randomHistory || []).filter((entry) => {
-        const entryTime = new Date(entry?.timestamp || 0).getTime();
-        return Number.isFinite(entryTime) && timestamp - entryTime < HERO_RANDOM_HISTORY_MS;
-    });
-    const recentlyUsed = new Set(history.flatMap((entry) => entry.movieIds || []).map(String));
-
-    // Try a bounded number of salts for a line-up that avoids the recent history.
-    let seedSalt = String(timestamp);
-    let selected = [];
-    for (let attempt = 0; attempt < 12; attempt += 1) {
-        seedSalt = `${timestamp}-${attempt}`;
-        selected = selectHeroMovies(pool, { now, salt: seedSalt });
-        if (selected.every((movie) => !recentlyUsed.has(String(movie.id)))) break;
+    const slot = await resolveHeroSlot({ now, pool });
+    const lastShownAt = await loadShownBeforeOrDuring(slot);
+    const unshown = pool.filter((movie) => !lastShownAt.has(movie.id));
+    for (let index = unshown.length - 1; index > 0; index -= 1) {
+        const target = randomInt(index + 1);
+        [unshown[index], unshown[target]] = [unshown[target], unshown[index]];
     }
-    const movieIds = selected.map((movie) => String(movie.id));
+    const picks = unshown.slice(0, HERO_LIMIT).sort(compareNewest);
+    if (picks.length < HERO_LIMIT) {
+        const taken = new Set(picks.map((movie) => movie.id));
+        const rest = pool.filter((movie) => !taken.has(movie.id));
+        picks.push(...selectHeroMovies(rest, { lastShownAt }).slice(0, HERO_LIMIT - picks.length));
+    }
+    const movieIds = picks.map((movie) => movie.id);
+    const reusedCount = picks.filter((movie) => lastShownAt.has(movie.id)).length;
 
+    await HeroRotation.updateOne(
+        { _id: slot._id },
+        { $set: { movieIds, reusedCount }, $addToSet: { shownMovieIds: { $each: movieIds } } },
+    );
+    reportRepeats(slot._id, reusedCount, pool.length);
     await SiteConfig.findOneAndUpdate(
         { key: HERO_CONFIG_KEY },
-        {
-            $setOnInsert: { key: HERO_CONFIG_KEY },
-            $set: {
-                // Stay in auto mode so the 12-hour rotation carries on from here.
-                'homeHero.mode': 'auto',
-                'homeHero.seedSalt': seedSalt,
-                'homeHero.randomHistory': [...history, { movieIds, timestamp: new Date(timestamp) }].slice(-20),
-            },
-        },
+        // Back to auto mode, so the rotation carries on from this line-up.
+        { $setOnInsert: { key: HERO_CONFIG_KEY }, $set: { 'homeHero.mode': 'auto' } },
         { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true },
     ).lean();
     await invalidateHeroCaches();

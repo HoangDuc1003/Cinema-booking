@@ -212,9 +212,9 @@ const HeroSettings = () => {
           <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
             <div>
               <p className="text-sm uppercase tracking-widest text-gray-400">Home page Hero</p>
-              <h2 className="mt-1 text-lg font-semibold">Five posters, reshuffled every 12 hours</h2>
+              <h2 className="mt-1 text-lg font-semibold">Five newest movies, new every 12 hours</h2>
               <p className="mt-1 text-sm text-gray-300">
-                Auto mode shows the next five movies from the whole catalog at 00:00 and 12:00 Vietnam time, so every movie gets its turn before any comes back. Manual mode pins your five posters in this exact order.
+                Auto mode shows the five newest movies that have not been on the Hero in the last 30 days, and moves on to the next five at 00:00 and 12:00 Vietnam time. Manual mode pins your five posters in this exact order.
               </p>
               {(nextRefreshLabel || heroMeta?.rotationKey || heroMeta?.dateKey) && (
                 <p className="mt-2 inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/30 px-3 py-1 text-xs text-gray-400">
@@ -225,6 +225,11 @@ const HeroSettings = () => {
                       : '12-hour line-up'}
                     {nextRefreshLabel ? ` · next reshuffle ${nextRefreshLabel}` : ''}
                   </span>
+                </p>
+              )}
+              {heroMeta?.reusedCount > 0 && (
+                <p role="status" className="mt-2 text-xs text-amber-300">
+                  The catalog ran short: {heroMeta.reusedCount} of these five were already on the Hero in the last {heroMeta.noRepeatDays || 30} days.
                 </p>
               )}
             </div>

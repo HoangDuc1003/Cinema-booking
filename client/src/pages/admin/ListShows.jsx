@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import useEdgeSwipeGuard from '../../hooks/useEdgeSwipeGuard';
 import Loading from '../../components/Loading';
 import Title from '../../components/admin/Title';
 import { dateFormat } from '../../lib/dateFormat';
@@ -7,6 +8,8 @@ import { useAppContext } from '../../context/AppContext';
 import toast from 'react-hot-toast'
 
 const ListShows = () => {
+  // Wide table/poster row: a swipe at either end must not go back/forward in history.
+  const guardScroller = useEdgeSwipeGuard();
   const currency = import.meta.env.VITE_CURRENCY
   const {axios,getToken,user} = useAppContext();
   const [shows, setShows] = useState([]);
@@ -41,7 +44,7 @@ const ListShows = () => {
         <BlurCircle top="200px" right='0'/>
         <BlurCircle top="500px" left='0'/>
         <BlurCircle bottom="0" right='0'/>
-      <div className='max-w-4xl mt-6 overflow-auto w-full'>
+      <div ref={guardScroller} className='max-w-4xl mt-6 overflow-auto w-full'>
         <table className='w-full border-collapse rounded-md overflow-hidden text-nowrap'>
           <thead>
             <tr className='bg-primary/20 text-left text-white'>

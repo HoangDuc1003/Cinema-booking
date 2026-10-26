@@ -74,31 +74,6 @@
   97% { opacity: 0.04; animation-timing-function: linear; }
 }
 
-@keyframes hero-content-spring-open {
-  0% {
-    bottom: calc(var(--hero-safe-bottom) + 1.1rem);
-    transform: translate3d(0, 0, 0) scale(0.98);
-  }
-  58% {
-    bottom: calc(var(--hero-safe-bottom) + 8.4rem);
-    transform: translate3d(0, -0.4rem, 0) scale(1.008);
-  }
-  78% {
-    bottom: calc(var(--hero-safe-bottom) + 7.9rem);
-    transform: translate3d(0, 0.1rem, 0) scale(0.998);
-  }
-  100% {
-    bottom: var(--hero-content-bottom);
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-}
-
-@keyframes hero-content-compact-in {
-  0% { transform: translate3d(0, 0, 0) scale(1); }
-  58% { transform: translate3d(0, 0.3rem, 0) scale(0.994); }
-  100% { transform: translate3d(0, 0, 0) scale(1); }
-}
-
 .hero-section {
   --hero-safe-top: max(calc(env(safe-area-inset-top) + 5.5rem), clamp(5.5rem, 11svh, 7.5rem));
   --hero-safe-right: max(calc(env(safe-area-inset-right) + 1rem), clamp(2rem, 4vw, 4.5rem));
@@ -106,7 +81,6 @@
   --hero-safe-left: max(calc(env(safe-area-inset-left) + 1rem), clamp(2rem, 6vw, 6rem));
   --hero-content-bottom: calc(var(--hero-safe-bottom) + 8rem);
   --hero-rail-block-height: 6.15rem;
-  --hero-content-compact-bottom: var(--hero-safe-bottom);
   position: relative;
   isolation: isolate;
   width: 100%;
@@ -120,6 +94,9 @@
   background: #08090c;
   color: #fff;
   -webkit-font-smoothing: antialiased;
+  /* Horizontal swipes change the slide (HeroSection), so the browser must not
+     claim them for its back/forward overscroll gesture. */
+  touch-action: pan-y pinch-zoom;
 }
 
 .hero-catalog-state {
@@ -438,93 +415,6 @@
   transition: opacity 360ms cubic-bezier(0.22, 1, 0.36, 1), transform 360ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* ─── Compact State Lifecycle & Transitions ─── */
-.hero-content-zone.is-compact,
-.hero-content-zone.is-compacting {
-  bottom: var(--hero-content-compact-bottom);
-  min-height: 0;
-  padding: 0;
-  margin: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-}
-
-.hero-content-zone.is-compacting {
-  animation: hero-content-compact-in 720ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-.hero-content-zone.is-compact { top: auto; }
-
-.hero-content-zone.is-compact .hero-title,
-.hero-content-zone.is-compacting .hero-title,
-.hero-content-zone.is-compact .hero-title__word,
-.hero-content-zone.is-compacting .hero-title__word {
-  animation: none !important;
-}
-
-.hero-content-zone.is-compact .hero-title,
-.hero-content-zone.is-compacting .hero-title {
-  margin: 0 0 0.65rem;
-  font-size: clamp(2rem, 3.4vw, 3rem);
-  line-height: 1.02;
-  transform: none;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.hero-content-zone.is-compact .hero-title__word,
-.hero-content-zone.is-compacting .hero-title__word {
-  display: inline;
-  opacity: 1;
-  white-space: nowrap;
-}
-
-.hero-content-zone.is-compact:not(.is-overview-revealed) .hero-overview,
-.hero-content-zone.is-compacting:not(.is-overview-revealed) .hero-overview {
-  opacity: 0.9;
-  max-height: 3.2rem;
-  margin: 0 0 0.85rem;
-  pointer-events: none;
-  transform: translate3d(0, 0, 0);
-}
-
-.hero-content-zone.is-compact:not(.is-overview-revealed) .hero-overview {
-  -webkit-line-clamp: 2;
-}
-
-.hero-content-zone.is-expanding {
-  animation: none;
-}
-
-.hero-content-zone.is-compact .hero-genres,
-.hero-content-zone.is-compacting .hero-genres {
-  margin-bottom: 0.55rem;
-}
-
-.hero-content-zone.is-compact .hero-meta,
-.hero-content-zone.is-compacting .hero-meta {
-  margin-bottom: 0.75rem;
-}
-
-.hero-content-zone.is-compacting .hero-control,
-.hero-content-zone.is-compacting .hero-action--details {
-  opacity: 0;
-  pointer-events: none;
-  transform: translate3d(0, 0.45rem, 0) scale(0.94);
-}
-
-.hero-content-zone.is-compact .hero-control,
-.hero-content-zone.is-compact .hero-action--details {
-  display: none;
-}
-
-.hero-content-zone.is-compact:focus-visible {
-  border-radius: 1rem;
-  box-shadow: 0 0 0 2px rgba(248, 69, 101, 0.72);
-}
-
 .hero-genres {
   display: flex;
   flex-wrap: wrap;
@@ -633,11 +523,6 @@
   backdrop-filter: blur(14px);
 }
 
-.hero-content-zone.is-compact .hero-action--trailer,
-.hero-content-zone.is-compacting .hero-action--trailer {
-  display: none;
-}
-
 .hero-action:disabled,
 .hero-control:disabled {
   cursor: wait;
@@ -659,17 +544,22 @@
 .hero-poster-rail {
   position: absolute;
   z-index: 15;
-  /* The active thumbnail grows in width and height; containment keeps that
-     re-layout inside the rail instead of the whole section. */
+  /* Thumbnails keep one layout size; the active one grows with `scale`, which
+     the compositor animates without re-laying out the rail. The rail leaves
+     room for that growth (the bleed) on every side, and is shifted out by the
+     same amount so the first thumbnail still lines up with the Hero text. */
+  --thumb-w: 6rem;
+  --thumb-h: 3.4rem;
+  --thumb-scale: 1.3333;
+  --thumb-bleed-x: calc(var(--thumb-w) * (var(--thumb-scale) - 1) / 2);
+  --thumb-bleed-y: calc(var(--thumb-h) * (var(--thumb-scale) - 1));
   contain: layout style;
-  left: var(--hero-safe-left);
+  left: calc(var(--hero-safe-left) - var(--thumb-bleed-x));
   bottom: var(--hero-safe-bottom);
   max-width: min(64vw, 47rem);
   transition: opacity 400ms cubic-bezier(0.22, 1, 0.36, 1), transform 400ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.hero-poster-rail.is-compact,
-.hero-poster-rail.is-compacting,
 .hero-poster-rail.is-hidden {
   opacity: 0;
   pointer-events: none !important;
@@ -685,7 +575,7 @@
   align-items: center;
   gap: 0.35rem;
   min-height: 0.65rem;
-  margin: 0 0 0.45rem 0.4rem;
+  margin: 0 0 0.45rem calc(0.4rem + var(--thumb-bleed-x));
 }
 
 .hero-poster-rail__progress span {
@@ -734,9 +624,16 @@
   position: relative;
   display: flex;
   align-items: end;
-  gap: 0.65rem;
+  /* The visible gap beside the grown active thumbnail stays 0.65rem. */
+  gap: calc(0.65rem + var(--thumb-bleed-x));
   overflow-x: auto;
-  padding: 0.2rem 0.3rem 0.5rem;
+  /* Re-allow sideways panning here: the Hero itself only lets the browser pan
+     vertically, and the rail must still scroll on phones. A swipe pushing past
+     either end is held back by useEdgeSwipeGuard, so it cannot go back in
+     history; mid-scroll, `contain` keeps it from chaining to the page. */
+  touch-action: pan-x pan-y pinch-zoom;
+  overscroll-behavior-x: contain;
+  padding: calc(0.2rem + var(--thumb-bleed-y)) calc(0.3rem + var(--thumb-bleed-x)) 0.5rem;
   scrollbar-width: none;
 }
 
@@ -745,8 +642,8 @@
 .hero-poster-thumb {
   position: relative;
   flex: 0 0 auto;
-  width: 6rem;
-  height: 3.4rem;
+  width: var(--thumb-w);
+  height: var(--thumb-h);
   overflow: hidden;
   border: 1px solid transparent;
   border-radius: 0.7rem;
@@ -754,12 +651,12 @@
   color: #fff;
   opacity: 0.62;
   cursor: pointer;
-  transition: width 380ms cubic-bezier(0.22, 1, 0.36, 1), height 380ms cubic-bezier(0.22, 1, 0.36, 1), opacity 260ms ease, border-color 260ms ease, transform 260ms ease;
+  transform-origin: center bottom;
+  transition: scale 380ms cubic-bezier(0.22, 1, 0.36, 1), opacity 260ms ease, border-color 260ms ease, transform 260ms ease;
 }
 
 .hero-poster-thumb.is-active {
-  width: 8rem;
-  height: 4.65rem;
+  scale: var(--thumb-scale);
   border-color: rgba(248, 69, 101, 0.9);
   opacity: 1;
   box-shadow: 0 10px 30px rgba(248, 69, 101, 0.2);
@@ -915,30 +812,25 @@
     background: linear-gradient(90deg, transparent 0%, rgba(229, 9, 20, 0.22) 30%, rgba(229, 9, 20, 0.5) 50%, rgba(229, 9, 20, 0.22) 70%, transparent 100%);
   }
 
+  /* 44px tall: the inactive thumbnails are tap targets too. */
   .hero-poster-rail {
-    max-width: calc(100vw - 2rem);
+    --thumb-w: 4.85rem;
+    --thumb-h: 2.75rem;
+    --thumb-scale: 1.196;
+    max-width: calc(100vw - 2rem + 2 * var(--thumb-bleed-x));
     bottom: var(--hero-safe-bottom);
   }
 
   .hero-poster-rail__progress {
-    margin: 0 0 0.3rem 0.2rem;
+    margin: 0 0 0.3rem calc(0.2rem + var(--thumb-bleed-x));
   }
 
   .hero-poster-rail__items {
     padding-bottom: 0.2rem;
-    gap: 0.45rem;
+    gap: calc(0.45rem + var(--thumb-bleed-x));
   }
 
-  /* 44px tall: the inactive thumbnails are tap targets too. */
   .hero-poster-thumb {
-    width: 4.85rem;
-    height: 2.75rem;
-    border-radius: 0.5rem;
-  }
-
-  .hero-poster-thumb.is-active {
-    width: 5.8rem;
-    height: 3.25rem;
     border-radius: 0.5rem;
   }
 }

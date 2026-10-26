@@ -36,14 +36,13 @@ const payload = {
     dateKey: '2026-07-29',
     settings: { mode: 'auto', configuredMode: 'auto', effectiveMode: 'auto', movieIds: [] },
     movies: Array.from({ length: 5 }, (_, index) => ({ id: String(index + 1) })),
-    rotation: { type: 'poster-rotation', key: '2026-07-29T00:00', hours: 12, dateKey: '2026-07-29', seed: 'hero:2026-07-29T00:00:default' },
+    rotation: { type: 'newest-rotation', key: '2026-07-29T00:00', hours: 12, dateKey: '2026-07-29' },
     meta: {
         configuredMode: 'auto',
         effectiveMode: 'auto',
-        source: 'poster-rotation',
+        source: 'newest-rotation',
         dateKey: '2026-07-29',
         rotationKey: '2026-07-29T00:00',
-        seed: 'hero:2026-07-29T00:00:default',
     },
     cache: 'hit',
 };
@@ -66,7 +65,7 @@ test('Home Hero controller returns cache headers, stable metadata, meta identity
     assert.deepEqual(res.body.movies, payload.movies);
     assert.equal(res.body.nextRefreshAt, payload.nextRefreshAt);
     assert.deepEqual(res.body.meta, payload.meta);
-    assert.equal(res.body.meta.source, 'poster-rotation');
+    assert.equal(res.body.meta.source, 'newest-rotation');
 });
 
 test('Home Hero controller serves the same English text and ETag to every country', async () => {
